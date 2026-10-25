@@ -344,7 +344,7 @@ export default function MemberProfile({ member: memberProp, registration, onClos
 
             {chrono.length === 0 ? (
               <Panel title="Match history">
-                <Empty>{data.history.syncing || data.history.pending > 0 ? `Reading match history… ${data.history.pending} left` : "No stored matches for this player yet."}</Empty>
+                <Empty>{data.history.syncing || data.history.pending > 0 ? `Reading match history… ${data.history.pending} left` : s && s.matches > 0 ? `${s.matches} match${s.matches === 1 ? "" : "es"} counted in the all-time totals above, but ${s.matches === 1 ? "it" : "they"} predate${s.matches === 1 ? "s" : ""} the dashboard's detailed history. The Wardogs API only exposes the latest 100 matches, so charts will start filling in from the next game ${inline ? "you play" : "they play"}.` : "No stored matches for this player yet."}</Empty>
               </Panel>
             ) : (
               <>
