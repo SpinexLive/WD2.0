@@ -161,6 +161,32 @@ export async function getMatchPlayers(matchId: number): Promise<MatchPlayerRow[]
   });
 }
 
+export type LeaderboardRange = "7d" | "30d" | "all";
+export type LeaderboardSort = "kills" | "kd" | "cash" | "matches";
+export interface LeaderboardRow { rank: number; steamId: string; name: string | null; kills: number; deaths: number; kd: number; matches: number; cash: number | null }
+export const MIN_KD_MATCHES = 5;
+
+/** Top 100 for a range and sort (the API's maximum page). K/D sorting hides players with fewer than MIN_KD_MATCHES matches, who would otherwise top it on one lucky game. */
+export function getLeaderboard(range: LeaderboardRange, sort: LeaderboardSort, force = false): Promise<Snapshot<LeaderboardRow[]>> {
+  return cached(`rcon:lb:${range}:${sort}`, 600_000, async () => {
+    const o = await get(`/leaderboard?range=${range}&sort=${sort}&limit=100`);
+    const rows = obj(o.leaderboard)?.rows;
+    if (!Array.isArray(rows)) throw new ProviderError("wardogs-rcon", "Unrecognised Wardogs leaderboard response format");
+    const out: LeaderboardRow[] = [];
+    for (const r of rows) {
+      const x = obj(r);
+      const steamId = str(x?.steamId);
+      const kills = num(x?.kills);
+      const deaths = num(x?.deaths);
+      if (!x || !steamId || kills === null || deaths === null) continue;
+      const matches = num(x.matches) ?? 0;
+      if (sort === "kd" && matches < MIN_KD_MATCHES) continue;
+      out.push({ rank: out.length + 1, steamId, name: str(x.name), kills, deaths, kd: num(x.kd) ?? (deaths === 0 ? kills : Math.round((kills / deaths) * 100) / 100), matches, cash: num(x.cash) });
+    }
+    return out;
+  }, force);
+}
+
 /** Server-wide all-time rank by kills, for players inside the top 100 (the API's maximum page). */
 export function getLeaderboardRanks(force = false): Promise<Snapshot<Map<string, { rank: number; kd: number | null }>>> {
   return cached("rcon:leaderboard", 600_000, async () => {
