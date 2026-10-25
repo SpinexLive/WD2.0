@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { env } from "@/lib/env";
 import { query, tx } from "@/lib/db";
 import { HttpError } from "@/lib/http";
 import { audit } from "@/lib/audit";
@@ -31,8 +32,8 @@ export function messagePayload(m: RosterMessage, rosterId: string, index: number
       {
         type: 1,
         components: [
-          { type: 2, style: 3, label: "Confirm", emoji: { name: "✅" }, custom_id: `${BUTTON_PREFIX}:${rosterId}:accept` },
-          { type: 2, style: 4, label: "Decline", emoji: { name: "❌" }, custom_id: `${BUTTON_PREFIX}:${rosterId}:decline` },
+          { type: 2, style: 3, label: "Confirm", emoji: { id: "1389367850082500729", name: "yes" }, custom_id: `${BUTTON_PREFIX}:${rosterId}:accept` },
+          { type: 2, style: 4, label: "Decline", emoji: { id: "1389367851470553108", name: "no" }, custom_id: `${BUTTON_PREFIX}:${rosterId}:decline` },
         ],
       },
     ],
@@ -46,6 +47,7 @@ export async function renderRosterMessages(roster: Roster, event: RaidHelperEven
     eventTitle: event.title,
     startTime: event.startTime,
     eventDescription: event.description,
+    thumbnailUrl: `${env().APP_URL}/images/icon.png`,
     eventType: roster.eventType,
     eventUrl: event.discordUrl,
     squads: roster.squads,

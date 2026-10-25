@@ -6,6 +6,7 @@ export interface DiscordEmbed {
   color: number;
   fields: { name: string; value: string; inline: false }[];
   footer?: { text: string };
+  thumbnail?: { url: string };
   timestamp?: string;
 }
 
@@ -14,6 +15,7 @@ export interface EmbedInput {
   startTime: number | null;
   /** The Raid Helper event description, shown above the date. */
   eventDescription?: string | null;
+  thumbnailUrl?: string;
   eventType: "competitive" | "weekly";
   eventUrl: string | null;
   squads: Squad[];
@@ -126,7 +128,7 @@ export function buildRosterMessages(input: EmbedInput): RosterMessage[] {
   const everyone = input.squads.flatMap((s) => s.slots.flatMap((p) => (p ? [p.discordId] : [])));
   const confirmed = everyone.filter((id) => responses[id] === "accepted").length;
   const declined = everyone.filter((id) => responses[id] === "declined").length;
-  const counts = `${confirmed} confirmed | ${everyone.length - confirmed - declined} pending | ${declined} declined`;
+  const counts = `${confirmed} confirmed | ${everyone.length - confirmed - declined} pending | ${declined} declined | ★ = Squad Leader`;
 
   const timestamp = (input.now ?? new Date()).toISOString();
   return groups.map((g, i) => ({
@@ -135,6 +137,7 @@ export function buildRosterMessages(input: EmbedInput): RosterMessage[] {
       title: i === 0 ? title : `${title} (continued)`,
       description: i === 0 && description ? description : undefined,
       color: RED,
+      thumbnail: input.thumbnailUrl ? { url: input.thumbnailUrl } : undefined,
       fields: g.map(({ name, value, inline }) => ({ name, value, inline })),
       footer: { text: groups.length > 1 ? `${counts} | Part ${i + 1}/${groups.length}` : counts },
       timestamp,

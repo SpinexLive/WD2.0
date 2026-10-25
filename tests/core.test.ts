@@ -196,7 +196,7 @@ describe("Discord embeds", () => {
     expect(m!.embed.fields[0]!.value).toContain(`${STATUS_ICON.accepted} <@${id(1)}>`);
     expect(m!.embed.fields[0]!.value).toContain(`${STATUS_ICON.declined} <@${id(2)}>`);
     expect(m!.embed.fields[0]!.value).not.toContain("@everyone");
-    expect(m!.embed.footer?.text).toBe("1 confirmed | 0 pending | 1 declined");
+    expect(m!.embed.footer?.text).toBe("1 confirmed | 0 pending | 1 declined | ★ = Squad Leader");
     expect(mentionContent(m!.mentions, true)).toBe(`Roster posted for confirmation: <@${id(1)}> <@${id(2)}>`);
     expect(mentionContent([], true)).toBeUndefined();
   });
