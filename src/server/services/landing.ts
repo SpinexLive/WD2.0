@@ -36,7 +36,7 @@ const safe = async <T>(fn: () => Promise<T>): Promise<T | null> => {
 };
 
 /** Events still to come (or started within the last 3 hours), nearest first. */
-export function upcomingEvents(events: RaidHelperEvent[], now = Date.now(), limit = 6): LandingEvent[] {
+export function upcomingEvents(events: RaidHelperEvent[], now = Date.now(), limit = 3): LandingEvent[] {
   return events
     .filter((e): e is RaidHelperEvent & { startTime: number } => e.startTime !== null && e.startTime * 1000 > now - 3 * 3600_000)
     .sort((a, b) => a.startTime - b.startTime)

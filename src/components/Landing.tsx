@@ -91,7 +91,6 @@ export function Landing({ initial, signedIn }: { initial: LandingData; signedIn:
           <div className="login-divider mx-auto mt-4 h-0.5 w-20 bg-blood-600" />
           <p className="mx-auto mt-4 max-w-xl text-sm text-stone/70">A Hell Let Loose clan. Mature, EU-wide, with weekly events and weekend matches.</p>
           <div className="mt-6 flex flex-wrap items-center justify-center gap-3">
-            {cta}
             {data.inviteUrl && <a href={data.inviteUrl} target="_blank" rel="noopener noreferrer" className="btn-ghost">Join our Discord</a>}
           </div>
         </section>
