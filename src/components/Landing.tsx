@@ -133,7 +133,6 @@ export function Landing({ initial, signedIn, dashboardHref = "/members" }: { ini
                       </div>
                       <div className="flex items-center gap-3">
                         <span className="text-xs font-bold uppercase tracking-wider text-blood-300">{now !== null ? countdown(e.startTime, now) : ""}</span>
-                        {e.discordUrl && <a href={e.discordUrl} target="_blank" rel="noopener noreferrer" className="btn-ghost !py-1">Sign up</a>}
                       </div>
                     </li>
                   ))}
