@@ -71,7 +71,7 @@ export function Landing({ initial, signedIn }: { initial: LandingData; signedIn:
   );
 
   return (
-    <div className="relative min-h-screen overflow-hidden bg-ink-950">
+    <div className="relative flex min-h-screen flex-col overflow-hidden bg-ink-950">
       <div className="login-bg" />
       <div className="login-vignette" />
       <div className="login-grain" />
@@ -89,19 +89,19 @@ export function Landing({ initial, signedIn }: { initial: LandingData; signedIn:
         </div>
       </header>
 
-      <main className="relative z-10 mx-auto max-w-7xl space-y-5 px-4 py-6 lg:px-8">
+      <main className="relative z-10 mx-auto w-full max-w-7xl flex-1 space-y-5 px-4 py-6 lg:px-8">
         <section id="about" className="card overflow-hidden border-l-4 border-l-blood-600 bg-ink-900/85 backdrop-blur">
           <div className="grid gap-6 p-5 md:p-7 lg:grid-cols-3">
             <div className="lg:col-span-2">
-              <h1 className="text-2xl font-extrabold text-stone md:text-3xl">About REMNANT</h1>
-              <p className="mt-3 text-sm leading-relaxed text-stone/75">REMNANT is a mature Hell Let Loose community, built from groups of players from many different communities who came together. We take the game seriously and the company easy. Members are from all over the EU.</p>
-              <p className="mt-3 text-sm leading-relaxed text-stone/75">Join the Discord, sign up to events through Raid Helper and apply to become a member.</p>
+              <h1 className="text-2xl font-extrabold text-stone md:text-3xl">About Us</h1>
+              <p className="mt-3 text-sm leading-relaxed text-stone/75">Remant is a gaming community with Hell Let Loose and Wardogs at its heart, but we're not just about one game. We're a friendly, mature bunch from all over Europe who like good company and good games. We ask for the basics: be active, hop on the mic and look out for each other. New members are always welcome, whether you've played for years or only just landed.</p>              <p className="mt-3 text-sm leading-relaxed text-stone/75">Join the Discord, sign up to events through Raid Helper and apply to become a member.</p>
               <div className="mt-4"><a href={data.inviteUrl ?? APPLY_URL} target="_blank" rel="noopener noreferrer" className="btn-primary">Apply to join</a></div>
             </div>
             <ul className="space-y-3 text-sm text-stone/75">
+            <li className="flex gap-2"><span className="text-blood-400">▸</span><span><strong className="text-stone">Hell Let Loose:</strong> tournaments and weekly events.</span></li>
               <li className="flex gap-2"><span className="text-blood-400">▸</span><span><strong className="text-stone">Weekly events:</strong> every Tuesday and Thursday.</span></li>
               <li className="flex gap-2"><span className="text-blood-400">▸</span><span><strong className="text-stone">Matches:</strong> Saturday and Sunday evenings.</span></li>
-              <li className="flex gap-2"><span className="text-blood-400">▸</span><span><strong className="text-stone">Wardogs League:</strong> we play competitive matches as a clan.</span></li>
+              <li className="flex gap-2"><span className="text-blood-400">▸</span><span><strong className="text-stone">Wardogs League:</strong> competitive matches.</span></li>
             </ul>
           </div>
         </section>
@@ -189,24 +189,31 @@ export function Landing({ initial, signedIn }: { initial: LandingData; signedIn:
           </div>
 
           <div className="lg:col-span-4">
-            <Panel title="In voice" right={data.voice && <span className="text-[11px] font-medium normal-case tracking-normal text-stone/55">{data.voice.total} online</span>}>
-              {data.voice === null ? (
-                <Empty>Voice status is unavailable right now.</Empty>
-              ) : data.voice.channels.length === 0 ? (
-                <Empty>Nobody is in voice right now.</Empty>
+            <Panel title="Discord" right={data.widget && <span className="text-[11px] font-medium normal-case tracking-normal text-stone/55">{data.widget.online} online</span>}>
+              {data.widget === null ? (
+                <Empty>Discord status is unavailable right now.</Empty>
               ) : (
-                <ul className="space-y-3">
-                  {data.voice.channels.map((c) => (
-                    <li key={c.id}>
-                      <div className="text-[11px] font-bold uppercase tracking-[0.14em] text-stone/50">{c.name}</div>
-                      <ul className="mt-1.5 space-y-1.5">
-                        {c.members.map((m) => (
-                          <li key={m.id} className="flex items-center gap-2 text-sm"><Avatar src={m.avatarUrl} size={24} /><span className="truncate">{m.name}</span></li>
-                        ))}
-                      </ul>
-                    </li>
-                  ))}
-                </ul>
+                <div className="space-y-3">
+                  {data.widget.members.length === 0 ? (
+                    <Empty>Nobody is online right now.</Empty>
+                  ) : (
+                    <ul className="max-h-[26rem] space-y-1 overflow-y-auto pr-1">
+                      {data.widget.members.map((m) => (
+                        <li key={m.id} className="flex items-center gap-2.5 rounded px-1.5 py-1 text-sm hover:bg-ink-800/70">
+                          <span className="relative shrink-0">
+                            <Avatar src={m.avatarUrl} size={28} />
+                            <span className={`absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full border-2 border-ink-900 ${m.status === "online" ? "bg-ok" : m.status === "idle" ? "bg-yellow-500" : "bg-blood-500"}`} />
+                          </span>
+                          <span className="min-w-0 flex-1">
+                            <span className="block truncate text-stone">{m.name}</span>
+                            {m.game && <span className="block truncate text-[11px] text-stone/45">{m.game}</span>}
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                  {data.inviteUrl && <a href={data.inviteUrl} target="_blank" rel="noopener noreferrer" className="btn-primary w-full gap-2"><DiscordIcon />Join the Discord</a>}
+                </div>
               )}
             </Panel>
           </div>

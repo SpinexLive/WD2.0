@@ -18,9 +18,16 @@ export interface LandingVoiceChannel {
   name: string;
   members: { id: string; name: string; avatarUrl: string }[];
 }
+export interface LandingWidget {
+  name: string;
+  online: number;
+  invite: string | null;
+  members: { id: string; name: string; avatarUrl: string; status: string; game: string | null }[];
+}
 export interface LandingData {
   events: LandingEvent[] | null;
   voice: { channels: LandingVoiceChannel[]; total: number } | null;
+  widget: LandingWidget | null;
   news: NewsPost[] | null;
   server: { name: string | null; online: boolean | null; players: number | null; map: string | null } | null;
   memberCount: number | null;
@@ -69,13 +76,37 @@ async function serverStatus(): Promise<LandingData["server"]> {
   return s ? { name: s.name, online: s.online, players: s.players, map: s.map } : null;
 }
 
+interface RawWidget {
+  name?: string;
+  instant_invite?: string | null;
+  presence_count?: number;
+  members?: { id?: string; username?: string; status?: string; avatar_url?: string; game?: { name?: string } }[];
+}
+
+async function discordWidget(): Promise<LandingWidget> {
+  const { data } = await cached("landing:widget", 60_000, async () => {
+    const res = await fetch(`https://discord.com/api/guilds/${env().DISCORD_GUILD_ID}/widget.json`, { cache: "no-store", signal: AbortSignal.timeout(8000) });
+    if (!res.ok) throw new Error(`widget ${res.status}`);
+    return (await res.json()) as RawWidget;
+  });
+  const members = (data.members ?? []).filter((m) => m.id && m.username).map((m) => ({
+    id: m.id!,
+    name: m.username!,
+    avatarUrl: m.avatar_url ?? "",
+    status: m.status ?? "online",
+    game: m.game?.name ?? null,
+  }));
+  return { name: data.name ?? "REMNANT", online: data.presence_count ?? members.length, invite: data.instant_invite ?? null, members };
+}
+
 export async function getLandingData(): Promise<LandingData> {
-  const [events, voice, news, server, members] = await Promise.all([
+  const [events, voice, widget, news, server, members] = await Promise.all([
     safe(async () => upcomingEvents((await getEvents()).data)),
     safe(voiceMembers),
+    safe(discordWidget),
     safe(() => listNews(5)),
     safe(serverStatus),
     safe(() => getAllClanMembers()),
   ]);
-  return { events, voice, news, server, memberCount: members ? members.data.length : null, inviteUrl: env().DISCORD_INVITE_URL ?? null };
+  return { events, voice, widget, news, server, memberCount: members ? members.data.length : null, inviteUrl: env().DISCORD_INVITE_URL ?? widget?.invite ?? null };
 }
