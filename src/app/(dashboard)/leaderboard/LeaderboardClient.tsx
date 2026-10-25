@@ -60,7 +60,7 @@ export default function LeaderboardClient() {
           <button className="btn-ghost" onClick={() => void load(true)}>Refresh</button>
         </div>
       </div>
-      <p className="text-sm text-stone/60">Top 100 on the Wardogs game server. {sort === "kd" ? "K/D only lists players with at least 5 matches. " : ""}Your row is highlighted if your Steam account is linked.</p>
+      <p className="text-sm text-stone/60">Clan members from the Wardogs game server's top 100, ranked among ourselves. {sort === "kd" ? "K/D only lists players with at least 5 matches. " : ""}Your row is highlighted if your Steam account is linked.</p>
 
       <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
         <div className="flex gap-1" role="group" aria-label="Time range">{RANGES.map((r) => <button key={r.key} className={chip(range === r.key)} onClick={() => setRange(r.key)}>{r.label}</button>)}</div>
@@ -69,7 +69,7 @@ export default function LeaderboardClient() {
       </div>
 
       {error && <ErrorBanner message={error} onRetry={() => void load()} />}
-      {data && data.mySteamId && !mine && <p className="text-xs text-stone/55">You aren&apos;t in the top 100 for this view.</p>}
+      {data && data.mySteamId && !mine && <p className="text-xs text-stone/55">You aren&apos;t on this leaderboard for this view.</p>}
       {!data && !error && <div className="space-y-1.5">{Array.from({ length: 10 }, (_, i) => <Skeleton key={i} className="h-9 w-full" />)}</div>}
       {data && rows.length === 0 && <p className="text-sm text-stone/55">No players found.</p>}
 

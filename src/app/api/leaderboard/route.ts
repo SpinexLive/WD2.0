@@ -31,7 +31,8 @@ export const GET = protectedRoute(
         if (name) nick.set(steamId, name);
       }
     }
-    const rows = board.data.map((r) => ({ ...r, nickname: nick.get(r.steamId) ?? null }));
+    // Clan members only (linked to a Discord member with the clan or Wardogs role), ranked within the clan.
+    const rows = board.data.flatMap((r) => (nick.has(r.steamId) ? [{ ...r, nickname: nick.get(r.steamId)! }] : [])).map((r, i) => ({ ...r, rank: i + 1 }));
     return { range: q.range, sort: q.sort, rows, fetchedAt: board.fetchedAt, stale: board.stale, mySteamId: links?.steamIds.get(session.discordId) ?? null };
   },
   { allowMember: true },
