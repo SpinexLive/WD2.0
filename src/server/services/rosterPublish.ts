@@ -108,6 +108,58 @@ export async function buildPreview(roster: Roster, event: RaidHelperEventDetail)
   return { embeds: messages.map((m) => m.embed), messages, names, warnings: validateRoster(roster, signups) };
 }
 
+const lastReminder = new Map<string, number>();
+const REMIND_COOLDOWN_MS = 5 * 60_000;
+
+/** Posts a reply under the published roster pinging everyone assigned who hasn't pressed Confirm or Decline. */
+export async function remindPending(eventId: string, actor: Session) {
+  const roster = await getRoster(eventId);
+  if (!roster) throw new HttpError(404, "Roster not found", "not_found");
+  const first = roster.messages[0];
+  if (!first) throw new HttpError(409, "Publish this roster to Discord before sending reminders.", "not_published");
+
+  const assigned = new Set(roster.squads.flatMap((s) => s.slots.flatMap((p) => (p ? [p.discordId] : []))));
+  const pending = [...assigned].filter((id) => !roster.responses[id]);
+  if (pending.length === 0) throw new HttpError(409, "Nobody is pending: everyone assigned has responded.", "nobody_pending");
+
+  const wait = (lastReminder.get(roster.id) ?? 0) + REMIND_COOLDOWN_MS - Date.now();
+  if (wait > 0) throw new HttpError(429, `A reminder was just sent. Try again in ${Math.ceil(wait / 60_000)} min.`, "cooldown");
+  lastReminder.set(roster.id, Date.now());
+
+  const link = `https://discord.com/channels/${env().DISCORD_GUILD_ID}/${first.channelId}/${first.messageId}`;
+  const head = `Please confirm or decline your place on the roster: ${link}\n`;
+  const chunks: string[][] = [];
+  let cur: string[] = [];
+  let len = head.length;
+  for (const id of pending) {
+    const m = `<@${id}> `;
+    if (len + m.length > 1900 && cur.length) {
+      chunks.push(cur);
+      cur = [];
+      len = head.length;
+    }
+    cur.push(id);
+    len += m.length;
+  }
+  chunks.push(cur);
+
+  try {
+    for (const ids of chunks) {
+      await postMessage(first.channelId, {
+        content: `${head}${ids.map((id) => `<@${id}>`).join(" ")}`,
+        embeds: [],
+        allowed_mentions: { parse: [], users: ids },
+        message_reference: { message_id: first.messageId, fail_if_not_exists: false },
+      });
+    }
+  } catch (err) {
+    lastReminder.delete(roster.id);
+    throw err;
+  }
+  await audit(actor, "roster.remind_pending", "roster", roster.id, { count: pending.length });
+  return { ok: true, reminded: pending.length };
+}
+
 export async function loadForPublish(eventId: string): Promise<{ roster: Roster; event: RaidHelperEventDetail }> {
   const roster = await getRoster(eventId);
   if (!roster) throw new HttpError(404, "Save a roster for this event before publishing", "not_found");

@@ -233,6 +233,7 @@ export interface DiscordMessagePayload {
   embeds: unknown[];
   components?: unknown[];
   allowed_mentions: { parse: never[]; users?: string[] };
+  message_reference?: { message_id: string; fail_if_not_exists: boolean };
 }
 
 export class DiscordMessageMissing extends Error {}

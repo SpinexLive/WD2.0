@@ -84,6 +84,7 @@ export function RosterEditor({ roster, signups, leagueAvailable, eventTitle, onR
   const [active, setActive] = useState<{ player: PlayerRef; role: string | null } | null>(null);
   const [sort, setSort] = useState<{ key: SortKey; dir: 1 | -1 }>({ key: "kd", dir: -1 });
   const [confirmReset, setConfirmReset] = useState(false);
+  const [confirmRemind, setConfirmRemind] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [publishing, setPublishing] = useState(false);
   const [newName, setNewName] = useState("");
@@ -191,6 +192,19 @@ export function RosterEditor({ roster, signups, leagueAvailable, eventTitle, onR
     }
   }
 
+  async function remind() {
+    setSaving(true);
+    try {
+      const r = await api<{ reminded: number }>(`/api/rosters/${encodeURIComponent(roster.eventId)}/remind`, { method: "POST" });
+      toast({ text: `Reminder sent to ${r.reminded} player${r.reminded === 1 ? "" : "s"}.`, tone: "ok" });
+    } catch (e) {
+      toast({ text: (e as ApiError).message, tone: "err" });
+    } finally {
+      setSaving(false);
+      setConfirmRemind(false);
+    }
+  }
+
   async function remove() {
     setSaving(true);
     try {
@@ -235,6 +249,11 @@ export function RosterEditor({ roster, signups, leagueAvailable, eventTitle, onR
         </div>
         <div className="flex flex-wrap gap-1.5">
           <button className="btn-ghost" onClick={() => onReload()} disabled={saving}>Sync</button>
+          {roster.messages.length > 0 && (
+            <button className="btn-ghost" onClick={() => setConfirmRemind(true)} disabled={saving || counts.pending === 0} title={counts.pending === 0 ? "Everyone assigned has responded" : "Ping assigned players who haven't confirmed"}>
+              Remind pending ({counts.pending})
+            </button>
+          )}
           <button className="btn-ghost" onClick={() => setConfirmReset(true)} disabled={saving}>Reset</button>
           <button className="btn-ghost text-blood-300" onClick={() => setConfirmDelete(true)} disabled={saving}>Delete</button>
           <button className="btn-ghost" onClick={save} disabled={saving || !dirty}>{saving ? "Saving…" : "Save draft"}</button>
@@ -378,6 +397,11 @@ export function RosterEditor({ roster, signups, leagueAvailable, eventTitle, onR
           </ul>
         )}
       </details>
+      {confirmRemind && (
+        <ConfirmDialog title="Remind pending players?" confirmLabel={`Ping ${counts.pending}`} busy={saving} onConfirm={remind} onCancel={() => setConfirmRemind(false)}>
+          This posts a message in the roster&apos;s Discord channel that pings the {counts.pending} assigned player{counts.pending === 1 ? "" : "s"} who haven&apos;t confirmed or declined, asking them to respond.
+        </ConfirmDialog>
+      )}
       {confirmReset && (
         <ConfirmDialog title="Reset roster?" confirmLabel="Reset roster" danger busy={saving} onConfirm={reset} onCancel={() => setConfirmReset(false)}>
           This clears all assignments and restores the template&apos;s squads. It does not change Raid Helper sign-ups or any message already on Discord. Unsaved edits are discarded.
