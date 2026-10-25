@@ -11,6 +11,7 @@ const NAV: { href: string; label: string; logo?: string }[] = [
   { href: "/members", label: "Members", logo: "/images/icons/wardogs.png" },
   { href: "/wdl", label: "WDL", logo: "/images/WDL.webp" },
   { href: "/rosters", label: "Rosters", logo: "/images/icons/infantry.png" },
+  { href: "/recruit", label: "Recruit" },
   { href: "/news", label: "News" },
 ];
 const ME_NAV: { href: string; label: string; logo?: string } = { href: "/me", label: "My stats" };
