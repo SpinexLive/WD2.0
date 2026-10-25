@@ -12,6 +12,8 @@ export interface DiscordEmbed {
 export interface EmbedInput {
   eventTitle: string;
   startTime: number | null;
+  /** The Raid Helper event description, shown above the date. */
+  eventDescription?: string | null;
   eventType: "competitive" | "weekly";
   eventUrl: string | null;
   squads: Squad[];
@@ -100,8 +102,9 @@ export function buildRosterMessages(input: EmbedInput): RosterMessage[] {
   const responses = input.responses ?? {};
   const title = clip(input.eventTitle, 240);
   const lines: string[] = [];
-  if (input.startTime) lines.push(`**Date:** <t:${input.startTime}:D>`);
-  const description = lines.join("\n");
+  if (input.eventDescription) lines.push(clip(input.eventDescription, 1500), "");
+  if (input.startTime) lines.push(`**Date:** <t:${input.startTime}:D>`, `**Time:** <t:${input.startTime}:t>`);
+  const description = lines.join("\n").trim();
 
   const fields = fieldsFor(input.squads, responses);
   const groups: Field[][] = [];

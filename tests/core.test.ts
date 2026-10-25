@@ -162,11 +162,12 @@ describe("Discord embeds", () => {
   const input = (squads: Squad[]) => ({ eventTitle: "REMNANT vs Opp", startTime: 1900000000, eventType: "competitive" as const, eventUrl: "https://discord.com/channels/1/2/3", squads });
 
   it("renders a small roster as one embed with event details", () => {
-    const e = buildRosterEmbeds(input([squad("Commander", 1, { category: "COMMAND", slots: [{ discordId: id(1), displayName: "Boss", avatarUrl: null, isLeader: false }] })]));
+    const e = buildRosterEmbeds({ ...input([squad("Commander", 1, { category: "COMMAND", slots: [{ discordId: id(1), displayName: "Boss", avatarUrl: null, isLeader: false }] })]), eventDescription: "Bring mics." });
     expect(e).toHaveLength(1);
     expect(e[0]!.title).toBe("REMNANT vs Opp");
+    expect(e[0]!.description).toMatch(/^Bring mics\./);
     expect(e[0]!.description).toContain("Date:");
-    expect(e[0]!.description).not.toContain("Time:");
+    expect(e[0]!.description).toContain("**Time:** <t:1900000000:t>");
     expect(e[0]!.fields[0]).toMatchObject({ name: "COMMAND • Commander", value: `${STATUS_ICON.pending} <@${id(1)}>` });
   });
   it("splits very large rosters while respecting Discord limits", () => {

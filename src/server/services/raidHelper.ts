@@ -18,6 +18,7 @@ export interface RaidHelperEvent {
   status: "upcoming" | "past" | "closed" | "unknown";
   channelId: string | null;
   discordUrl: string | null;
+  description: string | null;
 }
 
 export interface RaidHelperSignup {
@@ -82,6 +83,7 @@ export function parseEvent(raw: unknown): RaidHelperEvent | null {
     signupCount: typeof countRaw === "number" ? countRaw : countRaw !== undefined && Number.isFinite(Number(countRaw)) ? Number(countRaw) : (signups?.length ?? null),
     status: closed ? "closed" : startTime === null ? "unknown" : startTime * 1000 < Date.now() ? "past" : "upcoming",
     channelId,
+    description: asStr(o.description) ? formatTitle(asStr(o.description)!, startTime).trim() : null,
     // Raid Helper event IDs are the Discord message IDs of the event post.
     discordUrl: channelId && /^\d+$/.test(id) ? `https://discord.com/channels/${guild}/${channelId}/${id}` : null,
   };

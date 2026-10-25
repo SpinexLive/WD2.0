@@ -45,6 +45,7 @@ export async function renderRosterMessages(roster: Roster, event: RaidHelperEven
   return buildRosterMessages({
     eventTitle: event.title,
     startTime: event.startTime,
+    eventDescription: event.description,
     eventType: roster.eventType,
     eventUrl: event.discordUrl,
     squads: roster.squads,
