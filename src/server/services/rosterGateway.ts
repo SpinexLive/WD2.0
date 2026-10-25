@@ -1,12 +1,12 @@
-import { Client, GatewayIntentBits, MessageFlags, type ButtonInteraction as DjsButton } from "discord.js";
+import { Client, GatewayIntentBits, MessageFlags, type ButtonInteraction as DjsButton, type Guild } from "discord.js";
 import { env } from "@/lib/env";
+import { setVoice } from "./voice";
 import { BUTTON_PREFIX } from "./rosterPublish";
 import { handleRosterButton } from "./rosterResponses";
 
 const g = globalThis as unknown as { __rosterGateway?: Client };
 
 async function onButton(i: DjsButton) {
-  console.log("roster gateway button:", i.customId.split(":")[0]);
   if (!i.customId.startsWith(`${BUTTON_PREFIX}:`)) return;
   try {
     // Acknowledge straight away; Discord only waits 3 seconds, the work below can take longer.
@@ -33,8 +33,20 @@ async function onButton(i: DjsButton) {
 export function startRosterGateway(): void {
   if (process.env.NEXT_PHASE === "phase-production-build") return;
   if (g.__rosterGateway) return;
-  const client = new Client({ intents: [GatewayIntentBits.Guilds] });
+  const client = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildVoiceStates] });
   g.__rosterGateway = client;
+  const refreshVoice = (guild: Guild) => {
+    if (guild.id !== env().DISCORD_GUILD_ID) return;
+    const byChannel = new Map<string, string[]>();
+    for (const vs of guild.voiceStates.cache.values()) {
+      if (!vs.channelId || vs.member?.user.bot) continue;
+      byChannel.set(vs.channelId, [...(byChannel.get(vs.channelId) ?? []), vs.id]);
+    }
+    setVoice([...byChannel].map(([id, userIds]) => ({ id, name: guild.channels.cache.get(id)?.name ?? "Voice", userIds })));
+  };
+  client.on("clientReady", () => client.guilds.cache.forEach(refreshVoice));
+  client.on("guildCreate", refreshVoice);
+  client.on("voiceStateUpdate", (_old, next) => refreshVoice(next.guild));
   client.on("interactionCreate", (i) => {
     if (i.isButton()) void onButton(i);
   });

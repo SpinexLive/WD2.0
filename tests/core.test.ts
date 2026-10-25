@@ -6,6 +6,7 @@ import { parseApplications, parseMembers, registrationStatus } from "@/server/se
 import { botCanPost, hasAuthorisedRole } from "@/server/services/discord";
 import { parseEvent, parseSignups, formatTitle } from "@/server/services/raidHelper";
 import { saveSchema } from "@/server/services/rosters";
+import { upcomingEvents } from "@/server/services/landing";
 import type { Squad } from "@/lib/rosterTypes";
 
 beforeAll(() => {
@@ -199,5 +200,15 @@ describe("Discord embeds", () => {
     expect(m!.embed.footer?.text).toBe("1 confirmed | 0 pending | 1 declined | ★ = Squad Leader");
     expect(mentionContent(m!.mentions, true)).toBe(`Roster posted for confirmation: <@${id(1)}> <@${id(2)}>`);
     expect(mentionContent([], true)).toBeUndefined();
+  });
+});
+
+describe("landing page events", () => {
+  const ev = (id: string, startTime: number | null) => ({ id, title: id, startTime, signupCount: 3, status: "upcoming" as const, channelId: null, discordUrl: null, description: null });
+  it("keeps upcoming events, nearest first, and drops old ones", () => {
+    const now = Date.UTC(2026, 9, 25, 12) ;
+    const s = now / 1000;
+    const out = upcomingEvents([ev("late", s + 7200), ev("old", s - 5 * 3600), ev("none", null), ev("soon", s + 600), ev("live", s - 1800)], now);
+    expect(out.map((e) => e.id)).toEqual(["live", "soon", "late"]);
   });
 });

@@ -10,9 +10,11 @@ export interface DiscordMember {
   username: string;
   avatarUrl: string;
   roles: string[];
+  bot?: boolean;
 }
 
 interface RawUser {
+  bot?: boolean;
   id: string;
   username: string;
   global_name?: string | null;
@@ -42,6 +44,7 @@ function toMember(m: RawMember, fallback?: RawUser): DiscordMember {
     displayName: m.nick || user.global_name || user.username,
     avatarUrl: avatarUrl(user),
     roles: m.roles,
+    bot: user.bot === true,
   };
 }
 

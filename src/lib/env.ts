@@ -26,6 +26,8 @@ const schema = z.object({
   RAID_HELPER_EVENTS_PATH: z.string().default("/api/v4/servers/{guildId}/events"),
   RAID_HELPER_EVENT_PATH: z.string().default("/api/v4/events/{eventId}"),
   WARDOGS_RCON_SERVER_ID: z.string().optional(),
+  // Shown as the "Join us" button on the public landing page.
+  DISCORD_INVITE_URL: z.string().url().optional(),
   // The only Discord user who can open the hidden /admin page.
   OWNER_DISCORD_ID: snowflake.default("839225558806167582"),
   // Direct game-server RCON HTTP API (fast); both must be set to use it, otherwise the hosted API is used.

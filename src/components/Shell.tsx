@@ -11,6 +11,7 @@ const NAV: { href: string; label: string; logo?: string }[] = [
   { href: "/members", label: "Members", logo: "/images/icons/wardogs.png" },
   { href: "/wdl", label: "WDL", logo: "/images/WDL.webp" },
   { href: "/rosters", label: "Rosters", logo: "/images/icons/infantry.png" },
+  { href: "/news", label: "News" },
 ];
 const ADMIN_NAV: { href: string; label: string; logo?: string } = { href: "/admin", label: "Admin" };
 
@@ -21,7 +22,7 @@ function Inner({ children, isOwner }: { children: React.ReactNode; isOwner: bool
 
   async function logout() {
     await fetch("/api/auth/logout", { method: "POST", headers: { "X-CSRF-Token": csrfToken } }).catch(() => undefined);
-    window.location.href = "/login";
+    window.location.href = "/";
   }
 
   const nav = (

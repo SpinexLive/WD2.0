@@ -70,3 +70,6 @@ Runs the app, Postgres and Caddy (automatic HTTPS). Migrations are applied on ev
 4. In the Discord Developer Portal set the OAuth redirect to `https://<DOMAIN>/api/auth/callback` and the Interactions Endpoint URL to `https://<DOMAIN>/api/discord/interactions`.
 
 Update with `git pull; docker compose up -d --build`. Back up with `docker compose exec -T postgres pg_dump -U remnant remnant > backup.sql`.
+## Landing page
+
+`/` is a public landing page (sign-in button, upcoming Raid Helper events with countdowns, who is in Discord voice, news, game server status, clan stats). It reads from `/api/public/landing` (read-only, rate limited per IP). Voice presence comes from the Discord gateway listener (`GuildVoiceStates` intent, no privileged intents needed). News is managed on the dashboard's News page. Set `DISCORD_INVITE_URL` to show a "Join our Discord" button.
