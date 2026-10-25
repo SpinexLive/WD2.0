@@ -67,7 +67,7 @@ export function Landing({ initial, signedIn }: { initial: LandingData; signedIn:
   const cta = signedIn ? (
     <a href="/members" className="btn-primary">Open dashboard</a>
   ) : (
-    <a href="/api/auth/login" className="btn-primary gap-2"><DiscordIcon />Sign in with Discord</a>
+    <a href="/login" className="btn-primary gap-2"><DiscordIcon />Sign in with Discord</a>
   );
 
   return (
