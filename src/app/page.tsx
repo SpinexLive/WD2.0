@@ -4,7 +4,11 @@ import { getSession } from "@/lib/session";
 import { getLandingData } from "@/server/services/landing";
 
 export const dynamic = "force-dynamic";
-export const metadata: Metadata = { title: "REMNANT", description: "REMNANT – a Hell Let Loose clan. Upcoming events, news and who is online." };
+export const metadata: Metadata = {
+  title: "REMNANT | Hell Let Loose Clan",
+  description: "A friendly, mature European gaming community built around Hell Let Loose and Wardogs. New members welcome.",
+  openGraph: { title: "REMNANT | Hell Let Loose Clan", description: "A friendly, mature European gaming community built around Hell Let Loose and Wardogs. New members welcome.", siteName: "REMNANT" },
+};
 
 export default async function Home() {
   const [data, session] = await Promise.all([getLandingData(), getSession().catch(() => null)]);
