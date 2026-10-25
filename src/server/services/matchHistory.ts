@@ -106,15 +106,16 @@ export interface ProfileMatch {
   mvp: boolean;
   durationS: number | null;
   startedAt: string | null;
+  cash: number | null;
 }
 
 /** A player's stored matches, newest first. The lobby K/D is everyone else's kills over deaths in the same match. */
 export async function getPlayerMatches(steamId: string): Promise<ProfileMatch[]> {
   const rows = await query<{
-    id: string; ended_at: Date | null; started_at: Date | null; map: string | null; server_name: string | null; faction: string | null; kills: number; deaths: number;
+    id: string; ended_at: Date | null; started_at: Date | null; map: string | null; server_name: string | null;     faction: string | null; kills: number; deaths: number; cash: number | null;
     mvp_steam_id: string | null; duration_s: number | null; lobby_kills: string; lobby_deaths: string; players: string;
   }>(
-    `SELECT m.id, m.ended_at, m.started_at, m.map, m.server_name, mp.faction, mp.kills, mp.deaths, m.mvp_steam_id, m.duration_s,
+    `SELECT m.id, m.ended_at, m.started_at, m.map, m.server_name, mp.faction, mp.kills, mp.deaths, mp.cash, m.mvp_steam_id, m.duration_s,
             (SELECT COALESCE(sum(kills),0) FROM match_players o WHERE o.match_id = m.id AND o.steam_id <> mp.steam_id AND lower(COALESCE(o.faction, '')) <> 'white') AS lobby_kills,
             (SELECT COALESCE(sum(deaths),0) FROM match_players o WHERE o.match_id = m.id AND o.steam_id <> mp.steam_id AND lower(COALESCE(o.faction, '')) <> 'white') AS lobby_deaths,
             (SELECT count(*) FROM match_players o WHERE o.match_id = m.id) AS players
@@ -140,6 +141,7 @@ export async function getPlayerMatches(steamId: string): Promise<ProfileMatch[]>
       players: Number(r.players),
       mvp: r.mvp_steam_id === steamId,
       durationS: r.duration_s,
+      cash: r.cash === null ? null : Number(r.cash),
     };
   });
 }

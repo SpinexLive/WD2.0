@@ -9,7 +9,7 @@ type Reg = keyof typeof REG_LABEL;
 
 interface ProfileMatch {
   id: number; endedAt: string | null; startedAt: string | null; map: string | null; server: string | null; faction: string | null;
-  kills: number; deaths: number; kd: number; lobbyKd: number | null; players: number; mvp: boolean; durationS: number | null;
+  kills: number; deaths: number; kd: number; lobbyKd: number | null; players: number; mvp: boolean; durationS: number | null; cash: number | null;
 }
 interface Profile {
   member: { id: string; displayName: string; avatarUrl: string };
@@ -264,7 +264,8 @@ export default function MemberProfile({ member: memberProp, registration, onClos
   const chrono = useMemo(() => [...(data?.matches ?? [])].reverse(), [data]);
   const derived = useMemo(() => {
     const ms = data?.matches ?? [];
-    return { mvps: ms.filter((m) => m.mvp).length };
+    const cash = ms.flatMap((m) => (m.cash === null ? [] : [m.cash]));
+    return { mvps: ms.filter((m) => m.mvp).length, avgCash: cash.length ? Math.round(cash.reduce((a, b) => a + b, 0) / cash.length) : null };
   }, [data]);
 
   const s = data?.stats;
@@ -335,12 +336,13 @@ export default function MemberProfile({ member: memberProp, registration, onClos
         ) : data ? (
           <div className="mt-4 space-y-4">
             <p className="text-xs font-medium uppercase tracking-wider text-stone/55">Stats from the REMNANT / Wardogs game server only. Games on other servers aren&apos;t counted.</p>
-            <div className="grid grid-cols-2 gap-3 md:grid-cols-4 lg:grid-cols-5">
+            <div className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-6">
               <Tile i={0} label="All-time K/D" value={s?.kd != null ? s.kd.toFixed(2) : "-"} color={s?.kd != null ? kdColor(s.kd) : undefined} sub={s ? `${s.kills.toLocaleString()} K / ${s.deaths.toLocaleString()} D` : "No community record"} />
               <Tile i={1} label="Kills" value={s ? s.kills.toLocaleString() : "-"} />
               <Tile i={2} label="Deaths" value={s ? s.deaths.toLocaleString() : "-"} />
               <Tile i={3} label="Matches" value={s ? s.matches : "-"} sub={`${data.matches.length} in detail`} />
               <Tile i={4} label="MVPs" value={derived.mvps} />
+              <Tile i={5} label="Avg cash / match" value={derived.avgCash !== null ? derived.avgCash.toLocaleString() : "-"} sub="Cash earned" />
             </div>
 
             {chrono.length === 0 ? (
@@ -361,7 +363,7 @@ export default function MemberProfile({ member: memberProp, registration, onClos
                 <Panel title="Match history" sub={`${data.matches.length} matches`}>
                   <div className="max-h-80 overflow-auto">
                     <table className="w-full min-w-[560px] text-left">
-                      <thead className="sticky top-0 bg-ink-900"><tr><th className="th">Date</th><th className="th">Map</th><th className="th">Faction</th><th className="th">K</th><th className="th">D</th><th className="th">K/D</th><th className="th">vs lobby</th></tr></thead>
+                      <thead className="sticky top-0 bg-ink-900"><tr><th className="th">Date</th><th className="th">Map</th><th className="th">Faction</th><th className="th">K</th><th className="th">D</th><th className="th">K/D</th><th className="th">Cash</th><th className="th">vs lobby</th></tr></thead>
                       <tbody>
                         {data.matches.map((m) => {
                           const delta = m.lobbyKd === null ? null : m.kd - m.lobbyKd;
@@ -373,6 +375,7 @@ export default function MemberProfile({ member: memberProp, registration, onClos
                               <td className="px-3 py-1.5 text-sm tabular-nums">{m.kills}</td>
                               <td className="px-3 py-1.5 text-sm tabular-nums">{m.deaths}</td>
                               <td className="px-3 py-1.5 text-sm font-semibold tabular-nums" style={{ color: kdColor(m.kd) }}>{m.kd.toFixed(2)}</td>
+                              <td className="px-3 py-1.5 text-sm tabular-nums">{m.cash === null ? "-" : m.cash.toLocaleString()}</td>
                               <td className="px-3 py-1.5 text-xs tabular-nums" style={delta === null ? undefined : { color: delta >= 0 ? SAGE : RED }}>{delta === null ? "-" : `${delta >= 0 ? "+" : ""}${delta.toFixed(2)}`}</td>
                             </tr>
                           );
