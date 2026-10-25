@@ -5,7 +5,8 @@ import { useApi } from "@/lib/client";
 import { ErrorBanner, Skeleton, SyncInfo } from "@/components/ui";
 import type { LeaderboardRange, LeaderboardRow, LeaderboardSort } from "@/server/services/wardogsRcon";
 
-interface Board { range: LeaderboardRange; sort: LeaderboardSort; rows: LeaderboardRow[]; fetchedAt: string; stale: boolean; mySteamId: string | null }
+type Row = LeaderboardRow & { nickname: string | null };
+interface Board { range: LeaderboardRange; sort: LeaderboardSort; rows: Row[]; fetchedAt: string; stale: boolean; mySteamId: string | null }
 
 const RANGES: { key: LeaderboardRange; label: string }[] = [
   { key: "7d", label: "7 days" },
@@ -46,7 +47,7 @@ export default function LeaderboardClient() {
   }, [load]);
 
   const q = search.trim().toLowerCase();
-  const rows = (data?.rows ?? []).filter((r) => !q || (r.name ?? "").toLowerCase().includes(q));
+  const rows = (data?.rows ?? []).filter((r) => !q || (r.nickname ?? r.name ?? "").toLowerCase().includes(q) || (r.name ?? "").toLowerCase().includes(q));
   const mine = data?.rows.find((r) => r.steamId === data.mySteamId) ?? null;
   const chip = (on: boolean) => `rounded border px-3 py-1 text-sm ${on ? "border-blood-400 bg-blood-700/30" : "border-ink-600 text-stone/70 hover:border-ink-500"}`;
 
@@ -82,7 +83,7 @@ export default function LeaderboardClient() {
                 return (
                   <tr key={r.steamId} className={`border-t border-ink-800 ${me ? "bg-blood-700/20" : "hover:bg-ink-800/50"}`}>
                     <td className={`px-3 py-1.5 text-sm font-bold tabular-nums ${r.rank <= 3 ? "text-blood-300" : "text-stone/60"}`}>{r.rank}</td>
-                    <td className="px-3 py-1.5 text-sm font-semibold">{r.name ?? "Unknown"}{me && <span className="ml-2 rounded bg-blood-600/40 px-1.5 py-0.5 text-[10px] uppercase tracking-wider">You</span>}</td>
+                    <td className="px-3 py-1.5 text-sm font-semibold">{r.nickname ?? r.name ?? "Unknown"}{me && <span className="ml-2 rounded bg-blood-600/40 px-1.5 py-0.5 text-[10px] uppercase tracking-wider">You</span>}</td>
                     <td className="px-3 py-1.5 text-sm tabular-nums">{r.kills.toLocaleString()}</td>
                     <td className="px-3 py-1.5 text-sm tabular-nums">{r.deaths.toLocaleString()}</td>
                     <td className="px-3 py-1.5 text-sm font-semibold tabular-nums" style={{ color: kdColor(r.kd) }}>{r.kd.toFixed(2)}</td>

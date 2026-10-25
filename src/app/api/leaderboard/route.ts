@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { protectedRoute } from "@/lib/apiGuard";
 import { resolveLinks } from "@/server/services/links";
+import { getAllClanMembers, getClanMembers } from "@/server/services/discord";
 import { getLeaderboard } from "@/server/services/wardogsRcon";
 
 export const dynamic = "force-dynamic";
@@ -15,8 +16,23 @@ export const GET = protectedRoute(
   async ({ req, session }) => {
     const q = querySchema.parse(Object.fromEntries(req.nextUrl.searchParams));
     const force = req.nextUrl.searchParams.get("refresh") === "1";
-    const [board, links] = await Promise.all([getLeaderboard(q.range, q.sort, force), resolveLinks().catch(() => null)]);
-    return { range: q.range, sort: q.sort, rows: board.data, fetchedAt: board.fetchedAt, stale: board.stale, mySteamId: links?.steamIds.get(session.discordId) ?? null };
+    const [board, links, clan, allClan] = await Promise.all([
+      getLeaderboard(q.range, q.sort, force),
+      resolveLinks().catch(() => null),
+      getClanMembers().then((s) => s.data, () => []),
+      getAllClanMembers().then((s) => s.data, () => []),
+    ]);
+    // Linked players are shown by their Discord nickname; everyone else keeps their in-game name.
+    const nick = new Map<string, string>();
+    if (links) {
+      const byDiscord = new Map([...allClan, ...clan].map((m) => [m.id, m.displayName]));
+      for (const [discordId, steamId] of links.steamIds) {
+        const name = byDiscord.get(discordId);
+        if (name) nick.set(steamId, name);
+      }
+    }
+    const rows = board.data.map((r) => ({ ...r, nickname: nick.get(r.steamId) ?? null }));
+    return { range: q.range, sort: q.sort, rows, fetchedAt: board.fetchedAt, stale: board.stale, mySteamId: links?.steamIds.get(session.discordId) ?? null };
   },
   { allowMember: true },
 );
