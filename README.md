@@ -59,3 +59,14 @@ Publishing never happens on save. Publish/update/republish are separate explicit
 ## Testing
 
 `npm test` covers role checks, bot channel permission resolution, League matching/parsing, Raid Helper parsing, roster move/leader/duplicate rules, validation warnings, save-schema validation and embed splitting/limits. Integration against live Discord, Raid Helper, Wardogs and PostgreSQL requires real credentials and was not run in this repository; follow the checklist: sign in with each authorised role, an unauthorised user and a non-member; open Members; accept/reject a test application; create a roster, save, reload, save from two tabs (expect conflict); publish to a test channel, edit and update; delete the message and update (expect republish prompt).
+
+## Docker deployment
+
+Runs the app, Postgres and Caddy (automatic HTTPS). Migrations are applied on every start.
+
+1. Point a hostname (DNS A record, or `<ip-with-dashes>.sslip.io`) at the server and open ports 80/443.
+2. `cp .env.example .env`, fill in the secrets, and set `DOMAIN` (no scheme) and `POSTGRES_PASSWORD`. `APP_URL` and `DATABASE_URL` are set by compose.
+3. `docker compose up -d --build`, then `docker compose logs -f app` (look for "roster gateway connected").
+4. In the Discord Developer Portal set the OAuth redirect to `https://<DOMAIN>/api/auth/callback` and the Interactions Endpoint URL to `https://<DOMAIN>/api/discord/interactions`.
+
+Update with `git pull; docker compose up -d --build`. Back up with `docker compose exec -T postgres pg_dump -U remnant remnant > backup.sql`.
