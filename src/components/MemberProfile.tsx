@@ -334,6 +334,7 @@ export default function MemberProfile({ member: memberProp, registration, onClos
           )
         ) : data ? (
           <div className="mt-4 space-y-4">
+            <p className="text-xs font-medium uppercase tracking-wider text-stone/55">Stats from the REMNANT / Wardogs game server only. Games on other servers aren&apos;t counted.</p>
             <div className="grid grid-cols-2 gap-3 md:grid-cols-4 lg:grid-cols-5">
               <Tile i={0} label="All-time K/D" value={s?.kd != null ? s.kd.toFixed(2) : "-"} color={s?.kd != null ? kdColor(s.kd) : undefined} sub={s ? `${s.kills.toLocaleString()} K / ${s.deaths.toLocaleString()} D` : "No community record"} />
               <Tile i={1} label="Kills" value={s ? s.kills.toLocaleString() : "-"} />
