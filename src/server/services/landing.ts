@@ -1,6 +1,6 @@
 import { env } from "@/lib/env";
 import { cached } from "@/lib/cache";
-import { fetchGuildMember, getClanMembers } from "./discord";
+import { fetchGuildMember, getAllClanMembers, getClanMembers } from "./discord";
 import { getEvents, type RaidHelperEvent } from "./raidHelper";
 import { getServers } from "./wardogsRcon";
 import { listNews, type NewsPost } from "./news";
@@ -75,7 +75,6 @@ export async function getLandingData(): Promise<LandingData> {
     safe(voiceMembers),
     safe(() => listNews(5)),
     safe(serverStatus),
-    safe(() => getClanMembers()),
-  ]);
+    safe(() => getAllClanMembers()),
   return { events, voice, news, server, memberCount: members ? members.data.length : null, inviteUrl: env().DISCORD_INVITE_URL ?? null };
 }

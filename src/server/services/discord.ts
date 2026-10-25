@@ -117,8 +117,20 @@ export async function fetchGuildMember(userId: string): Promise<DiscordMember | 
   return status === 404 ? null : toMember(data as RawMember);
 }
 
-export function getClanMembers(force = false): Promise<Snapshot<DiscordMember[]>> {
-  return cached("discord:members", 5 * 60_000, async () => {
+export async function getClanMembers(force = false): Promise<Snapshot<DiscordMember[]>> {
+  const snap = await getGuildMembers(force);
+  return { ...snap, data: snap.data.filter((m) => m.roles.includes(env().DISCORD_MEMBER_ROLE_ID)) };
+}
+
+/** Everyone holding the whole-clan role (includes members who don't play Wardogs). */
+export async function getAllClanMembers(force = false): Promise<Snapshot<DiscordMember[]>> {
+  const snap = await getGuildMembers(force);
+  const role = env().DISCORD_CLAN_ROLE_ID;
+  return { ...snap, data: snap.data.filter((m) => m.roles.includes(role)) };
+}
+
+function getGuildMembers(force = false): Promise<Snapshot<DiscordMember[]>> {
+  return cached("discord:guild-members", 5 * 60_000, async () => {
     const all: DiscordMember[] = [];
     let after = "0";
     for (let page = 0; page < 50; page++) {
@@ -133,7 +145,7 @@ export function getClanMembers(force = false): Promise<Snapshot<DiscordMember[]>
       if (batch.length < 1000) break;
       after = batch[batch.length - 1]!.user!.id;
     }
-    return all.filter((m) => m.roles.includes(env().DISCORD_MEMBER_ROLE_ID));
+    return all;
   }, force);
 }
 
