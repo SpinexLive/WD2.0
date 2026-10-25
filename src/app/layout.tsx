@@ -1,7 +1,7 @@
 import "./globals.css";
 import type { Metadata, Viewport } from "next";
 
-export const metadata: Metadata = { title: "Remnant Dashboard", description: "Remnant Clan Management" };
+export const metadata: Metadata = { title: "REMNANT | Hell Let Loose Clan", description: "Official site of REMNANT, a mature EU Hell Let Loose clan. Events, matches and news." };
 export const viewport: Viewport = { themeColor: "#0c0c0e" };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

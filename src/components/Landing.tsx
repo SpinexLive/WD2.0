@@ -27,8 +27,8 @@ const fmtDate = (t: number) => new Date(t * 1000).toLocaleDateString("en-GB", { 
 const fmtTime = (t: number) => new Date(t * 1000).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", timeZoneName: "short" });
 const fmtPosted = (iso: string) => new Date(iso).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
 
-const Panel = ({ title, children, right }: { title: string; children: React.ReactNode; right?: React.ReactNode }) => (
-  <section className="card overflow-hidden bg-ink-900/85 backdrop-blur">
+const Panel = ({ id, title, children, right }: { id?: string; title: string; children: React.ReactNode; right?: React.ReactNode }) => (
+  <section id={id} className="card scroll-mt-20 overflow-hidden bg-ink-900/85 backdrop-blur">
     <h2 className="card-head justify-between"><span className="flex items-center gap-2">{title}</span>{right}</h2>
     <div className="p-3">{children}</div>
   </section>
@@ -76,35 +76,61 @@ export function Landing({ initial, signedIn }: { initial: LandingData; signedIn:
       <div className="login-vignette" />
       <div className="login-grain" />
 
-      <header className="relative z-10 mx-auto flex max-w-6xl items-center justify-between px-4 py-4">
-        <div className="flex items-center gap-3">
-          <Image src="/images/icon.png" alt="" width={40} height={40} priority />
-          <span className="text-xl font-bold tracking-[0.3em] text-stone">REMNANT</span>
+      <header className="relative z-10 border-b border-ink-700/70 bg-ink-950/80 backdrop-blur">
+        <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-4 py-3 lg:px-8">
+          <div className="flex items-center gap-3">
+            <Image src="/images/icon.png" alt="REMNANT" width={36} height={36} priority />
+            <span className="text-lg font-bold tracking-[0.3em] text-stone">REMNANT</span>
+          </div>
+          <nav className="hidden items-center gap-6 text-xs font-bold uppercase tracking-[0.16em] text-stone/60 md:flex">
+            <a href="#events" className="hover:text-stone">Events</a>
+            <a href="#news" className="hover:text-stone">News</a>
+            <a href="#about" className="hover:text-stone">About</a>
+          </nav>
+          <div className="flex items-center gap-2">
+            {data.inviteUrl && <a href={data.inviteUrl} target="_blank" rel="noopener noreferrer" className="btn-ghost hidden sm:inline-flex">Join Discord</a>}
+            {cta}
+          </div>
         </div>
-        {cta}
       </header>
 
-      <main className="relative z-10 mx-auto max-w-6xl space-y-4 px-4 pb-12">
-        <section className="py-8 text-center md:py-14">
-          <Image src="/images/icon.png" alt="REMNANT" width={120} height={120} className="login-logo mx-auto" priority />
-          <h1 className="login-title mt-3 text-4xl font-bold tracking-[0.35em] text-stone md:text-5xl">REMNANT</h1>
-          <div className="login-divider mx-auto mt-4 h-0.5 w-20 bg-blood-600" />
-          <p className="mx-auto mt-4 max-w-xl text-sm text-stone/70">A Hell Let Loose clan. Mature, EU-wide, with weekly events and weekend matches.</p>
-          <div className="mt-6 flex flex-wrap items-center justify-center gap-3">
-            {data.inviteUrl && <a href={data.inviteUrl} target="_blank" rel="noopener noreferrer" className="btn-ghost">Join our Discord</a>}
+      <main className="relative z-10 mx-auto max-w-7xl space-y-5 px-4 py-6 lg:px-8">
+        <section className="card overflow-hidden border-l-4 border-l-blood-600 bg-ink-900/85 backdrop-blur">
+          <div className="flex flex-col gap-5 p-5 md:flex-row md:items-center md:justify-between md:p-7">
+            <div className="min-w-0">
+              <div className="text-[11px] font-bold uppercase tracking-[0.2em] text-blood-300">Next event</div>
+              {next ? (
+                <>
+                  <h1 className="mt-1 truncate text-2xl font-extrabold text-stone md:text-3xl">{next.title}</h1>
+                  <p className="mt-1 text-sm text-stone/60">{now !== null ? `${fmtDate(next.startTime)} · ${fmtTime(next.startTime)}` : "\u00a0"}{next.signupCount !== null && ` · ${next.signupCount} signed up`}</p>
+                </>
+              ) : (
+                <>
+                  <h1 className="mt-1 text-2xl font-extrabold text-stone md:text-3xl">Hell Let Loose, played properly</h1>
+                  <p className="mt-1 text-sm text-stone/60">Mature, EU-wide clan with weekly events and weekend matches.</p>
+                </>
+              )}
+            </div>
+            <div className="flex shrink-0 flex-wrap items-center gap-4 md:gap-6">
+              {next && <div className="text-3xl font-extrabold tabular-nums tracking-wide text-stone md:text-4xl">{now !== null ? countdown(next.startTime, now) : "—"}</div>}
+              <div className="flex gap-2">
+                {next?.discordUrl && <a href={next.discordUrl} target="_blank" rel="noopener noreferrer" className="btn-primary">Sign up</a>}
+                <a href={APPLY_URL} target="_blank" rel="noopener noreferrer" className={next?.discordUrl ? "btn-ghost" : "btn-primary"}>Apply to join</a>
+              </div>
+            </div>
           </div>
         </section>
 
         <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
           <Stat label="Clan members" value={data.memberCount !== null ? String(data.memberCount) : "—"} />
           <Stat label="In voice now" value={data.voice ? String(data.voice.total) : "—"} />
-          <Stat label="Next event" value={next && now !== null ? countdown(next.startTime, now) : "—"} />
+          <Stat label="Upcoming events" value={data.events ? String(data.events.length) : "—"} />
           <Stat label="Players on server" value={data.server?.players != null ? String(data.server.players) : "—"} />
         </div>
 
-        <div className="grid gap-4 lg:grid-cols-3">
-          <div className="space-y-4 lg:col-span-2">
-            <Panel title="Upcoming events">
+        <div className="grid gap-5 lg:grid-cols-12">
+          <div className="space-y-5 lg:col-span-8">
+            <Panel id="events" title="Upcoming events">
               {data.events === null ? (
                 <Empty>Events are unavailable right now.</Empty>
               ) : data.events.length === 0 ? (
@@ -129,8 +155,7 @@ export function Landing({ initial, signedIn }: { initial: LandingData; signedIn:
                 </ul>
               )}
             </Panel>
-
-            <Panel title="News">
+            <Panel id="news" title="News">
               {data.news === null ? (
                 <Empty>News is unavailable right now.</Empty>
               ) : data.news.length === 0 ? (
@@ -151,7 +176,7 @@ export function Landing({ initial, signedIn }: { initial: LandingData; signedIn:
             </Panel>
           </div>
 
-          <div className="space-y-4">
+          <div className="space-y-5 lg:col-span-4">
             <Panel title="Voice channels" right={data.voice && <span className="text-[11px] font-medium normal-case tracking-normal text-stone/55">{data.voice.total} online</span>}>
               {data.voice === null ? (
                 <Empty>Voice status is unavailable right now.</Empty>
@@ -188,8 +213,7 @@ export function Landing({ initial, signedIn }: { initial: LandingData; signedIn:
                 </div>
               )}
             </Panel>
-
-            <Panel title="About">
+            <Panel id="about" title="About">
               <p className="text-sm text-stone/75">REMNANT is a mature Hell Let Loose community, built from groups of players from many different communities who came together. We take the game seriously and the company easy. Members are from all over the EU.</p>
               <ul className="mt-3 space-y-1.5 text-sm text-stone/75">
                 <li className="flex gap-2"><span className="text-blood-400">▸</span><span><strong className="text-stone">Weekly events:</strong> every Tuesday and Thursday.</span></li>
@@ -205,6 +229,10 @@ export function Landing({ initial, signedIn }: { initial: LandingData; signedIn:
           </div>
         </div>
       </main>
+
+      <footer className="relative z-10 border-t border-ink-700/70 py-5 text-center text-xs text-stone/45">
+        © REMNANT · Official site of the REMNANT Hell Let Loose clan
+      </footer>
     </div>
   );
 }
