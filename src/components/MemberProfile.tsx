@@ -71,11 +71,14 @@ function Tile({ label, value, sub, color, i }: { label: string; value: React.Rea
 
 /** K/D per match as an area line, and the lobby's K/D as a dashed baseline. Hover for a match readout. */
 function TrendChart({ data }: { data: ProfileMatch[] }) {
-  const W = 640, H = 220, L = 34, R = 10, T = 12, B = 24;
+  const W = 640, H = 220, L = 34, R = 44, T = 12, B = 24;
   const [hover, setHover] = useState<number | null>(null);
   const ref = useRef<SVGSVGElement>(null);
   const vals = data.map((m) => m.kd);
   const max = Math.max(2, Math.ceil(Math.max(...vals, ...data.map((m) => m.lobbyKd ?? 0)) * 2) / 2);
+  const cashMax = Math.max(1, ...data.map((m) => m.cash ?? 0));
+  const hasCash = data.some((m) => m.cash !== null);
+  const yc = (v: number) => T + (1 - v / cashMax) * (H - T - B);
   const x = (i: number) => L + (data.length === 1 ? (W - L - R) / 2 : (i / (data.length - 1)) * (W - L - R));
   const y = (v: number) => T + (1 - v / max) * (H - T - B);
   const line = (arr: number[]) => arr.map((v, i) => `${i ? "L" : "M"}${x(i).toFixed(1)},${y(v).toFixed(1)}`).join("");
@@ -104,6 +107,13 @@ function TrendChart({ data }: { data: ProfileMatch[] }) {
         <path d={area} fill="url(#kdfill)" />
         <path d={lobby.filter(Boolean).join("")} fill="none" stroke={AMBER} strokeWidth="1.2" strokeDasharray="4 4" opacity="0.7" />
         <path d={line(vals)} fill="none" stroke={RED} strokeWidth="2" strokeLinejoin="round" className="m-draw" pathLength={1} />
+        {hasCash && (
+          <g>
+            {[0, 0.5, 1].map((t) => <text key={t} x={W - R + 6} y={yc(t * cashMax) + 3} fontSize="10" fill={SAGE} opacity="0.8">{Math.round(t * cashMax).toLocaleString()}</text>)}
+            <path d={data.flatMap((m, i) => (m.cash === null ? [] : [`${i ? "L" : "M"}${x(i).toFixed(1)},${yc(m.cash).toFixed(1)}`])).join("").replace(/^L/, "M")} fill="none" stroke={SAGE} strokeWidth="1.6" strokeLinejoin="round" />
+            {data.map((m, i) => (m.cash === null ? null : <circle key={m.id} cx={x(i)} cy={yc(m.cash)} r={hover === i ? 3.5 : 2} fill={SAGE} stroke="#161616" strokeWidth="1" />))}
+          </g>
+        )}
         {data.map((m, i) => <circle key={m.id} cx={x(i)} cy={y(m.kd)} r={hover === i ? 4.5 : 2.4} fill={m.mvp ? AMBER : RED} stroke="#161616" strokeWidth="1" />)}
         <text x={L} y={H - 6} fontSize="10" fill="rgba(232,230,225,0.45)">{fmtDate(data[0]!.endedAt)}</text>
         <text x={W - R} y={H - 6} fontSize="10" textAnchor="end" fill="rgba(232,230,225,0.45)">{fmtDate(data[data.length - 1]!.endedAt)}</text>
@@ -111,6 +121,7 @@ function TrendChart({ data }: { data: ProfileMatch[] }) {
       </svg>
       <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-stone/55">
         <span><i className="mr-1 inline-block h-0.5 w-4 align-middle" style={{ background: RED }} />K/D per match</span>
+        {hasCash && <span><i className="mr-1 inline-block h-0.5 w-4 align-middle" style={{ background: SAGE }} />Cash earned (right axis)</span>}
         <span><i className="mr-1 inline-block h-0.5 w-4 align-middle border-t border-dashed" style={{ borderColor: AMBER }} />Lobby K/D</span>
         <span><i className="mr-1 inline-block h-2 w-2 rounded-full align-middle" style={{ background: AMBER }} />MVP</span>
       </div>
@@ -118,7 +129,7 @@ function TrendChart({ data }: { data: ProfileMatch[] }) {
         <div className="pointer-events-none absolute right-2 top-2 rounded-md border border-ink-600 bg-ink-850/95 px-2.5 py-1.5 text-xs shadow-lg">
           <div className="font-semibold">{h.map ?? "Unknown map"} <span className="font-normal text-stone/50">#{h.id}</span></div>
           <div className="text-stone/60">{fmtDateTime(h.endedAt)}</div>
-          <div className="tabular-nums">{h.kills} K / {h.deaths} D · <span style={{ color: kdColor(h.kd) }}>{h.kd.toFixed(2)}</span>{h.lobbyKd !== null && <span className="text-stone/50"> (lobby {h.lobbyKd.toFixed(2)})</span>}</div>
+          <div className="tabular-nums">{h.kills} K / {h.deaths} D · <span style={{ color: kdColor(h.kd) }}>{h.kd.toFixed(2)}</span>{h.lobbyKd !== null && <span className="text-stone/50"> (lobby {h.lobbyKd.toFixed(2)})</span>}{h.cash !== null && <span style={{ color: SAGE }}> · ${h.cash.toLocaleString()}</span>}</div>
         </div>
       )}
     </div>
