@@ -14,6 +14,7 @@ interface ProfileMatch {
 interface Profile {
   member: { id: string; displayName: string; avatarUrl: string };
   steamId: string | null;
+  registration?: Reg;
   stats: { name: string | null; kills: number; deaths: number; matches: number; seedingSeconds: number | null; kd: number | null } | null;
   rank: { rank: number; kd: number | null } | null;
   matches: ProfileMatch[];
@@ -276,7 +277,7 @@ export default function MemberProfile({ member: memberProp, registration, onClos
           <div className="min-w-0 flex-1">
             <h2 className="truncate text-2xl font-bold tracking-tight">{member.displayName}</h2>
             <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-stone/60">
-              {registration && <RegBadge status={registration} />}
+              {(registration ?? data?.registration) && <RegBadge status={(registration ?? data?.registration)!} />}
               {data?.steamId && <span className="font-mono">{data.steamId}</span>}
               {s?.name && <span>In game: <span className="text-stone/85">{s.name}</span></span>}
               {data?.rank && <span className="rounded border border-blood-500/60 bg-blood-600/20 px-1.5 py-0.5 font-semibold text-blood-300" title="All-time rank by kills on the Wardogs leaderboard">Server rank #{data.rank.rank}</span>}
@@ -290,6 +291,23 @@ export default function MemberProfile({ member: memberProp, registration, onClos
 
         {error && <div className="mt-4"><ErrorBanner message={error} onRetry={() => void load()} /></div>}
         {data?.errors.map((e) => <p key={e} className="mt-3 text-xs text-orange">{e}</p>)}
+
+        {inline && data?.registration === "not_registered" && (
+          <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-red-900/60 bg-neutral-900 p-4">
+            <div>
+              <h3 className="font-semibold text-white">Join the Wardogs League</h3>
+              <p className="text-sm text-neutral-400">You aren&apos;t registered for the league with REMNANT yet. Apply to join our team.</p>
+            </div>
+            <a
+              href="https://wardogsleague.net/join/rmnt"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="rounded-lg bg-red-700 px-4 py-2 text-sm font-semibold text-white hover:bg-red-600"
+            >
+              Join the league
+            </a>
+          </div>
+        )}
 
         {!data && !error ? (
           <div className="mt-4 space-y-3"><div className="grid grid-cols-2 gap-3 md:grid-cols-4 lg:grid-cols-5">{Array.from({ length: 7 }, (_, i) => <Skeleton key={i} className="h-20" />)}</div><Skeleton className="h-64" /></div>
