@@ -189,31 +189,26 @@ export function Landing({ initial, signedIn }: { initial: LandingData; signedIn:
           </div>
 
           <div className="lg:col-span-4">
-            <Panel title="Discord" right={data.widget && <span className="text-[11px] font-medium normal-case tracking-normal text-stone/55">{data.widget.online} online</span>}>
-              {data.widget === null ? (
-                <Empty>Discord status is unavailable right now.</Empty>
+            <Panel title="In voice" right={data.voice && <span className="text-[11px] font-medium normal-case tracking-normal text-stone/55">{data.voice.total} online</span>}>
+              {data.voice === null ? (
+                <Empty>Voice status is unavailable right now.</Empty>
+              ) : data.voice.channels.length === 0 ? (
+                <Empty>Nobody is in voice right now.</Empty>
               ) : (
-                <div className="space-y-3">
-                  {data.widget.members.length === 0 ? (
-                    <Empty>Nobody is online right now.</Empty>
-                  ) : (
-                    <ul className="max-h-[26rem] space-y-1 overflow-y-auto pr-1">
-                      {data.widget.members.map((m) => (
-                        <li key={m.id} className="flex items-center gap-2.5 rounded px-1.5 py-1 text-sm hover:bg-ink-800/70">
-                          <span className="relative shrink-0">
-                            <Avatar src={m.avatarUrl} size={28} />
-                            <span className={`absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full border-2 border-ink-900 ${m.status === "online" ? "bg-ok" : m.status === "idle" ? "bg-yellow-500" : "bg-blood-500"}`} />
-                          </span>
-                          <span className="min-w-0 flex-1">
-                            <span className="block truncate text-stone">{m.name}</span>
-                            {m.game && <span className="block truncate text-[11px] text-stone/45">{m.game}</span>}
-                          </span>
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                  {data.inviteUrl && <a href={data.inviteUrl} target="_blank" rel="noopener noreferrer" className="btn-primary w-full gap-2"><DiscordIcon />Join the Discord</a>}
-                </div>
+                <ul className="space-y-4">
+                  {data.voice.channels.map((c) => (
+                    <li key={c.id}>
+                      <div className="flex items-center justify-between border-b border-ink-700/70 pb-1 text-[11px] font-bold uppercase tracking-[0.14em] text-stone/55">
+                        <span className="truncate">🔊 {c.name}</span><span>{c.members.length}</span>
+                      </div>
+                      <ul className="mt-2 space-y-1.5">
+                        {c.members.map((m) => (
+                          <li key={m.id} className="flex items-center gap-2.5 text-sm"><Avatar src={m.avatarUrl} size={26} /><span className="truncate text-stone">{m.name}</span></li>
+                        ))}
+                      </ul>
+                    </li>
+                  ))}
+                </ul>
               )}
             </Panel>
           </div>

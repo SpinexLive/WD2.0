@@ -18,16 +18,9 @@ export interface LandingVoiceChannel {
   name: string;
   members: { id: string; name: string; avatarUrl: string }[];
 }
-export interface LandingWidget {
-  name: string;
-  online: number;
-  invite: string | null;
-  members: { id: string; name: string; avatarUrl: string; status: string; game: string | null }[];
-}
 export interface LandingData {
   events: LandingEvent[] | null;
   voice: { channels: LandingVoiceChannel[]; total: number } | null;
-  widget: LandingWidget | null;
   news: NewsPost[] | null;
   server: { name: string | null; online: boolean | null; players: number | null; map: string | null } | null;
   memberCount: number | null;
@@ -77,36 +70,35 @@ async function serverStatus(): Promise<LandingData["server"]> {
 }
 
 interface RawWidget {
-  name?: string;
   instant_invite?: string | null;
-  presence_count?: number;
-  members?: { id?: string; username?: string; status?: string; avatar_url?: string; game?: { name?: string } }[];
+  channels?: { id: string; name: string; position?: number }[];
+  members?: { id?: string; username?: string; avatar_url?: string; channel_id?: string | null }[];
 }
 
-async function discordWidget(): Promise<LandingWidget> {
-  const { data } = await cached("landing:widget", 60_000, async () => {
+/** Active voice channels and their users, from Discord's public server widget. */
+async function widgetVoice(): Promise<{ voice: NonNullable<LandingData["voice"]>; invite: string | null }> {
+  const { data } = await cached("landing:widget", 30_000, async () => {
     const res = await fetch(`https://discord.com/api/guilds/${env().DISCORD_GUILD_ID}/widget.json`, { cache: "no-store", signal: AbortSignal.timeout(8000) });
     if (!res.ok) throw new Error(`widget ${res.status}`);
     return (await res.json()) as RawWidget;
   });
-  const members = (data.members ?? []).filter((m) => m.id && m.username).map((m) => ({
-    id: m.id!,
-    name: m.username!,
-    avatarUrl: m.avatar_url ?? "",
-    status: m.status ?? "online",
-    game: m.game?.name ?? null,
-  }));
-  return { name: data.name ?? "REMNANT", online: data.presence_count ?? members.length, invite: data.instant_invite ?? null, members };
+  const channels: LandingVoiceChannel[] = [];
+  for (const ch of [...(data.channels ?? [])].sort((a, b) => (a.position ?? 0) - (b.position ?? 0))) {
+    const members = (data.members ?? [])
+      .filter((m) => m.channel_id === ch.id && m.id && m.username)
+      .map((m) => ({ id: m.id!, name: m.username!, avatarUrl: m.avatar_url ?? "" }));
+    if (members.length) channels.push({ id: ch.id, name: ch.name, members });
+  }
+  return { voice: { channels, total: channels.reduce((n, c) => n + c.members.length, 0) }, invite: data.instant_invite ?? null };
 }
-
 export async function getLandingData(): Promise<LandingData> {
-  const [events, voice, widget, news, server, members] = await Promise.all([
+  const [events, widgetResult, news, server, members] = await Promise.all([
     safe(async () => upcomingEvents((await getEvents()).data)),
-    safe(voiceMembers),
-    safe(discordWidget),
+    safe(widgetVoice),
     safe(() => listNews(5)),
     safe(serverStatus),
     safe(() => getAllClanMembers()),
   ]);
-  return { events, voice, widget, news, server, memberCount: members ? members.data.length : null, inviteUrl: env().DISCORD_INVITE_URL ?? widget?.invite ?? null };
+  const voice = widgetResult?.voice ?? (await safe(voiceMembers));
+  return { events, voice, news, server, memberCount: members ? members.data.length : null, inviteUrl: env().DISCORD_INVITE_URL ?? widgetResult?.invite ?? null };
 }
