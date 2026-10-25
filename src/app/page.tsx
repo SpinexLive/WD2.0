@@ -5,9 +5,9 @@ import { getLandingData } from "@/server/services/landing";
 
 export const dynamic = "force-dynamic";
 export const metadata: Metadata = {
-  title: "REMNANT | Hell Let Loose Clan",
-  description: "A friendly, mature European gaming community built around Hell Let Loose and Wardogs. New members welcome.",
-  openGraph: { title: "REMNANT | Hell Let Loose Clan", description: "A friendly, mature European gaming community built around Hell Let Loose and Wardogs. New members welcome.", siteName: "REMNANT" },
+  title: "REMNANT | EU Competitive Gaming Community",
+  description: "REMNANT is a mature EU competitive gaming community. New members welcome.",
+  openGraph: { title: "REMNANT | EU Competitive Gaming Community", description: "REMNANT is a mature EU competitive gaming community. New members welcome.", siteName: "REMNANT" },
 };
 
 export default async function Home() {
