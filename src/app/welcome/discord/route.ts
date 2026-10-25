@@ -3,7 +3,7 @@ import { timingSafeEqual } from "node:crypto";
 import { query } from "@/lib/db";
 import { env } from "@/lib/env";
 import { createSession, sessionCookieOptions, SESSION_COOKIE, STATE_COOKIE } from "@/lib/session";
-import { exchangeCode, fetchOwnGuildMember, hasAuthorisedRole } from "@/server/services/discord";
+import { exchangeCode, fetchOwnGuildMember, hasAuthorisedRole, hasMemberRole } from "@/server/services/discord";
 import { audit } from "@/lib/audit";
 
 export const dynamic = "force-dynamic";
@@ -30,14 +30,14 @@ export async function GET(req: NextRequest) {
     const accessToken = await exchangeCode(code);
     const member = await fetchOwnGuildMember(accessToken);
     if (!member) return deny("not_in_guild");
-    if (!hasAuthorisedRole(member.roles)) {
+    if (!hasAuthorisedRole(member.roles) && !hasMemberRole(member.roles)) {
       await audit({ discordId: member.id, displayName: member.displayName }, "login.denied", "user", member.id);
       return deny("forbidden");
     }
     const { token, expires } = await createSession(member);
     await audit({ discordId: member.id, displayName: member.displayName }, "login", "user", member.id);
 
-    const res = NextResponse.redirect(new URL("/members", env().APP_URL));
+    const res = NextResponse.redirect(new URL(hasAuthorisedRole(member.roles) ? "/members" : "/me", env().APP_URL));
     res.cookies.set(SESSION_COOKIE, token, sessionCookieOptions(expires));
     res.cookies.delete({ name: STATE_COOKIE, path: "/" });
     return res;

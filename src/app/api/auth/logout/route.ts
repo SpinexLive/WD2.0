@@ -11,4 +11,4 @@ export const POST = protectedRoute(async ({ session }) => {
   const res = NextResponse.json({ ok: true });
   res.cookies.delete({ name: SESSION_COOKIE, path: "/" });
   return res;
-});
+}, { allowMember: true });

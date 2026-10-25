@@ -2,7 +2,7 @@ import { createHmac, randomBytes } from "node:crypto";
 import { cookies } from "next/headers";
 import { query } from "./db";
 import { env, isProduction } from "./env";
-import { fetchGuildMember, hasAuthorisedRole, type DiscordMember } from "@/server/services/discord";
+import { fetchGuildMember, hasAuthorisedRole, hasMemberRole, type DiscordMember } from "@/server/services/discord";
 import { ProviderError } from "./http";
 
 export const SESSION_COOKIE = isProduction ? "__Host-remnant_session" : "remnant_session";
@@ -20,6 +20,8 @@ export interface Session {
   displayName: string;
   avatarUrl: string;
   csrfToken: string;
+  /** Holds an authorised role: full dashboard. Otherwise a clan member who may only see their own stats. */
+  isAdmin: boolean;
 }
 
 const hashToken = (token: string) => createHmac("sha256", env().SESSION_SECRET).update(token).digest("hex");
@@ -47,6 +49,7 @@ interface Row {
   display_name: string;
   avatar_url: string;
   csrf_token: string;
+  roles: string[];
   stale_ms: number;
 }
 
@@ -55,7 +58,7 @@ export async function getSession(): Promise<Session | null> {
   if (!token || token.length > 128) return null;
   const id = hashToken(token);
   const [row] = await query<Row>(
-    `SELECT id, discord_id, username, display_name, avatar_url, csrf_token,
+    `SELECT id, discord_id, username, display_name, avatar_url, csrf_token, roles,
             (extract(epoch FROM now() - roles_checked_at) * 1000)::bigint::float8 AS stale_ms
        FROM sessions WHERE id = $1 AND expires_at > now()`,
     [id],
@@ -65,11 +68,12 @@ export async function getSession(): Promise<Session | null> {
   if (row.stale_ms > REVALIDATE_MS) {
     try {
       const member = await fetchGuildMember(row.discord_id);
-      if (!member || !hasAuthorisedRole(member.roles)) {
+      if (!member || !(hasAuthorisedRole(member.roles) || hasMemberRole(member.roles))) {
         await query("DELETE FROM sessions WHERE discord_id = $1", [row.discord_id]);
         return null;
       }
       await query("UPDATE sessions SET roles = $2, display_name = $3, avatar_url = $4, roles_checked_at = now() WHERE id = $1", [id, member.roles, member.displayName, member.avatarUrl]);
+      row.roles = member.roles;
       row.display_name = member.displayName;
       row.avatar_url = member.avatarUrl;
     } catch (err) {
@@ -77,7 +81,7 @@ export async function getSession(): Promise<Session | null> {
     }
   }
 
-  return { id, discordId: row.discord_id, username: row.username, displayName: row.display_name, avatarUrl: row.avatar_url, csrfToken: row.csrf_token };
+  return { id, discordId: row.discord_id, username: row.username, displayName: row.display_name, avatarUrl: row.avatar_url, csrfToken: row.csrf_token, isAdmin: hasAuthorisedRole(row.roles ?? []) };
 }
 
 export async function destroyCurrentSession(): Promise<void> {

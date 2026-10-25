@@ -53,6 +53,11 @@ export function hasAuthorisedRole(roles: string[]): boolean {
   return roles.some((r) => allowed.has(r));
 }
 
+/** Clan members (the Wardogs role) can sign in to see only their own stats. */
+export function hasMemberRole(roles: string[]): boolean {
+  return roles.includes(env().DISCORD_MEMBER_ROLE_ID);
+}
+
 // ---- OAuth2 (user token is used only during login and never stored) ----
 
 export function authorizeUrl(state: string): string {

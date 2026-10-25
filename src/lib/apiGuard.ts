@@ -14,6 +14,11 @@ export interface Ctx<P = Record<string, string>> {
 
 type Handler<P> = (ctx: Ctx<P>) => Promise<unknown>;
 
+export interface GuardOptions {
+  /** Let signed-in clan members (no authorised role) call this route. Everything else is staff-only. */
+  allowMember?: boolean;
+}
+
 export function errorResponse(err: unknown): NextResponse {
   if (err instanceof HttpError) {
     return NextResponse.json({ error: { message: err.message, code: err.code, ...err.extra } }, { status: err.status });
@@ -39,11 +44,12 @@ function safeEqual(a: string, b: string): boolean {
  * Wraps every protected API route: session check (which also re-validates the
  * Discord role periodically), CSRF + Origin checks for mutations, and rate limiting.
  */
-export function protectedRoute<P = Record<string, string>>(handler: Handler<P>) {
+export function protectedRoute<P = Record<string, string>>(handler: Handler<P>, options: GuardOptions = {}) {
   return async (req: NextRequest, routeCtx: { params: Promise<P> }): Promise<NextResponse> => {
     try {
       const session = await getSession();
       if (!session) throw new HttpError(401, "Not signed in or access revoked", "unauthenticated");
+      if (!session.isAdmin && !options.allowMember) throw new HttpError(403, "This area is for REMNANT staff only", "forbidden");
 
       const mutating = req.method !== "GET" && req.method !== "HEAD";
       if (mutating) {

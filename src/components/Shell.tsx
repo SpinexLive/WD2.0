@@ -13,9 +13,10 @@ const NAV: { href: string; label: string; logo?: string }[] = [
   { href: "/rosters", label: "Rosters", logo: "/images/icons/infantry.png" },
   { href: "/news", label: "News" },
 ];
+const ME_NAV: { href: string; label: string; logo?: string } = { href: "/me", label: "My stats" };
 const ADMIN_NAV: { href: string; label: string; logo?: string } = { href: "/admin", label: "Admin" };
 
-function Inner({ children, isOwner }: { children: React.ReactNode; isOwner: boolean }) {
+function Inner({ children, isOwner, isAdmin }: { children: React.ReactNode; isOwner: boolean; isAdmin: boolean }) {
   const { user, csrfToken } = useApp();
   const path = usePathname();
   const [open, setOpen] = useState(false);
@@ -27,7 +28,7 @@ function Inner({ children, isOwner }: { children: React.ReactNode; isOwner: bool
 
   const nav = (
     <nav className="flex flex-col gap-1 p-2 pt-3">
-      {(isOwner ? [...NAV, ADMIN_NAV] : NAV).map((n) => (
+      {(isAdmin ? [...NAV, ME_NAV, ...(isOwner ? [ADMIN_NAV] : [])] : [ME_NAV]).map((n) => (
         <Link key={n.href} href={n.href} onClick={() => setOpen(false)} className={`group relative rounded-lg px-3 py-2 text-[12px] font-bold uppercase tracking-[0.14em] transition ${path.startsWith(n.href) ? "bg-gradient-to-r from-blood-600/30 to-transparent text-stone before:absolute before:inset-y-1.5 before:left-0 before:w-[3px] before:rounded-full before:bg-blood-500" : "text-stone/55 hover:bg-ink-800/80 hover:text-stone"}`}>
           <span className="flex items-center gap-2"><Image src={n.logo ?? "/images/grey.png"} alt="" width={22} height={22} className="h-[22px] w-[22px] object-contain" />{n.label}</span>
         </Link>
@@ -65,10 +66,10 @@ function Inner({ children, isOwner }: { children: React.ReactNode; isOwner: bool
   );
 }
 
-export function Shell(props: { user: { id: string; displayName: string; username: string; avatarUrl: string }; csrfToken: string; isOwner?: boolean; children: React.ReactNode }) {
+export function Shell(props: { user: { id: string; displayName: string; username: string; avatarUrl: string }; csrfToken: string; isOwner?: boolean; isAdmin?: boolean; children: React.ReactNode }) {
   return (
     <AppProvider value={{ user: props.user, csrfToken: props.csrfToken }}>
-      <Inner isOwner={!!props.isOwner}>{props.children}</Inner>
+      <Inner isOwner={!!props.isOwner} isAdmin={props.isAdmin !== false}>{props.children}</Inner>
     </AppProvider>
   );
 }

@@ -3,7 +3,7 @@ import { buildRosterEmbeds, buildRosterMessages, embedSize, mentionContent, STAT
 import { movePlayer, resizeSquad, setLeader, findPlayer } from "@/lib/rosterOps";
 import { validateRoster } from "@/lib/rosterValidation";
 import { parseApplications, parseMembers, registrationStatus } from "@/server/services/wardogsLeague";
-import { botCanPost, hasAuthorisedRole } from "@/server/services/discord";
+import { botCanPost, hasAuthorisedRole, hasMemberRole } from "@/server/services/discord";
 import { parseEvent, parseSignups, formatTitle } from "@/server/services/raidHelper";
 import { saveSchema } from "@/server/services/rosters";
 import { upcomingEvents } from "@/server/services/landing";
@@ -28,6 +28,8 @@ describe("access roles", () => {
     expect(hasAuthorisedRole(["1546188874986950758"])).toBe(true);
     expect(hasAuthorisedRole(["1546184733174669424"])).toBe(false);
     expect(hasAuthorisedRole([])).toBe(false);
+    expect(hasMemberRole(["1546184733174669424"])).toBe(true);
+    expect(hasMemberRole(["1349704360816414762"])).toBe(false);
   });
 });
 

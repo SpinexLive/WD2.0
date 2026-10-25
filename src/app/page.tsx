@@ -8,5 +8,5 @@ export const metadata: Metadata = { title: "REMNANT", description: "REMNANT – 
 
 export default async function Home() {
   const [data, session] = await Promise.all([getLandingData(), getSession().catch(() => null)]);
-  return <Landing initial={data} signedIn={!!session} />;
+  return <Landing initial={data} signedIn={!!session} dashboardHref={session?.isAdmin ? "/members" : "/me"} />;
 }

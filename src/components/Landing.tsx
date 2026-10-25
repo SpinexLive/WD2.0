@@ -41,7 +41,7 @@ const Stat = ({ label, value }: { label: string; value: string }) => (
   </div>
 );
 
-export function Landing({ initial, signedIn }: { initial: LandingData; signedIn: boolean }) {
+export function Landing({ initial, signedIn, dashboardHref = "/members" }: { initial: LandingData; signedIn: boolean; dashboardHref?: string }) {
   const [data, setData] = useState(initial);
   const [now, setNow] = useState<number | null>(null);
 
@@ -65,7 +65,7 @@ export function Landing({ initial, signedIn }: { initial: LandingData; signedIn:
 
   const next = data.events?.[0];
   const cta = signedIn ? (
-    <a href="/members" className="btn-primary">Open dashboard</a>
+    <a href={dashboardHref} className="btn-primary">{dashboardHref === "/me" ? "My stats" : "Open dashboard"}</a>
   ) : (
     <a href="/login" className="btn-primary gap-2"><DiscordIcon />Sign in with Discord</a>
   );

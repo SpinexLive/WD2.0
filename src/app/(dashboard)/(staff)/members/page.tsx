@@ -5,7 +5,7 @@ import { useApi } from "@/lib/client";
 import Link from "next/link";
 import { Avatar, ErrorBanner, REG_LABEL, RegBadge, Skeleton, WarnBanner } from "@/components/ui";
 import MemberProfile from "@/components/MemberProfile";
-import "./members.css";
+import "@/components/members.css";
 
 type Reg = keyof typeof REG_LABEL;
 interface Source { fetchedAt: string | null; stale: boolean; error: string | null; available?: boolean }

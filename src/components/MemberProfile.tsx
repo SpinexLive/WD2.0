@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useApi } from "@/lib/client";
+import "./members.css";
 import { Avatar, ErrorBanner, RegBadge, REG_LABEL, Skeleton } from "@/components/ui";
 
 type Reg = keyof typeof REG_LABEL;
@@ -204,21 +205,25 @@ function Heatmap({ data }: { data: ProfileMatch[] }) {
   );
 }
 
-export default function MemberProfile({ member, registration, onClose }: { member: { id: string; displayName: string; avatarUrl: string }; registration: Reg; onClose: () => void }) {
+export default function MemberProfile({ member: memberProp, registration, onClose, endpoint }: { member?: { id: string; displayName: string; avatarUrl: string }; registration?: Reg; onClose?: () => void; endpoint?: string }) {
   const api = useApi();
   const [data, setData] = useState<Profile | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Without onClose this renders as a normal page (the signed-in user's own stats) instead of a popup.
+  const inline = !onClose;
+  const member = memberProp ?? data?.member ?? { id: "", displayName: "My stats", avatarUrl: "" };
+  const url = endpoint ?? `/api/members/${memberProp?.id ?? ""}`;
 
   const load = useCallback(
     async (refresh = false) => {
       try {
-        setData(await api<Profile>(`/api/members/${member.id}${refresh ? "?refresh=1" : ""}`));
+        setData(await api<Profile>(`${url}${refresh ? "?refresh=1" : ""}`));
         setError(null);
       } catch (e) {
         setError((e as Error).message);
       }
     },
-    [api, member.id],
+    [api, url],
   );
   useEffect(() => void load(), [load]);
 
@@ -231,6 +236,7 @@ export default function MemberProfile({ member, registration, onClose }: { membe
   }, [syncing, load]);
 
   useEffect(() => {
+    if (!onClose) return;
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
     window.addEventListener("keydown", onKey);
     const prev = document.body.style.overflow;
@@ -250,14 +256,14 @@ export default function MemberProfile({ member, registration, onClose }: { membe
   const s = data?.stats;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-ink-950/85 p-3 backdrop-blur-sm md:p-8" role="dialog" aria-modal="true" aria-label={`${member.displayName} profile`} onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-      <div className="m-modal card relative w-full max-w-6xl p-4 md:p-6">
+    <div className={inline ? "w-full" : "fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-ink-950/85 p-3 backdrop-blur-sm md:p-8"} {...(inline ? {} : { role: "dialog", "aria-modal": true, "aria-label": `${member.displayName} profile`, onMouseDown: (e: React.MouseEvent) => e.target === e.currentTarget && onClose?.() })}>
+      <div className={`m-modal card relative w-full p-4 md:p-6 ${inline ? "" : "max-w-6xl"}`}>
         <div className="flex flex-wrap items-center gap-4 border-b border-ink-700 pb-4">
           <Avatar src={member.avatarUrl} size={64} />
           <div className="min-w-0 flex-1">
             <h2 className="truncate text-2xl font-bold tracking-tight">{member.displayName}</h2>
             <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-stone/60">
-              <RegBadge status={registration} />
+              {registration && <RegBadge status={registration} />}
               {data?.steamId && <span className="font-mono">{data.steamId}</span>}
               {s?.name && <span>In game: <span className="text-stone/85">{s.name}</span></span>}
               {data?.rank && <span className="rounded border border-blood-500/60 bg-blood-600/20 px-1.5 py-0.5 font-semibold text-blood-300" title="All-time rank by kills on the Wardogs leaderboard">Server rank #{data.rank.rank}</span>}
@@ -265,7 +271,7 @@ export default function MemberProfile({ member, registration, onClose }: { membe
           </div>
           <div className="flex gap-2">
             <button className="btn-ghost" onClick={() => void load(true)}>Refresh</button>
-            <button className="btn-primary" onClick={onClose} aria-label="Close profile">Close</button>
+            {onClose && <button className="btn-primary" onClick={onClose} aria-label="Close profile">Close</button>}
           </div>
         </div>
 
@@ -275,7 +281,7 @@ export default function MemberProfile({ member, registration, onClose }: { membe
         {!data && !error ? (
           <div className="mt-4 space-y-3"><div className="grid grid-cols-2 gap-3 md:grid-cols-4 lg:grid-cols-5">{Array.from({ length: 7 }, (_, i) => <Skeleton key={i} className="h-20" />)}</div><Skeleton className="h-64" /></div>
         ) : data && !data.steamId ? (
-          <Empty>No Steam account is linked to this member in Wardogs, so there are no stats to show.</Empty>
+          <Empty>{inline ? "No Steam account is linked to your Discord in Wardogs yet, so there are no stats to show. Link your accounts with the Wardogs bot and check back." : "No Steam account is linked to this member in Wardogs, so there are no stats to show."}</Empty>
         ) : data ? (
           <div className="mt-4 space-y-4">
             <div className="grid grid-cols-2 gap-3 md:grid-cols-4 lg:grid-cols-5">
@@ -298,7 +304,7 @@ export default function MemberProfile({ member, registration, onClose }: { membe
                 </div>
                 <div className="grid gap-4 lg:grid-cols-2">
                   <Panel title="Map performance" sub="K/D"><MapBars data={chrono} /></Panel>
-                  <Panel title="When they play" sub="local time"><Heatmap data={chrono} /></Panel>
+                  <Panel title={inline ? "When you play" : "When they play"} sub="local time"><Heatmap data={chrono} /></Panel>
                 </div>
 
                 <Panel title="Match history" sub={`${data.matches.length} matches`}>

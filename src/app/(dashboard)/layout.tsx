@@ -9,7 +9,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
   const session = await getSession();
   if (!session) redirect("/login");
   return (
-    <Shell user={{ id: session.discordId, displayName: session.displayName, username: session.username, avatarUrl: session.avatarUrl }} csrfToken={session.csrfToken} isOwner={isOwner(session)}>
+    <Shell user={{ id: session.discordId, displayName: session.displayName, username: session.username, avatarUrl: session.avatarUrl }} csrfToken={session.csrfToken} isAdmin={session.isAdmin} isOwner={session.isAdmin && isOwner(session)}>
       {children}
     </Shell>
   );
