@@ -1,0 +1,117 @@
+.login-bg {
+  position: absolute;
+  inset: -4%;
+  background: url(/images/background.png) center / cover no-repeat;
+  animation: login-drift 40s ease-in-out infinite alternate;
+}
+.login-vignette {
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(ellipse at center, rgba(12, 13, 15, 0.35) 0%, rgba(12, 13, 15, 0.85) 100%);
+}
+.login-grain {
+  position: absolute;
+  inset: 0;
+  opacity: 0.07;
+  mix-blend-mode: overlay;
+  background-image: repeating-linear-gradient(0deg, #fff 0 1px, transparent 1px 3px);
+  animation: login-flicker 6s steps(2) infinite;
+}
+.login-embers {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+.login-embers i {
+  position: absolute;
+  bottom: -12px;
+  left: var(--x);
+  width: var(--s);
+  height: var(--s);
+  border-radius: 9999px;
+  background: #c4495a;
+  box-shadow: 0 0 8px 2px rgba(158, 48, 60, 0.7);
+  opacity: 0;
+  animation: login-rise var(--d) linear var(--delay) infinite;
+}
+
+.login-card {
+  animation: login-enter 0.8s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+
+.login-logo {
+  animation: login-breathe 5s ease-in-out infinite;
+  filter: drop-shadow(0 0 14px rgba(158, 48, 60, 0.55));
+}
+.login-title {
+  text-shadow: 0 0 18px rgba(158, 48, 60, 0.6);
+}
+.login-divider {
+  position: relative;
+  overflow: hidden;
+}
+.login-divider::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, transparent, #e8e6e1, transparent);
+  transform: translateX(-100%);
+  animation: login-sweep 3s ease-in-out infinite;
+}
+
+.login-btn {
+  position: relative;
+  overflow: hidden;
+}
+.login-btn::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 40%;
+  left: -60%;
+  background: linear-gradient(100deg, transparent, rgba(232, 230, 225, 0.35), transparent);
+  transform: skewX(-20deg);
+  animation: login-sheen 4.5s ease-in-out 1.5s infinite;
+}
+.login-btn:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 24px rgba(158, 48, 60, 0.55);
+}
+
+@keyframes login-drift {
+  from { transform: scale(1) translate(0, 0); }
+  to { transform: scale(1.08) translate(-1.5%, 1%); }
+}
+@keyframes login-flicker {
+  0% { transform: translateY(0); }
+  100% { transform: translateY(3px); }
+}
+@keyframes login-rise {
+  0% { transform: translateY(0) translateX(0); opacity: 0; }
+  10% { opacity: 0.9; }
+  100% { transform: translateY(-105vh) translateX(40px); opacity: 0; }
+}
+@keyframes login-enter {
+  from { opacity: 0; transform: translateY(16px) scale(0.98); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes login-breathe {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.05); }
+}
+@keyframes login-sweep {
+  to { transform: translateX(100%); }
+}
+@keyframes login-sheen {
+  0%, 60% { left: -60%; }
+  100% { left: 130%; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .login-bg, .login-grain, .login-embers i, .login-card, .login-logo, .login-divider::after, .login-btn::after {
+    animation: none;
+  }
+  .login-embers { display: none; }
+}
