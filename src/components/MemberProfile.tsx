@@ -235,6 +235,19 @@ export default function MemberProfile({ member: memberProp, registration, onClos
     return () => clearInterval(t);
   }, [syncing, load]);
 
+  // Unlinked members: re-check when they come back from the link page.
+  const needsLink = inline && !!data && !data.steamId;
+  useEffect(() => {
+    if (!needsLink) return;
+    const onFocus = () => void load(true);
+    window.addEventListener("focus", onFocus);
+    const t = setInterval(() => void load(true), 15000);
+    return () => {
+      window.removeEventListener("focus", onFocus);
+      clearInterval(t);
+    };
+  }, [needsLink, load]);
+
   useEffect(() => {
     if (!onClose) return;
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
@@ -281,7 +294,26 @@ export default function MemberProfile({ member: memberProp, registration, onClos
         {!data && !error ? (
           <div className="mt-4 space-y-3"><div className="grid grid-cols-2 gap-3 md:grid-cols-4 lg:grid-cols-5">{Array.from({ length: 7 }, (_, i) => <Skeleton key={i} className="h-20" />)}</div><Skeleton className="h-64" /></div>
         ) : data && !data.steamId ? (
-          <Empty>{inline ? "No Steam account is linked to your Discord in Wardogs yet, so there are no stats to show. Link your accounts with the Wardogs bot and check back." : "No Steam account is linked to this member in Wardogs, so there are no stats to show."}</Empty>
+          inline ? (
+            <div className="mx-auto mt-6 max-w-xl rounded-xl border border-red-900/60 bg-neutral-900 p-6 text-center">
+              <h2 className="text-lg font-semibold text-white">Link your Steam account</h2>
+              <p className="mt-2 text-sm text-neutral-400">
+                We couldn&apos;t find a Steam account linked to your Discord in Wardogs, so there are no stats to show yet. Link it once with Wardogs and your stats will appear here automatically.
+              </p>
+              <a
+                href="https://wardogsbot.com/link/1332320879073296404"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="mt-5 inline-block rounded-lg bg-red-700 px-5 py-2.5 text-sm font-semibold text-white hover:bg-red-600"
+              >
+                Link my account
+              </a>
+              <p className="mt-3 text-xs text-neutral-500">Opens in a new tab. This page updates when you return.</p>
+              <button className="btn-ghost mt-3" onClick={() => void load(true)}>I&apos;ve linked it — check again</button>
+            </div>
+          ) : (
+            <Empty>No Steam account is linked to this member in Wardogs, so there are no stats to show.</Empty>
+          )
         ) : data ? (
           <div className="mt-4 space-y-4">
             <div className="grid grid-cols-2 gap-3 md:grid-cols-4 lg:grid-cols-5">
