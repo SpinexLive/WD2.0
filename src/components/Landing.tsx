@@ -8,6 +8,8 @@ import "@/app/login/login.css";
 
 const DISCORD_ICON = "M20.317 4.37a19.79 19.79 0 0 0-4.885-1.515.074.074 0 0 0-.079.037c-.21.375-.444.864-.608 1.25a18.27 18.27 0 0 0-5.487 0 12.64 12.64 0 0 0-.617-1.25.077.077 0 0 0-.079-.037A19.74 19.74 0 0 0 3.677 4.37a.07.07 0 0 0-.032.027C.533 9.046-.32 13.58.099 18.057a.082.082 0 0 0 .031.057 19.9 19.9 0 0 0 5.993 3.03.078.078 0 0 0 .084-.028 14.09 14.09 0 0 0 1.226-1.994.076.076 0 0 0-.041-.106 13.1 13.1 0 0 1-1.872-.892.077.077 0 0 1-.008-.128c.126-.094.252-.192.372-.292a.074.074 0 0 1 .077-.01c3.928 1.793 8.18 1.793 12.062 0a.074.074 0 0 1 .078.01c.12.1.246.198.373.292a.077.077 0 0 1-.006.127 12.3 12.3 0 0 1-1.873.892.077.077 0 0 0-.041.107c.36.698.772 1.362 1.225 1.993a.076.076 0 0 0 .084.028 19.84 19.84 0 0 0 6.002-3.03.077.077 0 0 0 .032-.054c.5-5.177-.838-9.674-3.549-13.66a.061.061 0 0 0-.031-.03zM8.02 15.33c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.956-2.419 2.157-2.419 1.21 0 2.176 1.095 2.157 2.42 0 1.333-.956 2.418-2.157 2.418zm7.975 0c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.955-2.419 2.157-2.419 1.21 0 2.176 1.095 2.157 2.42 0 1.333-.946 2.418-2.157 2.418z";
 
+const APPLY_URL = "https://discord.com/channels/1332320879073296404/1354713645975601242";
+
 const DiscordIcon = () => (
   <svg aria-hidden="true" viewBox="0 0 24 24" className="h-5 w-5 fill-current"><path d={DISCORD_ICON} /></svg>
 );
@@ -87,7 +89,7 @@ export function Landing({ initial, signedIn }: { initial: LandingData; signedIn:
           <Image src="/images/icon.png" alt="REMNANT" width={120} height={120} className="login-logo mx-auto" priority />
           <h1 className="login-title mt-3 text-4xl font-bold tracking-[0.35em] text-stone md:text-5xl">REMNANT</h1>
           <div className="login-divider mx-auto mt-4 h-0.5 w-20 bg-blood-600" />
-          <p className="mx-auto mt-4 max-w-xl text-sm text-stone/70">A Hell Let Loose clan. Organised events, competitive matches and a community that shows up.</p>
+          <p className="mx-auto mt-4 max-w-xl text-sm text-stone/70">A Hell Let Loose clan. Mature, EU-wide, with weekly events and weekend matches.</p>
           <div className="mt-6 flex flex-wrap items-center justify-center gap-3">
             {cta}
             {data.inviteUrl && <a href={data.inviteUrl} target="_blank" rel="noopener noreferrer" className="btn-ghost">Join our Discord</a>}
@@ -189,8 +191,17 @@ export function Landing({ initial, signedIn }: { initial: LandingData; signedIn:
             </Panel>
 
             <Panel title="About">
-              <p className="text-sm text-stone/70">REMNANT plays Hell Let Loose together: weekly events, scrims and Wardogs League matches. Join the Discord, sign up through Raid Helper and turn up ready to play.</p>
-              {data.inviteUrl && <a href={data.inviteUrl} target="_blank" rel="noopener noreferrer" className="btn-primary mt-3 w-full">Join our Discord</a>}
+              <p className="text-sm text-stone/75">REMNANT is a mature Hell Let Loose community, built from groups of players from many different communities who came together. We take the game seriously and the company easy. Members are from all over the EU.</p>
+              <ul className="mt-3 space-y-1.5 text-sm text-stone/75">
+                <li className="flex gap-2"><span className="text-blood-400">▸</span><span><strong className="text-stone">Weekly events:</strong> every Tuesday and Thursday.</span></li>
+                <li className="flex gap-2"><span className="text-blood-400">▸</span><span><strong className="text-stone">Matches:</strong> Saturday and Sunday evenings.</span></li>
+                <li className="flex gap-2"><span className="text-blood-400">▸</span><span><strong className="text-stone">Wardogs League:</strong> we play competitive matches as a clan.</span></li>
+              </ul>
+              <p className="mt-3 text-sm text-stone/75">Join the Discord, sign up to events through Raid Helper and apply to become a member.</p>
+              <div className="mt-3 flex flex-col gap-2">
+                <a href={APPLY_URL} target="_blank" rel="noopener noreferrer" className="btn-primary w-full">Apply to join</a>
+                {data.inviteUrl && <a href={data.inviteUrl} target="_blank" rel="noopener noreferrer" className="btn-ghost w-full">Join our Discord</a>}
+              </div>
             </Panel>
           </div>
         </div>
