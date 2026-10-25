@@ -216,7 +216,8 @@ export function Landing({ initial, signedIn }: { initial: LandingData; signedIn:
       </main>
 
       <footer className="relative z-10 border-t border-ink-700/70 py-5 text-center text-xs text-stone/45">
-        © 2026 REMNANT. All rights reserved.
+        <a href="/privacy" className="hover:text-stone">Privacy Policy</a> · <a href="/terms" className="hover:text-stone">Terms &amp; Conditions</a>
+        <div className="mt-1">© 2026 REMNANT. All rights reserved.</div>
       </footer>
     </div>
   );
