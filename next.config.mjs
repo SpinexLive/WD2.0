@@ -8,6 +8,7 @@ const securityHeaders = [
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   poweredByHeader: false,
+  output: "standalone",
   serverExternalPackages: ["discord.js", "@discordjs/ws"],
   images: { remotePatterns: [{ protocol: "https", hostname: "cdn.discordapp.com" }] },
   async headers() {
