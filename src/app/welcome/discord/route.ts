@@ -10,7 +10,7 @@ export const dynamic = "force-dynamic";
 
 function deny(reason: string) {
   const res = NextResponse.redirect(new URL(`/login?error=${reason}`, env().APP_URL));
-  res.cookies.delete({ name: STATE_COOKIE, path: "/api/auth" });
+  res.cookies.delete({ name: STATE_COOKIE, path: "/" });
   return res;
 }
 
@@ -39,7 +39,7 @@ export async function GET(req: NextRequest) {
 
     const res = NextResponse.redirect(new URL("/members", env().APP_URL));
     res.cookies.set(SESSION_COOKIE, token, sessionCookieOptions(expires));
-    res.cookies.delete({ name: STATE_COOKIE, path: "/api/auth" });
+    res.cookies.delete({ name: STATE_COOKIE, path: "/" });
     return res;
   } catch (err) {
     console.error("Discord login failed:", (err as Error).message);

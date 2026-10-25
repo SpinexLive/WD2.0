@@ -30,7 +30,7 @@ npm run dev                   # or: npm run build && npm start
 `npm run migrate` reads `DATABASE_URL` from the process environment, e.g. `DATABASE_URL=postgres://... npm run migrate` (PowerShell: `$env:DATABASE_URL="..."; npm run migrate`). Requires PostgreSQL 13+.
 
 Discord developer portal:
-1. OAuth2 → Redirects: add `${APP_URL}/api/auth/callback`.
+1. OAuth2 → Redirects: add `${APP_URL}/welcome/discord`.
 2. Scopes used: `identify guilds.members.read`.
 3. Bot → enable **Server Members Intent**.
 
@@ -67,7 +67,7 @@ Runs the app, Postgres and Caddy (automatic HTTPS). Migrations are applied on ev
 1. Point a hostname (DNS A record, or `<ip-with-dashes>.sslip.io`) at the server and open ports 80/443.
 2. `cp .env.example .env`, fill in the secrets, and set `DOMAIN` (no scheme) and `POSTGRES_PASSWORD`. `APP_URL` and `DATABASE_URL` are set by compose.
 3. `docker compose up -d --build`, then `docker compose logs -f app` (look for "roster gateway connected").
-4. In the Discord Developer Portal set the OAuth redirect to `https://<DOMAIN>/api/auth/callback` and the Interactions Endpoint URL to `https://<DOMAIN>/api/discord/interactions`.
+4. In the Discord Developer Portal set the OAuth redirect to `https://<DOMAIN>/welcome/discord` and the Interactions Endpoint URL to `https://<DOMAIN>/api/discord/interactions`.
 
 Update with `git pull; docker compose up -d --build`. Back up with `docker compose exec -T postgres pg_dump -U remnant remnant > backup.sql`.
 ## Landing page

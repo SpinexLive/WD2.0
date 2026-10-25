@@ -20,7 +20,7 @@ export async function GET(req: NextRequest) {
     await query("INSERT INTO oauth_states (state) VALUES ($1)", [state]);
 
     const res = NextResponse.redirect(authorizeUrl(state));
-    res.cookies.set(STATE_COOKIE, state, { httpOnly: true, secure: isProduction, sameSite: "lax", path: "/api/auth", maxAge: 600 });
+    res.cookies.set(STATE_COOKIE, state, { httpOnly: true, secure: isProduction, sameSite: "lax", path: "/", maxAge: 600 });
     return res;
   } catch (err) {
     return errorResponse(err);

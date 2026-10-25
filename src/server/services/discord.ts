@@ -58,7 +58,7 @@ export function hasAuthorisedRole(roles: string[]): boolean {
 export function authorizeUrl(state: string): string {
   const p = new URLSearchParams({
     client_id: env().DISCORD_CLIENT_ID,
-    redirect_uri: `${env().APP_URL}/api/auth/callback`,
+    redirect_uri: `${env().APP_URL}/welcome/discord`,
     response_type: "code",
     scope: "identify guilds.members.read",
     state,
@@ -76,7 +76,7 @@ export async function exchangeCode(code: string): Promise<string> {
       client_secret: env().DISCORD_CLIENT_SECRET,
       grant_type: "authorization_code",
       code,
-      redirect_uri: `${env().APP_URL}/api/auth/callback`,
+      redirect_uri: `${env().APP_URL}/welcome/discord`,
     }),
     signal: AbortSignal.timeout(10_000),
   });
