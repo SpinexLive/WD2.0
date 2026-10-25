@@ -94,7 +94,7 @@ export function Landing({ initial, signedIn }: { initial: LandingData; signedIn:
           <div className="grid gap-6 p-5 md:p-7 lg:grid-cols-3">
             <div className="lg:col-span-2">
               <h1 className="text-2xl font-extrabold text-stone md:text-3xl">About Us</h1>
-              <p className="mt-3 text-sm leading-relaxed text-stone/75">Remant is a gaming community with Hell Let Loose and Wardogs at its heart, but we're not just about one game. We're a friendly, mature bunch from all over Europe who like good company and good games. We ask for the basics: be active, hop on the mic and look out for each other. New members are always welcome, whether you've played for years or only just landed.</p>              <p className="mt-3 text-sm leading-relaxed text-stone/75">Join the Discord, sign up to events through Raid Helper and apply to become a member.</p>
+              <p className="mt-3 text-sm leading-relaxed text-stone/75">Remant is a gaming community with Hell Let Loose and Wardogs at its heart, but we're not just about one game. We're a friendly, mature bunch from all over Europe who like good company and good games. We ask for the basics: be active, hop on the mic and look out for each other. New members are always welcome, whether you've played for years or only just landed.</p>              <p className="mt-3 text-sm leading-relaxed text-stone/75">Join us on Discord and apply to become a member.</p>
               <div className="mt-4"><a href={data.inviteUrl ?? APPLY_URL} target="_blank" rel="noopener noreferrer" className="btn-primary">Apply to join</a></div>
             </div>
             <ul className="space-y-3 text-sm text-stone/75">
