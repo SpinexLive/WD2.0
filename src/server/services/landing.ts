@@ -76,5 +76,6 @@ export async function getLandingData(): Promise<LandingData> {
     safe(() => listNews(5)),
     safe(serverStatus),
     safe(() => getAllClanMembers()),
+  ]);
   return { events, voice, news, server, memberCount: members ? members.data.length : null, inviteUrl: env().DISCORD_INVITE_URL ?? null };
 }
