@@ -19,6 +19,9 @@ const NAV: { href: string; label: string; logo?: string }[] = [
 const TODAY_NAV: { href: string; label: string; logo?: string } = { href: "/today", label: "Today", logo: "/images/icons/accept.png" };
 const ME_NAV: { href: string; label: string; logo?: string } = { href: "/me", label: "My stats" };
 const BOARD_NAV: { href: string; label: string; logo?: string } = { href: "/leaderboard", label: "Leaderboard" };
+const OBSERVE_NAV: { href: string; label: string; logo?: string } = { href: "/observe", label: "Observations" };
+const SCOUT_NAV: { href: string; label: string; logo?: string } = { href: "/scouting", label: "Scouting" };
+const SETUP_NAV: { href: string; label: string; logo?: string } = { href: "/feedback-setup", label: "Feedback setup" };
 const ADMIN_NAV: { href: string; label: string; logo?: string } = { href: "/admin", label: "Admin" };
 const STAFF_TABS = [TODAY_NAV, NAV[2]!, NAV[3]!, BOARD_NAV];
 const MEMBER_TABS = [TODAY_NAV, ME_NAV, BOARD_NAV];
@@ -65,7 +68,7 @@ function ViewAsPicker({ csrfToken }: { csrfToken: string }) {
   );
 }
 
-function Inner({ children, isOwner, isAdmin, canViewAs, viewingAs }: { children: React.ReactNode; isOwner: boolean; isAdmin: boolean; canViewAs: boolean; viewingAs: string | null }) {
+function Inner({ children, isOwner, isAdmin, isReviewer, canViewAs, viewingAs }: { children: React.ReactNode; isOwner: boolean; isAdmin: boolean; isReviewer: boolean; canViewAs: boolean; viewingAs: string | null }) {
   const { user, csrfToken } = useApp();
   const path = usePathname();
   const [open, setOpen] = useState(false);
@@ -82,7 +85,7 @@ function Inner({ children, isOwner, isAdmin, canViewAs, viewingAs }: { children:
 
   const nav = (
     <nav className="flex flex-col gap-1 p-2 pt-3">
-      {(isAdmin ? [TODAY_NAV, ...NAV, BOARD_NAV, ME_NAV, ...(isOwner ? [ADMIN_NAV] : [])] : [TODAY_NAV, ME_NAV, BOARD_NAV]).map((n) => (
+      {(isAdmin ? [TODAY_NAV, ...NAV, SETUP_NAV, BOARD_NAV, OBSERVE_NAV, ...(isReviewer ? [SCOUT_NAV] : []), ME_NAV, ...(isOwner ? [ADMIN_NAV] : [])] : [TODAY_NAV, ME_NAV, BOARD_NAV, OBSERVE_NAV, ...(isReviewer ? [SCOUT_NAV] : [])]).map((n) => (
         <Link key={n.href} href={n.href} onClick={() => setOpen(false)} className={`group relative rounded-lg px-3 py-2 text-[12px] font-bold uppercase tracking-[0.14em] transition ${path.startsWith(n.href) ? "bg-gradient-to-r from-blood-600/30 to-transparent text-stone before:absolute before:inset-y-1.5 before:left-0 before:w-[3px] before:rounded-full before:bg-blood-500" : "text-stone/55 hover:bg-ink-800/80 hover:text-stone"}`}>
           <span className="flex items-center gap-2"><Image src={n.logo ?? "/images/grey.png"} alt="" width={22} height={22} className="h-[22px] w-[22px] object-contain" />{n.label}</span>
         </Link>
@@ -143,10 +146,10 @@ function Inner({ children, isOwner, isAdmin, canViewAs, viewingAs }: { children:
   );
 }
 
-export function Shell(props: { user: { id: string; displayName: string; username: string; avatarUrl: string }; csrfToken: string; isOwner?: boolean; isAdmin?: boolean; canViewAs?: boolean; viewingAs?: string | null; children: React.ReactNode }) {
+export function Shell(props: { user: { id: string; displayName: string; username: string; avatarUrl: string }; csrfToken: string; isOwner?: boolean; isAdmin?: boolean; isReviewer?: boolean; canViewAs?: boolean; viewingAs?: string | null; children: React.ReactNode }) {
   return (
     <AppProvider value={{ user: props.user, csrfToken: props.csrfToken }}>
-      <Inner isOwner={!!props.isOwner} isAdmin={props.isAdmin !== false} canViewAs={!!props.canViewAs} viewingAs={props.viewingAs ?? null}>{props.children}</Inner>
+      <Inner isOwner={!!props.isOwner} isAdmin={props.isAdmin !== false} isReviewer={!!props.isReviewer} canViewAs={!!props.canViewAs} viewingAs={props.viewingAs ?? null}>{props.children}</Inner>
     </AppProvider>
   );
 }

@@ -23,6 +23,8 @@ export interface Session {
   csrfToken: string;
   /** Holds an authorised role: full dashboard. Otherwise a clan member who may only see their own stats. */
   isAdmin: boolean;
+  /** Holds the scouting reviewer role. */
+  isReviewer: boolean;
   /** Set while a staff member is previewing the dashboard as this member (read-only). */
   viewingAs?: { adminId: string; adminName: string };
 }
@@ -84,7 +86,7 @@ async function getRealSession(): Promise<Session | null> {
     }
   }
 
-  return { id, discordId: row.discord_id, username: row.username, displayName: row.display_name, avatarUrl: row.avatar_url, csrfToken: row.csrf_token, isAdmin: hasAuthorisedRole(row.roles ?? []) };
+  return { id, discordId: row.discord_id, username: row.username, displayName: row.display_name, avatarUrl: row.avatar_url, csrfToken: row.csrf_token, isAdmin: hasAuthorisedRole(row.roles ?? []), isReviewer: (row.roles ?? []).includes(env().DISCORD_REVIEWER_ROLE_ID) };
 }
 
 /**
@@ -99,7 +101,7 @@ export async function getSession(): Promise<Session | null> {
   const members = await getAllClanMembers().then((s) => s.data, () => []);
   const m = members.find((x) => x.id === target);
   if (!m) return real;
-  return { ...real, discordId: m.id, username: m.username, displayName: m.displayName, avatarUrl: m.avatarUrl, isAdmin: false, viewingAs: { adminId: real.discordId, adminName: real.displayName } };
+  return { ...real, discordId: m.id, username: m.username, displayName: m.displayName, avatarUrl: m.avatarUrl, isAdmin: false, isReviewer: false, viewingAs: { adminId: real.discordId, adminName: real.displayName } };
 }
 
 /** The signed-in person regardless of any "view as" choice. */

@@ -1,4 +1,4 @@
-export type Provider = "discord" | "wardogs-league" | "raid-helper" | "wardogs-rcon" | "game-rcon";
+export type Provider = "discord" | "wardogs-league" | "raid-helper" | "wardogs-rcon" | "game-rcon" | "ai";
 
 export class ProviderError extends Error {
   constructor(

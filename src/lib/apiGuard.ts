@@ -19,6 +19,8 @@ export interface GuardOptions {
   allowMember?: boolean;
   /** Mutations are refused while a staff member is previewing as someone else, unless the route opts in. */
   allowWhileViewing?: boolean;
+  /** Only holders of the scouting reviewer role (staff status doesn't matter). */
+  reviewerOnly?: boolean;
 }
 
 export function errorResponse(err: unknown): NextResponse {
@@ -51,7 +53,9 @@ export function protectedRoute<P = Record<string, string>>(handler: Handler<P>, 
     try {
       const session = await getSession();
       if (!session) throw new HttpError(401, "Not signed in or access revoked", "unauthenticated");
-      if (!session.isAdmin && !options.allowMember) throw new HttpError(403, "This area is for REMNANT staff only", "forbidden");
+      if (options.reviewerOnly) {
+        if (!session.isReviewer) throw new HttpError(403, "Scouting feedback is limited to the reviewer role", "forbidden");
+      } else if (!session.isAdmin && !options.allowMember) throw new HttpError(403, "This area is for REMNANT staff only", "forbidden");
 
       const mutating = req.method !== "GET" && req.method !== "HEAD";
       if (mutating) {
