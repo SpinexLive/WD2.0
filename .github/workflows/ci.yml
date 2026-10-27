@@ -1,0 +1,29 @@
+name: CI
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npx tsc --noEmit
+      - run: npm test
+      - run: npm run build
+        env:
+          DISCORD_CLIENT_ID: "1"
+          DISCORD_CLIENT_SECRET: ci
+          DISCORD_BOT_TOKEN: ci
+          RAID_HELPER_API_TOKEN: ci
+          WARDOGS_API_KEY: ci
+          TOURNAMENT_API_KEY: ci
+          DATABASE_URL: postgres://ci:ci@localhost:5432/ci
+          SESSION_SECRET: ci-ci-ci-ci-ci-ci-ci-ci-ci-ci-ci-ci-ci-ci
+          APP_URL: http://localhost:3000

@@ -8,9 +8,9 @@ const RATE_LIMIT_WAIT_MS = 20_000;
 const MAX_RATE_LIMIT_WAITS = 6;
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-interface SyncState { running: Promise<void> | null; lastRunAt: number; pending: number; lastError: string | null; incomplete: boolean }
+interface SyncState { running: Promise<void> | null; lastRunAt: number; pending: number; lastError: string | null; incomplete: boolean; failed: boolean }
 const g = globalThis as unknown as { __matchSync?: SyncState };
-const state = (): SyncState => (g.__matchSync ??= { running: null, lastRunAt: 0, pending: 0, lastError: null, incomplete: false });
+const state = (): SyncState => (g.__matchSync ??= { running: null, lastRunAt: 0, pending: 0, lastError: null, incomplete: false, failed: false });
 
 async function storeMatch(id: number, m: Awaited<ReturnType<typeof getMatches>>["data"][number]) {
   const players = await getMatchPlayers(id);
@@ -71,7 +71,9 @@ async function run(force: boolean) {
     s.pending = left;
     s.incomplete = left > 0;
     s.lastError = left ? `${left} match${left === 1 ? "" : "es"} still to read; syncing resumes automatically` : null;
+    s.failed = false;
   } catch (err) {
+    s.failed = true;
     s.incomplete = true;
     s.lastError = (err as Error).message;
   } finally {
@@ -89,7 +91,7 @@ export function kickMatchSync(force = false): void {
 
 export const matchSyncStatus = () => {
   const s = state();
-  return { syncing: s.running !== null, pending: Math.max(s.pending, 0), error: s.lastError };
+  return { syncing: s.running !== null, pending: Math.max(s.pending, 0), error: s.lastError, failed: s.failed, lastRunAt: s.lastRunAt };
 };
 
 export interface ProfileMatch {
@@ -143,6 +145,25 @@ export async function getPlayerMatches(steamId: string): Promise<ProfileMatch[]>
       durationS: r.duration_s,
       cash: r.cash === null ? null : Number(r.cash),
     };
+  });
+}
+
+/** Per-player totals from stored matches inside a range (days, or null for all time), for the given Steam IDs. Rank is filled in by the caller. */
+export async function getStoredTotals(steamIds: string[], days: number | null): Promise<import("@/server/services/wardogsRcon").LeaderboardRow[]> {
+  if (steamIds.length === 0) return [];
+  const rows = await query<{ steam_id: string; name: string | null; matches: string; kills: string; deaths: string; cash: string | null }>(
+    `SELECT mp.steam_id, (array_agg(mp.name ORDER BY m.ended_at DESC NULLS LAST))[1] AS name,
+            count(*) AS matches, sum(mp.kills) AS kills, sum(mp.deaths) AS deaths, sum(mp.cash) AS cash
+       FROM match_players mp JOIN matches m ON m.id = mp.match_id
+      WHERE mp.steam_id = ANY($1::text[]) AND lower(COALESCE(mp.faction, '')) <> 'white' AND (mp.kills > 0 OR mp.deaths > 0) AND COALESCE(m.peak_players, 0) >= 80
+        AND ($2::int IS NULL OR m.ended_at >= now() - make_interval(days => $2::int))
+      GROUP BY mp.steam_id`,
+    [steamIds, days],
+  );
+  return rows.map((r) => {
+    const kills = Number(r.kills);
+    const deaths = Number(r.deaths);
+    return { rank: 0, steamId: r.steam_id, name: r.name, kills, deaths, kd: deaths === 0 ? kills : Math.round((kills / deaths) * 100) / 100, matches: Number(r.matches), cash: r.cash === null ? null : Number(r.cash) };
   });
 }
 

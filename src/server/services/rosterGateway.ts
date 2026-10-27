@@ -6,6 +6,8 @@ import { handleRosterButton } from "./rosterResponses";
 
 const g = globalThis as unknown as { __rosterGateway?: Client };
 
+export const gatewayReady = () => g.__rosterGateway?.isReady() ?? false;
+
 async function onButton(i: DjsButton) {
   if (!i.customId.startsWith(`${BUTTON_PREFIX}:`)) return;
   try {

@@ -70,7 +70,14 @@ Runs the app, Postgres and Caddy (automatic HTTPS). Migrations are applied on ev
 3. `docker compose up -d --build`, then `docker compose logs -f app` (look for "roster gateway connected").
 4. In the Discord Developer Portal set the OAuth redirect to `https://<DOMAIN>/welcome/discord` and the Interactions Endpoint URL to `https://<DOMAIN>/api/discord/interactions`.
 
-Update with `git pull; docker compose up -d --build`. Back up with `docker compose exec -T postgres pg_dump -U remnant remnant > backup.sql`.
+Update with `git pull; docker compose up -d --build`.
+
+**Backups:** the `backup` service writes a compressed dump to `./backups/` every 24 hours and keeps 14 days. Restore with `docker compose exec -T postgres pg_restore -U remnant -d remnant --clean --if-exists < backups/<file>.dump`. Copy the folder off the server occasionally.
+
+**Monitoring:** the owner-only Admin > Status tab shows the health of the database, Discord, the bot connection, Raid Helper, Wardogs RCON, Wardogs League, match sync and the gold channel. Set `ALERT_CHANNEL_ID` (optional) to get a Discord message when one fails for an hour and when it recovers.
+
+**CI:** `.github/workflows/ci.yml` runs typecheck, tests and a production build on every push.
+
 ## Landing page
 
 `/` is a public landing page (sign-in button, upcoming Raid Helper events with countdowns, who is in Discord voice, news, game server status, clan stats). It reads from `/api/public/landing` (read-only, rate limited per IP). Voice presence comes from the Discord gateway listener (`GuildVoiceStates` intent, no privileged intents needed). News is managed on the dashboard's News page. Set `DISCORD_INVITE_URL` to show a "Join our Discord" button.

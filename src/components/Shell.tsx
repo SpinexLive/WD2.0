@@ -12,6 +12,7 @@ const NAV: { href: string; label: string; logo?: string }[] = [
   { href: "/wdl", label: "WDL", logo: "/images/WDL.webp" },
   { href: "/rosters", label: "Rosters", logo: "/images/icons/infantry.png" },
   { href: "/briefing", label: "Briefing" },
+  { href: "/attendance", label: "Attendance" },
   { href: "/recruit", label: "Recruit" },
   { href: "/news", label: "News" },
 ];

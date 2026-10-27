@@ -60,7 +60,7 @@ export default function LeaderboardClient() {
           <button className="btn-ghost" onClick={() => void load(true)}>Refresh</button>
         </div>
       </div>
-      <p className="text-sm text-stone/60">Clan members from the Wardogs game server's top 100, ranked among ourselves. {sort === "kd" ? "K/D only lists players with at least 5 matches. " : ""}Your row is highlighted if your Steam account is linked.</p>
+      <p className="text-sm text-stone/60">Clan members only, ranked among ourselves using the game server&apos;s stats and the matches we have stored. {sort === "kd" ? "K/D only lists players with at least 5 matches. " : ""}Your row is highlighted if your Steam account is linked.</p>
 
       <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
         <div className="flex gap-1" role="group" aria-label="Time range">{RANGES.map((r) => <button key={r.key} className={chip(range === r.key)} onClick={() => setRange(r.key)}>{r.label}</button>)}</div>

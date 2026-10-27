@@ -32,6 +32,8 @@ const schema = z.object({
   DISCORD_INVITE_URL: z.string().url().optional(),
   // The only Discord user who can open the hidden /admin page.
   OWNER_DISCORD_ID: snowflake.default("839225558806167582"),
+  // Optional channel where the dashboard posts an alert when an integration has been failing for an hour.
+  ALERT_CHANNEL_ID: snowflake.optional(),
   // Direct game-server RCON HTTP API (fast); both must be set to use it, otherwise the hosted API is used.
   GAME_RCON_URL: z.string().url().optional(),
   GAME_RCON_PASSWORD: z.string().min(1).optional(),

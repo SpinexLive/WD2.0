@@ -5,7 +5,7 @@ import { useApi } from "@/lib/client";
 import { ErrorBanner, Skeleton } from "@/components/ui";
 import type { Briefing } from "@/server/services/briefing";
 
-const RESPONSE_LABEL: Record<string, string> = { confirmed: "Confirmed", declined: "Declined" };
+const RESPONSE_LABEL: Record<string, string> = { accepted: "Confirmed", declined: "Declined" };
 
 export default function BriefingPage() {
   const api = useApi();
