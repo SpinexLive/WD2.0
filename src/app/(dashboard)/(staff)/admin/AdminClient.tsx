@@ -4,12 +4,13 @@ import { useCallback, useEffect, useState } from "react";
 import { useApi } from "@/lib/client";
 import { ErrorBanner, Skeleton } from "@/components/ui";
 import WhitelistPanel from "./WhitelistPanel";
+import GoldPanel from "./GoldPanel";
 
 interface Overview {
   audit: { id: string; actor: string | null; action: string; targetType: string | null; targetId: string | null; details: unknown; at: string }[];
 }
 
-type Tab = "whitelist" | "audit";
+type Tab = "whitelist" | "gold" | "audit";
 
 const fmt = (v: string | null) => (v ? new Date(v).toLocaleString("en-GB", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" }) : "-");
 
@@ -33,7 +34,7 @@ export default function AdminClient() {
   }, [api]);
   useEffect(() => void load(), [load]);
 
-  const tabs: [Tab, string][] = [["whitelist", "Whitelist links"], ["audit", "Audit log"]];
+  const tabs: [Tab, string][] = [["whitelist", "Whitelist links"], ["gold", "Gold price"], ["audit", "Audit log"]];
 
   return (
     <div className="flex flex-col gap-4 md:h-full">
@@ -53,6 +54,8 @@ export default function AdminClient() {
       <section className="card min-h-64 flex-1 overflow-auto md:min-h-0">
         {tab === "whitelist" ? (
           <WhitelistPanel onChanged={load} />
+        ) : tab === "gold" ? (
+          <GoldPanel />
         ) : loading && !data ? (
           <div className="space-y-2 p-4">{Array.from({ length: 6 }, (_, i) => <Skeleton key={i} className="h-8" />)}</div>
         ) : (
