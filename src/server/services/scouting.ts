@@ -182,8 +182,9 @@ export async function generateSummary(key: string): Promise<void> {
   const used = obs.slice(0, MAX_OBS_FOR_AI);
   const notes = used.map((o, i) => `Note ${i + 1} (match: ${o.title}):\n${o.body.slice(0, 1200)}`).join("\n\n");
 
+  const baseUrl = (c.AI_BASE_URL ?? "").replace(/\/+$/, "");
   const send = () =>
-    fetch(`${c.AI_BASE_URL.replace(/\/+$/, "")}/chat/completions`, {
+    fetch(`${baseUrl}/chat/completions`, {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${c.AI_API_KEY}` },
       body: JSON.stringify({
