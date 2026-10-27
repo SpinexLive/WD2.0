@@ -10,8 +10,8 @@ export const dynamic = "force-dynamic";
 export const POST = protectedRoute<{ key: string }>(
   async ({ params, session }) => {
     const key = params.key.slice(0, 80);
-    const wait = await rateLimit(`scouting-ai:${key}`, 3, 300);
-    if (wait > 0) throw new HttpError(429, `An overview was just generated for this team. Try again in ${wait}s.`, "rate_limited");
+    const wait = await     rateLimit(`scouting-ai:${key}`, 6, 300);
+        if (wait > 0) throw new HttpError(429, `Too many overview attempts for this team. Try again in ${wait}s.`, "rate_limited");
     await generateSummary(key);
     await audit(session, "scouting.summary", "team", key, {});
     return teamDetail(key);

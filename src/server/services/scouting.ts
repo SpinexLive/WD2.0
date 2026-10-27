@@ -182,9 +182,12 @@ export async function generateSummary(key: string): Promise<void> {
   const used = obs.slice(0, MAX_OBS_FOR_AI);
   const notes = used.map((o, i) => `Note ${i + 1} (match: ${o.title}):\n${o.body.slice(0, 1200)}`).join("\n\n");
 
-  const baseUrl = (c.AI_BASE_URL ?? "").replace(/\/+$/, "");
-  const send = () =>
-    fetch(`${baseUrl}/chat/completions`, {
+  let res!: Response;
+  try {
+    // Free tiers return 503 during demand spikes; retry briefly before giving up.
+    for (let attempt = 0; attempt < 3; attempt++) {
+      if (attempt > 0) await new Promise((r) => setTimeout(r, 2000 * attempt));
+    res = await fetch(`${c.AI_BASE_URL.replace(/\/+$/, "")}/chat/completions`, {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${c.AI_API_KEY}` },
       body: JSON.stringify({
@@ -198,13 +201,7 @@ export async function generateSummary(key: string): Promise<void> {
       }),
       signal: AbortSignal.timeout(30_000),
     });
-  let res: Response;
-  try {
-    res = await send();
-    // Overloaded or briefly rate limited: retry a couple of times before giving up.
-    for (let n = 1; n <= 2 && (res.status === 503 || res.status === 429); n++) {
-      await new Promise((r) => setTimeout(r, n * 2500));
-      res = await send();
+      if (res.status !== 503) break;
     }
   } catch {
     throw new ProviderError("ai", "The AI service didn't respond in time. Try again shortly.", 504);
