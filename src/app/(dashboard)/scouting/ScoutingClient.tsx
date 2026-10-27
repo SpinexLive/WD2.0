@@ -120,7 +120,14 @@ export default function ScoutingClient({ canDelete = false }: { canDelete?: bool
                         <span>{o.match} · {fmt(o.at)}</span>
                         {canDelete && <button className="text-blood-500 hover:underline" onClick={() => void remove(o.id)}>Delete</button>}
                       </div>
-                      <p className="whitespace-pre-wrap text-sm">{o.body}</p>
+                      <div className="space-y-2">
+                        {(["overview", "strengths", "weaknesses", "tactics"] as const).filter((k) => o[k]).map((k) => (
+                          <div key={k}>
+                            <div className="text-[11px] font-semibold uppercase tracking-wider text-stone/55">{k === "tactics" ? "Tactics" : k}</div>
+                            <p className="whitespace-pre-wrap text-sm">{o[k]}</p>
+                          </div>
+                        ))}
+                      </div>
                     </article>
                   ))}
                 </section>

@@ -3,20 +3,31 @@
 import { useCallback, useEffect, useState } from "react";
 import { useApi } from "@/lib/client";
 import { EmptyState, ErrorBanner, Skeleton, useToast } from "@/components/ui";
-import type { MemberEvent } from "@/server/services/scouting";
+import type { Fields, MemberEvent } from "@/server/services/scouting";
+
+const SECTIONS = [
+  { key: "overview", label: "Overview", hint: "General impression: playstyle, how they approached the match." },
+  { key: "strengths", label: "Strengths", hint: "What they did well. Strong players, positions, tactics." },
+  { key: "weaknesses", label: "Weaknesses", hint: "Where they were vulnerable or made mistakes." },
+  { key: "tactics", label: "Tactics to use against them", hint: "What we should do differently next time." },
+] as const;
+
+const EMPTY: Fields = { overview: "", strengths: "", weaknesses: "", tactics: "" };
 
 function TeamBox({ eventId, team, onSaved }: { eventId: string; team: MemberEvent["teams"][number]; onSaved: () => void }) {
   const api = useApi();
   const { toast, node } = useToast();
-  const [text, setText] = useState(team.mine ?? "");
+  const saved = team.mine ?? EMPTY;
+  const [vals, setVals] = useState<Fields>(saved);
   const [busy, setBusy] = useState(false);
-  const dirty = text.trim() !== (team.mine ?? "").trim();
+  const dirty = SECTIONS.some((s) => vals[s.key].trim() !== saved[s.key].trim());
+  const hasContent = SECTIONS.some((s) => vals[s.key].trim());
 
   async function save() {
     setBusy(true);
     try {
-      await api("/api/scouting/mine", { method: "POST", body: { eventId, slot: team.slot, body: text } });
-      toast({ text: "Observation saved", tone: "ok" });
+      await api("/api/scouting/mine", { method: "POST", body: { eventId, slot: team.slot, ...vals } });
+      toast({ text: "Feedback saved", tone: "ok" });
       onSaved();
     } catch (e) {
       toast({ text: (e as Error).message, tone: "err" });
@@ -26,19 +37,23 @@ function TeamBox({ eventId, team, onSaved }: { eventId: string; team: MemberEven
   }
 
   return (
-    <section className="card space-y-2 p-4">
+    <section className="card space-y-3 p-4">
       <h3 className="text-sm font-semibold uppercase tracking-wider">{team.name}</h3>
-      <textarea
-        className="input min-h-[140px] w-full"
-        maxLength={2000}
-        placeholder="What did you notice? Playstyle, strengths, weaknesses, vehicles, where they push, comms, anything useful for next time."
-        value={text}
-        onChange={(e) => setText(e.target.value)}
-        aria-label={`Observation about ${team.name}`}
-      />
+      {SECTIONS.map((s) => (
+        <label key={s.key} className="block space-y-1">
+          <span className="text-xs font-semibold text-stone/80">{s.label}</span>
+          <textarea
+            className="input min-h-[80px] w-full"
+            maxLength={2000}
+            placeholder={s.hint}
+            value={vals[s.key]}
+            onChange={(e) => setVals((v) => ({ ...v, [s.key]: e.target.value }))}
+          />
+        </label>
+      ))}
       <div className="flex items-center justify-between gap-2">
-        <span className="text-xs text-stone/50">{text.length}/2000 · {team.mine ? "You can edit your note" : "Not submitted yet"}</span>
-        <button className="btn-primary" disabled={busy || !dirty || !text.trim()} onClick={() => void save()}>{busy ? "Saving…" : team.mine ? "Update" : "Submit"}</button>
+        <span className="text-xs text-stone/50">Fill in any sections you can · {team.mine ? "You can edit your feedback" : "Not submitted yet"}</span>
+        <button className="btn-primary" disabled={busy || !dirty || !hasContent} onClick={() => void save()}>{busy ? "Saving…" : team.mine ? "Update" : "Submit"}</button>
       </div>
       {node}
     </section>
@@ -65,8 +80,8 @@ export default function ObserveClient() {
 
   return (
     <div className="mx-auto max-w-4xl space-y-4">
-      <h1 className="page-title">Observations</h1>
-      <p className="text-sm text-stone/60">Pick the match you played, then tell us what you saw from each opposing team. Your notes are anonymous to reviewers and are compiled into a briefing for future matches.</p>
+      <h1 className="page-title">Match Feedback</h1>
+            <p className="text-sm text-stone/60">Pick the match you played, then tell us what you saw from each opposing team. Your feedback is anonymous to reviewers and is compiled into a briefing for future matches.</p>
       {error && <ErrorBanner message={error} onRetry={load} />}
       {!events && !error && <Skeleton className="h-40" />}
       {events?.length === 0 && <EmptyState title="No matches to give feedback on" hint="Staff open a match for feedback after it's played, and you must have been on its roster." />}
