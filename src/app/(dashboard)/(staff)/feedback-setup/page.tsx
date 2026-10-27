@@ -39,6 +39,7 @@ function Row({ e, onChanged }: { e: ManageEvent; onChanged: () => void }) {
         <span className="text-xs text-stone/50">v</span>
         <input className="input !w-44" aria-label="Opposing team 2" placeholder="Team 2" value={b} onChange={(x) => setB(x.target.value)} disabled={busy} />
         <button className="btn-primary" disabled={busy || !a.trim() || !b.trim()} onClick={() => void act({ action: "open", eventId: e.eventId, teamA: a, teamB: b }, e.open ? "Team names updated" : "Opened for feedback")}>{e.open ? "Save names" : e.closed ? "Reopen" : "Open for feedback"}</button>
+        {e.open && <button className="btn-ghost" disabled={busy} onClick={() => void act({ action: "post", eventId: e.eventId }, "Posted to the event channel on Discord")}>{e.posted ? "Repost to Discord" : "Post to Discord"}</button>}
         {e.open && <button className="btn-ghost" disabled={busy} onClick={() => void act({ action: "close", eventId: e.eventId }, "Feedback closed")}>Close</button>}
       </div>
       {node}

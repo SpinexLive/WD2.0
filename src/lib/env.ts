@@ -39,6 +39,8 @@ const schema = z.object({
   GAME_RCON_PASSWORD: z.string().min(1).optional(),
   // Members of this role can read the compiled scouting feedback on opposing teams.
   DISCORD_REVIEWER_ROLE_ID: snowflake.default("1546477974461882418"),
+  // Channel that receives AI scouting overviews posted by staff.
+  SCOUTING_CHANNEL_ID: snowflake.default("1546478090908209172"),
   // Any OpenAI-compatible chat-completions API (GitHub Models, Gemini, OpenAI...). All three must be set to enable AI overviews.
   AI_BASE_URL: z.string().url().optional().or(z.literal("").transform(() => undefined)),
   AI_API_KEY: z.string().min(1).optional().or(z.literal("").transform(() => undefined)),

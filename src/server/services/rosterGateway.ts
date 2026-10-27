@@ -3,6 +3,7 @@ import { env } from "@/lib/env";
 import { setVoice } from "./voice";
 import { BUTTON_PREFIX } from "./rosterPublish";
 import { handleRosterButton } from "./rosterResponses";
+import { FEEDBACK_BUTTON, FEEDBACK_MODAL, onFeedbackButton, onFeedbackModal } from "./scoutingDiscord";
 
 const g = globalThis as unknown as { __rosterGateway?: Client };
 
@@ -50,7 +51,12 @@ export function startRosterGateway(): void {
   client.on("guildCreate", refreshVoice);
   client.on("voiceStateUpdate", (_old, next) => refreshVoice(next.guild));
   client.on("interactionCreate", (i) => {
-    if (i.isButton()) void onButton(i);
+    if (i.isButton()) {
+      if (i.customId.startsWith(`${FEEDBACK_BUTTON}:`)) void onFeedbackButton(i).catch((e: Error) => console.error("feedback button failed:", e.message));
+      else void onButton(i);
+    } else if (i.isModalSubmit() && i.customId.startsWith(`${FEEDBACK_MODAL}:`)) {
+      void onFeedbackModal(i).catch((e: Error) => console.error("feedback form failed:", e.message));
+    }
   });
   client.on("error", (e) => console.error("roster gateway error:", e.message));
   client.login(env().DISCORD_BOT_TOKEN).then(

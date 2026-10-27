@@ -75,13 +75,14 @@ export interface ManageEvent {
   teamA: string;
   teamB: string;
   observations: number;
+  posted: boolean;
 }
 
 /** Recent Raid Helper events with their feedback state, for staff to open or close. */
 export async function manageEvents(): Promise<ManageEvent[]> {
   const [events, rows, counts] = await Promise.all([
     getEvents().then((s) => s.data),
-    query<{ event_id: string; team_a: string; team_b: string; closed_at: Date | null }>("SELECT event_id, team_a, team_b, closed_at FROM scouting_events"),
+    query<{ event_id: string; team_a: string; team_b: string; closed_at: Date | null; prompt_message_id: string | null }>("SELECT event_id, team_a, team_b, closed_at, prompt_message_id FROM scouting_events"),
     query<{ event_id: string; n: string }>("SELECT event_id, count(*) AS n FROM scouting_observations GROUP BY event_id"),
   ]);
   const by = new Map(rows.map((r) => [r.event_id, r]));
@@ -99,6 +100,7 @@ export async function manageEvents(): Promise<ManageEvent[]> {
         teamA: r?.team_a ?? guess[0] ?? "",
         teamB: r?.team_b ?? guess[1] ?? "",
         observations: n.get(e.id) ?? 0,
+        posted: !!r?.prompt_message_id,
       };
     })
     .sort((a, b) => (b.startTime ?? 0) - (a.startTime ?? 0));

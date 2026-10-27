@@ -37,6 +37,21 @@ export default function ScoutingClient({ isStaff = false }: { isStaff?: boolean 
     };
   }, [api, selected]);
 
+  const [posting, setPosting] = useState(false);
+
+  async function postToDiscord() {
+    if (!selected) return;
+    setPosting(true);
+    try {
+      await api(`/api/scouting/teams/${encodeURIComponent(selected)}/post`, { method: "POST" });
+      toast({ text: "Overview posted to Discord", tone: "ok" });
+    } catch (e) {
+      toast({ text: (e as Error).message, tone: "err" });
+    } finally {
+      setPosting(false);
+    }
+  }
+
   async function regenerate() {
     if (!selected) return;
     setBusy(true);
@@ -100,7 +115,10 @@ export default function ScoutingClient({ isStaff = false }: { isStaff?: boolean 
                 <section className="card space-y-3 p-4">
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <h2 className="text-lg font-bold">{detail.name}</h2>
-                    {isStaff && <button className="btn-primary" disabled={busy || !detail.aiConfigured} onClick={() => void regenerate()}>{busy ? "Generating…" : detail.summary ? "Refresh overview" : "Generate overview"}</button>}
+                    <div className="flex flex-wrap gap-2">
+                      {isStaff && detail.summary && <button className="btn-ghost" disabled={posting} onClick={() => void postToDiscord()}>{posting ? "Posting…" : "Post to Discord"}</button>}
+                      {isStaff && <button className="btn-primary" disabled={busy || !detail.aiConfigured} onClick={() => void regenerate()}>{busy ? "Generating…" : detail.summary ? "Refresh overview" : "Generate overview"}</button>}
+                    </div>
                   </div>
                   {isStaff && !detail.aiConfigured && <p className="text-xs text-orange">AI overviews aren&apos;t configured on the server yet. The notes below are still available.</p>}
                   {detail.summary ? (
