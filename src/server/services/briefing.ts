@@ -15,12 +15,19 @@ export interface BriefingPlayer {
   inVoice: boolean;
 }
 
+export interface BriefingSquad {
+  name: string;
+  size: number;
+  slots: (BriefingPlayer | null)[];
+}
+
 export interface BriefingRoster {
   eventId: string;
   title: string;
   startTime: number;
   status: "draft" | "published";
   players: BriefingPlayer[];
+  squads: BriefingSquad[];
 }
 
 /** Rosters (draft or published) for events starting within the last 2 hours or in the future, with who is currently in the briefing voice channel. */
@@ -37,12 +44,15 @@ export async function buildBriefing() {
   for (const e of relevant) {
     const roster = await getRoster(e.id);
     if (!roster) continue;
-    const players = roster.squads.flatMap((s) =>
-      s.slots.flatMap((p) =>
-        p ? [{ discordId: p.discordId, name: p.displayName, avatarUrl: p.avatarUrl, squad: s.name, isLeader: p.isLeader, response: roster.responses[p.discordId] ?? null, inVoice: present.has(p.discordId) }] : [],
+    const squads: BriefingSquad[] = roster.squads.map((s) => ({
+      name: s.name,
+      size: s.size,
+      slots: s.slots.map((p) =>
+        p ? { discordId: p.discordId, name: p.displayName, avatarUrl: p.avatarUrl, squad: s.name, isLeader: p.isLeader, response: roster.responses[p.discordId] ?? null, inVoice: present.has(p.discordId) } : null,
       ),
-    );
-    rosters.push({ eventId: e.id, title: e.title, startTime: e.startTime!, status: roster.status, players });
+    }));
+    const players = squads.flatMap((s) => s.slots.flatMap((p) => (p ? [p] : [])));
+    rosters.push({ eventId: e.id, title: e.title, startTime: e.startTime!, status: roster.status, players, squads });
   }
   return {
     rosters,
