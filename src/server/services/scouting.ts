@@ -182,9 +182,8 @@ export async function generateSummary(key: string): Promise<void> {
   const used = obs.slice(0, MAX_OBS_FOR_AI);
   const notes = used.map((o, i) => `Note ${i + 1} (match: ${o.title}):\n${o.body.slice(0, 1200)}`).join("\n\n");
 
-  let res: Response;
-  try {
-    res = await fetch(`${c.AI_BASE_URL.replace(/\/+$/, "")}/chat/completions`, {
+  const send = () =>
+    fetch(`${c.AI_BASE_URL.replace(/\/+$/, "")}/chat/completions`, {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${c.AI_API_KEY}` },
       body: JSON.stringify({
@@ -196,8 +195,16 @@ export async function generateSummary(key: string): Promise<void> {
           { role: "user", content: `Opposing team: ${obs[0]!.team_name}\n${used.length} notes:\n\n${notes}` },
         ],
       }),
-      signal: AbortSignal.timeout(45_000),
+      signal: AbortSignal.timeout(30_000),
     });
+  let res: Response;
+  try {
+    res = await send();
+    // Overloaded or briefly rate limited: retry a couple of times before giving up.
+    for (let n = 1; n <= 2 && (res.status === 503 || res.status === 429); n++) {
+      await new Promise((r) => setTimeout(r, n * 2500));
+      res = await send();
+    }
   } catch {
     throw new ProviderError("ai", "The AI service didn't respond in time. Try again shortly.", 504);
   }
