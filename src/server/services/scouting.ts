@@ -14,15 +14,13 @@ export interface MemberEvent {
 }
 
 /** Open events the user was rostered for, with their own existing observation for each team. */
-export async function memberEvents(discordId: string): Promise<MemberEvent[]> {
+export async function memberEvents(discordId: string, isStaff = false): Promise<MemberEvent[]> {
   const events = await query<{ event_id: string; title: string; starts_at: Date | null; team_a: string; team_b: string }>(
     `SELECT e.event_id, e.title, e.starts_at, e.team_a, e.team_b
        FROM scouting_events e
-       JOIN rosters r ON r.raid_helper_event_id = e.event_id
-       JOIN roster_assignments a ON a.roster_id = r.id AND a.discord_id = $1
-      WHERE e.closed_at IS NULL
+       WHERE e.closed_at IS NULL AND ($2::boolean OR EXISTS (SELECT 1 FROM rosters r JOIN roster_assignments a ON a.roster_id = r.id AND a.discord_id = $1 WHERE r.raid_helper_event_id = e.event_id))
       ORDER BY e.starts_at DESC NULLS LAST, e.opened_at DESC`,
-    [discordId],
+    [discordId, isStaff],
   );
   if (events.length === 0) return [];
   const mine = await query<{ event_id: string; team_key: string; body: string }>(
@@ -41,7 +39,7 @@ export async function memberEvents(discordId: string): Promise<MemberEvent[]> {
   }));
 }
 
-export async function saveObservation(eventId: string, slot: "a" | "b", authorId: string, body: string): Promise<void> {
+export async function saveObservation(eventId: string, slot: "a" | "b", authorId: string, body: string, isStaff = false): Promise<void> {
   const text = body.trim();
   if (!text) throw new HttpError(400, "Write something first", "empty");
   const [ev] = await query<{ team_a: string; team_b: string; closed_at: Date | null; allowed: boolean }>(
@@ -52,7 +50,7 @@ export async function saveObservation(eventId: string, slot: "a" | "b", authorId
   );
   if (!ev) throw new HttpError(404, "That match isn't open for feedback", "not_found");
   if (ev.closed_at) throw new HttpError(409, "Feedback for this match is closed", "closed");
-  if (!ev.allowed) throw new HttpError(403, "Only players on the roster for this match can add observations", "not_rostered");
+  if (!ev.allowed && !isStaff) throw new HttpError(403, "Only players on the roster for this match can add observations", "not_rostered");
   const name = slot === "a" ? ev.team_a : ev.team_b;
   await query(
     `INSERT INTO scouting_observations (event_id, team_key, team_name, author_id, body) VALUES ($1,$2,$3,$4,$5)
