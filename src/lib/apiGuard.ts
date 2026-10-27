@@ -17,6 +17,8 @@ type Handler<P> = (ctx: Ctx<P>) => Promise<unknown>;
 export interface GuardOptions {
   /** Let signed-in clan members (no authorised role) call this route. Everything else is staff-only. */
   allowMember?: boolean;
+  /** Mutations are refused while a staff member is previewing as someone else, unless the route opts in. */
+  allowWhileViewing?: boolean;
 }
 
 export function errorResponse(err: unknown): NextResponse {
@@ -53,6 +55,7 @@ export function protectedRoute<P = Record<string, string>>(handler: Handler<P>, 
 
       const mutating = req.method !== "GET" && req.method !== "HEAD";
       if (mutating) {
+        if (session.viewingAs && !options.allowWhileViewing) throw new HttpError(403, "You're viewing as another member (read-only). Exit view-as to make changes.", "view_as_readonly");
         const origin = req.headers.get("origin");
         if (!origin || origin !== new URL(env().APP_URL).origin) throw new HttpError(403, "Cross-origin request rejected", "bad_origin");
         const token = req.headers.get("x-csrf-token");

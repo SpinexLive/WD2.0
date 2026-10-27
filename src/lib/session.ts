@@ -2,10 +2,11 @@ import { createHmac, randomBytes } from "node:crypto";
 import { cookies } from "next/headers";
 import { query } from "./db";
 import { env, isProduction } from "./env";
-import { fetchGuildMember, hasAuthorisedRole, hasMemberRole, type DiscordMember } from "@/server/services/discord";
+import { fetchGuildMember, getAllClanMembers, hasAuthorisedRole, hasMemberRole, type DiscordMember } from "@/server/services/discord";
 import { ProviderError } from "./http";
 
 export const SESSION_COOKIE = isProduction ? "__Host-remnant_session" : "remnant_session";
+export const VIEWAS_COOKIE = "remnant_viewas";
 export const STATE_COOKIE = "remnant_oauth_state";
 const SESSION_TTL_MS = 12 * 60 * 60_000;
 /** How often Discord roles are re-checked while a user is active. */
@@ -22,6 +23,8 @@ export interface Session {
   csrfToken: string;
   /** Holds an authorised role: full dashboard. Otherwise a clan member who may only see their own stats. */
   isAdmin: boolean;
+  /** Set while a staff member is previewing the dashboard as this member (read-only). */
+  viewingAs?: { adminId: string; adminName: string };
 }
 
 const hashToken = (token: string) => createHmac("sha256", env().SESSION_SECRET).update(token).digest("hex");
@@ -53,7 +56,7 @@ interface Row {
   stale_ms: number;
 }
 
-export async function getSession(): Promise<Session | null> {
+async function getRealSession(): Promise<Session | null> {
   const token = (await cookies()).get(SESSION_COOKIE)?.value;
   if (!token || token.length > 128) return null;
   const id = hashToken(token);
@@ -83,6 +86,24 @@ export async function getSession(): Promise<Session | null> {
 
   return { id, discordId: row.discord_id, username: row.username, displayName: row.display_name, avatarUrl: row.avatar_url, csrfToken: row.csrf_token, isAdmin: hasAuthorisedRole(row.roles ?? []) };
 }
+
+/**
+ * The effective session. If a staff member has chosen "view as", the returned session is that clan member's
+ * (non-admin, so every staff-only route is closed). The cookie is only honoured while the real session is staff.
+ */
+export async function getSession(): Promise<Session | null> {
+  const real = await getRealSession();
+  if (!real || !real.isAdmin) return real;
+  const target = (await cookies()).get(VIEWAS_COOKIE)?.value;
+  if (!target || !/^\d{5,25}$/.test(target) || target === real.discordId) return real;
+  const members = await getAllClanMembers().then((s) => s.data, () => []);
+  const m = members.find((x) => x.id === target);
+  if (!m) return real;
+  return { ...real, discordId: m.id, username: m.username, displayName: m.displayName, avatarUrl: m.avatarUrl, isAdmin: false, viewingAs: { adminId: real.discordId, adminName: real.displayName } };
+}
+
+/** The signed-in person regardless of any "view as" choice. */
+export const getActualSession = getRealSession;
 
 export async function destroyCurrentSession(): Promise<void> {
   const token = (await cookies()).get(SESSION_COOKIE)?.value;

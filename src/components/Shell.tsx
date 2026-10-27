@@ -3,7 +3,7 @@
 import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { AppProvider, useApp } from "@/lib/client";
 import { Avatar } from "./ui";
 
@@ -23,10 +23,57 @@ const ADMIN_NAV: { href: string; label: string; logo?: string } = { href: "/admi
 const STAFF_TABS = [TODAY_NAV, NAV[2]!, NAV[3]!, BOARD_NAV];
 const MEMBER_TABS = [TODAY_NAV, ME_NAV, BOARD_NAV];
 
-function Inner({ children, isOwner, isAdmin }: { children: React.ReactNode; isOwner: boolean; isAdmin: boolean }) {
+function ViewAsPicker({ csrfToken }: { csrfToken: string }) {
+  const [open, setOpen] = useState(false);
+  const [list, setList] = useState<{ id: string; name: string; avatarUrl: string }[] | null>(null);
+  const [q, setQ] = useState("");
+  const [err, setErr] = useState<string | null>(null);
+  useEffect(() => {
+    if (!open || list) return;
+    fetch("/api/auth/view-as", { cache: "no-store" })
+      .then((r) => r.json())
+      .then((j) => (j.members ? setList(j.members) : setErr(j.error?.message ?? "Could not load members")))
+      .catch(() => setErr("Could not load members"));
+  }, [open, list]);
+  async function start(id: string) {
+    const r = await fetch("/api/auth/view-as", { method: "POST", headers: { "Content-Type": "application/json", "X-CSRF-Token": csrfToken }, body: JSON.stringify({ discordId: id }) });
+    if (r.ok) window.location.href = "/today";
+    else setErr((await r.json().catch(() => null))?.error?.message ?? "Failed");
+  }
+  const shown = (list ?? []).filter((m) => m.name.toLowerCase().includes(q.toLowerCase())).slice(0, 8);
+  return (
+    <div className="relative">
+      <button className="btn-ghost !px-3 !py-1" onClick={() => setOpen((o) => !o)} aria-expanded={open}>View as</button>
+      {open && (
+        <div className="absolute left-0 z-40 mt-1 w-64 rounded-lg border border-ink-600 bg-ink-900 p-2 shadow-xl">
+          <input autoFocus className="input mb-2" placeholder="Search member" aria-label="Search member" value={q} onChange={(e) => setQ(e.target.value)} />
+          {err && <p className="px-1 pb-1 text-xs text-blood-300">{err}</p>}
+          {!list && !err && <p className="px-1 text-xs text-stone/50">Loading…</p>}
+          <ul>
+            {shown.map((m) => (
+              <li key={m.id}>
+                <button className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm hover:bg-ink-800" onClick={() => void start(m.id)}>
+                  <Avatar src={m.avatarUrl} size={22} />
+                  <span className="truncate">{m.name}</span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function Inner({ children, isOwner, isAdmin, canViewAs, viewingAs }: { children: React.ReactNode; isOwner: boolean; isAdmin: boolean; canViewAs: boolean; viewingAs: string | null }) {
   const { user, csrfToken } = useApp();
   const path = usePathname();
   const [open, setOpen] = useState(false);
+
+  async function exitView() {
+    await fetch("/api/auth/view-as", { method: "DELETE", headers: { "X-CSRF-Token": csrfToken } }).catch(() => undefined);
+    window.location.href = "/today";
+  }
 
   async function logout() {
     await fetch("/api/auth/logout", { method: "POST", headers: { "X-CSRF-Token": csrfToken } }).catch(() => undefined);
@@ -58,9 +105,15 @@ function Inner({ children, isOwner, isAdmin }: { children: React.ReactNode; isOw
         </div>
       )}
       <div className="flex min-w-0 flex-1 flex-col md:min-h-0">
+        {viewingAs && (
+          <div className="flex flex-wrap items-center justify-between gap-2 bg-blood-700 px-4 py-1.5 text-sm font-semibold text-white" role="status">
+            <span>Viewing as {user.displayName} (read-only). Signed in as {viewingAs}.</span>
+            <button className="rounded bg-white/15 px-3 py-0.5 hover:bg-white/25" onClick={() => void exitView()}>Exit view</button>
+          </div>
+        )}
         <header className="sticky top-0 z-30 flex items-center justify-between border-b border-ink-700/80 bg-ink-950/80 px-4 py-1.5 shadow-[0_1px_0_0_rgba(158,48,60,0.35)] backdrop-blur-md">
           <button className="btn-ghost md:hidden" aria-label="Open menu" onClick={() => setOpen(true)}>☰</button>
-          <div className="hidden md:block" />
+          {canViewAs && !viewingAs ? <ViewAsPicker csrfToken={csrfToken} /> : <div className="hidden md:block" />}
           <div className="flex items-center gap-2.5 rounded-full border border-ink-700 bg-ink-850/80 py-0.5 pl-1 pr-1 md:pr-1">
             <Avatar src={user.avatarUrl} size={26} />
             <span className="max-w-[10rem] truncate text-sm">{user.displayName}</span>
@@ -90,10 +143,10 @@ function Inner({ children, isOwner, isAdmin }: { children: React.ReactNode; isOw
   );
 }
 
-export function Shell(props: { user: { id: string; displayName: string; username: string; avatarUrl: string }; csrfToken: string; isOwner?: boolean; isAdmin?: boolean; children: React.ReactNode }) {
+export function Shell(props: { user: { id: string; displayName: string; username: string; avatarUrl: string }; csrfToken: string; isOwner?: boolean; isAdmin?: boolean; canViewAs?: boolean; viewingAs?: string | null; children: React.ReactNode }) {
   return (
     <AppProvider value={{ user: props.user, csrfToken: props.csrfToken }}>
-      <Inner isOwner={!!props.isOwner} isAdmin={props.isAdmin !== false}>{props.children}</Inner>
+      <Inner isOwner={!!props.isOwner} isAdmin={props.isAdmin !== false} canViewAs={!!props.canViewAs} viewingAs={props.viewingAs ?? null}>{props.children}</Inner>
     </AppProvider>
   );
 }
