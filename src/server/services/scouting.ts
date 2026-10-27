@@ -182,30 +182,31 @@ export async function generateSummary(key: string): Promise<void> {
   const used = obs.slice(0, MAX_OBS_FOR_AI);
   const notes = used.map((o, i) => `Note ${i + 1} (match: ${o.title}):\n${o.body.slice(0, 1200)}`).join("\n\n");
 
-  let res!: Response;
-  try {
-    // Free tiers return 503 during demand spikes; retry briefly before giving up.
-    for (let attempt = 0; attempt < 3; attempt++) {
-      if (attempt > 0) await new Promise((r) => setTimeout(r, 2000 * attempt));
-    res = await fetch(`${c.AI_BASE_URL.replace(/\/+$/, "")}/chat/completions`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${c.AI_API_KEY}` },
-      body: JSON.stringify({
-        model: c.AI_MODEL,
-        temperature: 0.3,
-        max_tokens: 700,
-        messages: [
-          { role: "system", content: SYSTEM },
-          { role: "user", content: `Opposing team: ${obs[0]!.team_name}\n${used.length} notes:\n\n${notes}` },
-        ],
-      }),
-      signal: AbortSignal.timeout(30_000),
-    });
+  let res: Response | null = null;
+  // Free tiers return 503 or stall during demand spikes; retry before giving up.
+  for (let attempt = 0; attempt < 3; attempt++) {
+    if (attempt > 0) await new Promise((r) => setTimeout(r, 2000 * attempt));
+    try {
+      res = await fetch(`${c.AI_BASE_URL.replace(/\/+$/, "")}/chat/completions`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${c.AI_API_KEY}` },
+        body: JSON.stringify({
+          model: c.AI_MODEL,
+          temperature: 0.3,
+          max_tokens: 2000,
+          messages: [
+            { role: "system", content: SYSTEM },
+            { role: "user", content: `Opposing team: ${obs[0]!.team_name}\n${used.length} notes:\n\n${notes}` },
+          ],
+        }),
+        signal: AbortSignal.timeout(40_000),
+      });
       if (res.status !== 503) break;
+    } catch {
+      res = null;
     }
-  } catch {
-    throw new ProviderError("ai", "The AI service didn't respond in time. Try again shortly.", 504);
   }
+  if (!res) throw new ProviderError("ai", "The AI service didn't respond in time. Try again shortly.", 504);
   if (!res.ok) {
     const detail = await res.text().then((t) => {
       try {
