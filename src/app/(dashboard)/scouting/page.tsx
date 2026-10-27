@@ -8,6 +8,6 @@ export const dynamic = "force-dynamic";
 
 export default async function ScoutingPage() {
   const session = await getSession();
-  if (!session?.isReviewer) redirect("/today");
-  return <ScoutingClient />;
+  if (!session || (!session.isReviewer && !session.isAdmin)) redirect("/today");
+  return <ScoutingClient canDelete={session.isAdmin} />;
 }

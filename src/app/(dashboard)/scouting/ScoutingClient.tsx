@@ -7,7 +7,7 @@ import type { TeamDetail, TeamRow } from "@/server/services/scouting";
 
 const fmt = (iso: string) => new Date(iso).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
 
-export default function ScoutingClient() {
+export default function ScoutingClient({ canDelete = false }: { canDelete?: boolean }) {
   const api = useApi();
   const { toast, node } = useToast();
   const [teams, setTeams] = useState<TeamRow[] | null>(null);
@@ -47,6 +47,20 @@ export default function ScoutingClient() {
       toast({ text: (e as Error).message, tone: "err" });
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function remove(id: number) {
+    if (!selected || !window.confirm("Delete this note permanently? This can't be undone.")) return;
+    try {
+      await api(`/api/scouting/observations/${id}`, { method: "DELETE" });
+      toast({ text: "Note deleted", tone: "ok" });
+      void loadTeams();
+      const next = await api<TeamDetail>(`/api/scouting/teams/${encodeURIComponent(selected)}`).catch(() => null);
+      if (next) setDetail(next);
+      else setSelected(null);
+    } catch (e) {
+      toast({ text: (e as Error).message, tone: "err" });
     }
   }
 
@@ -102,7 +116,10 @@ export default function ScoutingClient() {
                   <h3 className="text-[11px] font-semibold uppercase tracking-[0.18em] text-stone/60">All notes ({detail.observations.length})</h3>
                   {detail.observations.map((o, i) => (
                     <article key={i} className="card p-3">
-                      <div className="mb-1 text-xs text-stone/55">{o.match} · {fmt(o.at)}</div>
+                      <div className="mb-1 flex items-center justify-between gap-2 text-xs text-stone/55">
+                        <span>{o.match} · {fmt(o.at)}</span>
+                        {canDelete && <button className="text-blood-500 hover:underline" onClick={() => void remove(o.id)}>Delete</button>}
+                      </div>
                       <p className="whitespace-pre-wrap text-sm">{o.body}</p>
                     </article>
                   ))}

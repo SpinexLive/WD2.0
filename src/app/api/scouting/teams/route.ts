@@ -3,4 +3,4 @@ import { listTeams } from "@/server/services/scouting";
 
 export const dynamic = "force-dynamic";
 
-export const GET = protectedRoute(async () => ({ teams: await listTeams() }), { reviewerOnly: true });
+export const GET = protectedRoute(async () => ({ teams: await listTeams() }), { reviewerOrStaff: true });

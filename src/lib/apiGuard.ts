@@ -21,6 +21,8 @@ export interface GuardOptions {
   allowWhileViewing?: boolean;
   /** Only holders of the scouting reviewer role (staff status doesn't matter). */
   reviewerOnly?: boolean;
+  /** Reviewers or staff (staff need to read notes in order to moderate them). */
+  reviewerOrStaff?: boolean;
 }
 
 export function errorResponse(err: unknown): NextResponse {
@@ -53,7 +55,9 @@ export function protectedRoute<P = Record<string, string>>(handler: Handler<P>, 
     try {
       const session = await getSession();
       if (!session) throw new HttpError(401, "Not signed in or access revoked", "unauthenticated");
-      if (options.reviewerOnly) {
+      if (options.reviewerOrStaff) {
+        if (!session.isReviewer && !session.isAdmin) throw new HttpError(403, "Scouting feedback is limited to reviewers and staff", "forbidden");
+      } else if (options.reviewerOnly) {
         if (!session.isReviewer) throw new HttpError(403, "Scouting feedback is limited to the reviewer role", "forbidden");
       } else if (!session.isAdmin && !options.allowMember) throw new HttpError(403, "This area is for REMNANT staff only", "forbidden");
 

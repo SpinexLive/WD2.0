@@ -142,12 +142,12 @@ export interface TeamDetail {
   summary: { text: string; generatedAt: string; basedOn: number } | null;
   aiConfigured: boolean;
   /** Anonymous by design: no author is ever returned. */
-  observations: { body: string; match: string; at: string }[];
+  observations: { id: number; body: string; match: string; at: string }[];
 }
 
 export async function teamDetail(key: string): Promise<TeamDetail> {
-  const obs = await query<{ body: string; team_name: string; title: string; starts_at: Date | null; created_at: Date }>(
-    `SELECT o.body, o.team_name, e.title, e.starts_at, o.created_at
+  const obs = await query<{ id: number; body: string; team_name: string; title: string; starts_at: Date | null; created_at: Date }>(
+    `SELECT o.id, o.body, o.team_name, e.title, e.starts_at, o.created_at
        FROM scouting_observations o JOIN scouting_events e ON e.event_id = o.event_id
       WHERE o.team_key = $1 ORDER BY COALESCE(e.starts_at, o.created_at) DESC, o.id DESC`,
     [key],
@@ -160,7 +160,7 @@ export async function teamDetail(key: string): Promise<TeamDetail> {
     name: obs[0]!.team_name,
     summary: s ? { text: s.summary, generatedAt: s.generated_at.toISOString(), basedOn: s.obs_count } : null,
     aiConfigured: !!(c.AI_BASE_URL && c.AI_API_KEY && c.AI_MODEL),
-    observations: obs.map((o) => ({ body: o.body, match: o.title, at: (o.starts_at ?? o.created_at).toISOString() })),
+    observations: obs.map((o) => ({ id: Number(o.id), body: o.body, match: o.title, at: (o.starts_at ?? o.created_at).toISOString() })),
   };
 }
 
@@ -173,8 +173,8 @@ Only use information present in the notes. If notes disagree, say so. Mention ho
 export async function generateSummary(key: string): Promise<void> {
   const c = env();
   if (!c.AI_BASE_URL || !c.AI_API_KEY || !c.AI_MODEL) throw new HttpError(503, "AI summaries aren't configured (set AI_BASE_URL, AI_API_KEY and AI_MODEL).", "ai_unconfigured");
-  const obs = await query<{ body: string; team_name: string; title: string }>(
-    `SELECT o.body, o.team_name, e.title FROM scouting_observations o JOIN scouting_events e ON e.event_id = o.event_id
+  const obs = await query<{ id: number; body: string; team_name: string; title: string }>(
+    `SELECT o.id, o.body, o.team_name, e.title FROM scouting_observations o JOIN scouting_events e ON e.event_id = o.event_id
       WHERE o.team_key = $1 ORDER BY COALESCE(e.starts_at, o.created_at) DESC, o.id DESC`,
     [key],
   );
@@ -210,4 +210,12 @@ export async function generateSummary(key: string): Promise<void> {
      ON CONFLICT (team_key) DO UPDATE SET team_name = EXCLUDED.team_name, summary = EXCLUDED.summary, obs_count = EXCLUDED.obs_count, generated_at = now()`,
     [key, obs[0]!.team_name, text.slice(0, 6000), obs.length],
   );
+}
+
+/** Staff moderation. Drops the cached overview once a team has no notes left. */
+export async function deleteObservation(id: number): Promise<{ teamKey: string; teamName: string; eventId: string }> {
+  const [row] = await query<{ team_key: string; team_name: string; event_id: string }>("DELETE FROM scouting_observations WHERE id = $1 RETURNING team_key, team_name, event_id", [id]);
+  if (!row) throw new HttpError(404, "That note no longer exists", "not_found");
+  await query("DELETE FROM scouting_summaries s WHERE s.team_key = $1 AND NOT EXISTS (SELECT 1 FROM scouting_observations WHERE team_key = $1)", [row.team_key]);
+  return { teamKey: row.team_key, teamName: row.team_name, eventId: row.event_id };
 }
