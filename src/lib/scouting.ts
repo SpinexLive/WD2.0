@@ -5,7 +5,7 @@ export function parseTeams(title: string): string[] {
   return title
     .split(/\s+(?:v|vs\.?|versus)\s+/i)
     .map((p) => p.replace(/\s+/g, " ").trim())
-    .filter((p) => p && !OURS.test(p))
+    .filter((p) => p && !OURS.test(p.replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, "").replace(/^[^\p{L}\p{N}]*\s*/u, "")) && !/(^|[^\p{L}\p{N}])(rmnt|remnant)$/iu.test(p))
     .slice(0, 2);
 }
 

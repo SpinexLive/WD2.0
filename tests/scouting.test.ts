@@ -7,6 +7,9 @@ describe("scouting team parsing", () => {
     expect(parseTeams("Iron Wolves vs RMNT vs Nightfall")).toEqual(["Iron Wolves", "Nightfall"]);
     expect(parseTeams("REMNANT v Alpha")).toEqual(["Alpha"]);
   });
+  it("ignores emoji prefixes on our name", () => {
+    expect(parseTeams("⚔️ RMNT v VLK v WTH")).toEqual(["VLK", "WTH"]);
+  });
   it("returns nothing when the title has no teams", () => {
     expect(parseTeams("Weekly scrim")).toEqual(["Weekly scrim"]);
     expect(parseTeams("")).toEqual([]);
