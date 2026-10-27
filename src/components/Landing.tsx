@@ -94,14 +94,15 @@ export function Landing({ initial, signedIn, dashboardHref = "/members" }: { ini
           <div className="grid gap-6 p-5 md:p-7 lg:grid-cols-3">
             <div className="lg:col-span-2">
               <h1 className="text-2xl font-extrabold text-stone md:text-3xl">About Us</h1>
-              <p className="mt-3 text-sm leading-relaxed text-stone/75">Remant is a gaming community with Hell Let Loose and Wardogs at its heart, but we're not just about one game. We're a friendly, mature bunch from all over Europe who like good company and good games. We ask for the basics: be active, hop on the mic and look out for each other. New members are always welcome, whether you've played for years or only just landed.</p>              <p className="mt-3 text-sm leading-relaxed text-stone/75">Join us on Discord and apply to become a member.</p>
+              <p className="mt-3 text-sm leading-relaxed text-stone/75">REMNANT is a gaming community from all over Europe: friendly, mature and built around good company and good games. We play a mix of titles together, and for the players who want more, we field solid competitive teams. We ask for the basics: be active, hop on the mic and look out for each other. New members are always welcome, whether you've played for years or only just landed.</p>
+              <p className="mt-3 text-sm leading-relaxed text-stone/75">Join us on Discord and apply to become a member.</p>
               <div className="mt-4"><a href={data.inviteUrl ?? APPLY_URL} target="_blank" rel="noopener noreferrer" className="btn-primary">Apply to join</a></div>
             </div>
             <ul className="space-y-3 text-sm text-stone/75">
-            <li className="flex gap-2"><span className="text-blood-400">▸</span><span><strong className="text-stone">Hell Let Loose:</strong> tournaments and weekly events.</span></li>
+            <li className="flex gap-2"><span className="text-blood-400">▸</span><span><strong className="text-stone">Community:</strong> friendly, mature and active across Europe.</span></li>
               <li className="flex gap-2"><span className="text-blood-400">▸</span><span><strong className="text-stone">Weekly events:</strong> every Tuesday and Thursday.</span></li>
               <li className="flex gap-2"><span className="text-blood-400">▸</span><span><strong className="text-stone">Matches:</strong> Saturday and Sunday evenings.</span></li>
-              <li className="flex gap-2"><span className="text-blood-400">▸</span><span><strong className="text-stone">Wardogs League:</strong> competitive matches.</span></li>
+              <li className="flex gap-2"><span className="text-blood-400">▸</span><span><strong className="text-stone">Competitive teams:</strong> solid squads for players who want to compete.</span></li>
             </ul>
           </div>
         </section>
