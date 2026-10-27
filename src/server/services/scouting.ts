@@ -201,7 +201,19 @@ export async function generateSummary(key: string): Promise<void> {
   } catch {
     throw new ProviderError("ai", "The AI service didn't respond in time. Try again shortly.", 504);
   }
-  if (!res.ok) throw new ProviderError("ai", res.status === 429 ? "The AI service is rate limited right now. Try again in a minute." : `The AI service returned an error (${res.status}).`, res.status);
+  if (!res.ok) {
+    const detail = await res.text().then((t) => {
+      try {
+        const j = JSON.parse(t) as { error?: { message?: string } } | { error?: { message?: string } }[];
+        return (Array.isArray(j) ? j[0] : j)?.error?.message ?? "";
+      } catch {
+        return "";
+      }
+    }, () => "");
+    console.error(`AI provider error ${res.status}: ${detail.slice(0, 300)}`);
+    const hint = res.status === 404 ? " Check AI_BASE_URL and AI_MODEL (the model may be retired or unavailable to your key)." : res.status === 401 || res.status === 403 ? " Check AI_API_KEY." : "";
+    throw new ProviderError("ai", res.status === 429 ? "The AI service is rate limited right now. Try again in a minute." : `The AI service returned an error (${res.status}).${hint}${detail ? ` ${detail.slice(0, 160)}` : ""}`, res.status);
+  }
   const json = (await res.json().catch(() => null)) as { choices?: { message?: { content?: string } }[] } | null;
   const text = json?.choices?.[0]?.message?.content?.trim();
   if (!text) throw new ProviderError("ai", "The AI service returned an empty answer.", 502);
