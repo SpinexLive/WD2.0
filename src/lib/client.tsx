@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useCallback, useContext, useMemo } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef } from "react";
 
 export interface ApiError extends Error {
   status: number;
@@ -50,4 +50,48 @@ export function useApi() {
     [csrfToken],
   );
   return useMemo(() => call, [call]);
+}
+
+type LiveTopic = "voice" | "roster";
+type LiveHandler = (data: { eventId?: string }) => void;
+const liveHandlers = new Map<LiveTopic, Set<LiveHandler>>();
+let liveSource: EventSource | null = null;
+
+function ensureLive() {
+  if (liveSource || typeof EventSource === "undefined") return;
+  const es = new EventSource("/api/live");
+  for (const topic of ["voice", "roster"] as const) {
+    es.addEventListener(topic, (ev) => {
+      let data = {};
+      try {
+        data = JSON.parse((ev as MessageEvent).data);
+      } catch {
+        // an empty payload is fine
+      }
+      liveHandlers.get(topic)?.forEach((h) => h(data));
+    });
+  }
+  liveSource = es;
+}
+
+/** Calls `cb` when the server reports a change on one of the topics. One shared connection; the browser reconnects on its own. */
+export function useLive(topics: LiveTopic[], cb: LiveHandler) {
+  const ref = useRef(cb);
+  useEffect(() => {
+    ref.current = cb;
+  });
+  const key = topics.join(",");
+  useEffect(() => {
+    const h: LiveHandler = (d) => ref.current(d);
+    const list = key.split(",") as LiveTopic[];
+    ensureLive();
+    for (const t of list) (liveHandlers.get(t) ?? liveHandlers.set(t, new Set()).get(t)!).add(h);
+    return () => {
+      for (const t of list) liveHandlers.get(t)?.delete(h);
+      if (![...liveHandlers.values()].some((s) => s.size)) {
+        liveSource?.close();
+        liveSource = null;
+      }
+    };
+  }, [key]);
 }

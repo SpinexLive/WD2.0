@@ -12,5 +12,5 @@ export const metadata: Metadata = {
 
 export default async function Home() {
   const [data, session] = await Promise.all([getLandingData(), getSession().catch(() => null)]);
-  return <Landing initial={data} signedIn={!!session} dashboardHref={session?.isAdmin ? "/members" : "/me"} />;
+  return <Landing initial={data} signedIn={!!session} dashboardHref={"/today"} />;
 }

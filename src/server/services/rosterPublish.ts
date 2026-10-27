@@ -11,6 +11,7 @@ import { deleteMessage, DiscordMessageMissing, editMessage, getClanMembers, getP
 import { getEventDetail, type RaidHelperEventDetail, type RaidHelperSignup } from "./raidHelper";
 import { getLeagueApplications, getLeagueMembers, registrationStatus } from "./wardogsLeague";
 import { getRoster } from "./rosters";
+import { publish } from "./bus";
 import { resolveLinks } from "./links";
 import { getPlayerStats } from "./wardogsRcon";
 
@@ -197,6 +198,7 @@ export async function publishRoster(eventId: string, input: PublishInput, actor:
     return await postFresh(roster, embeds, channelId, actor, input.mode === "republish");
   } finally {
     await query("UPDATE rosters SET publishing_started_at = NULL WHERE id = $1", [roster.id]).catch(() => undefined);
+    publish("roster", { eventId });
   }
 }
 

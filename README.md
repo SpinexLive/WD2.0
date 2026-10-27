@@ -17,6 +17,9 @@ The repository contained only `.gitattributes`: **no existing Discord bot, datab
 - Access tiers: a user with an authorised role (`DISCORD_ALLOWED_ROLE_IDS`) gets the full dashboard. A user with only `DISCORD_MEMBER_ROLE_ID` can sign in but sees just **My stats** (`/me`): their own all-time stats, rank, K/D trend, maps, factions and match history, found from their Discord ID via the Wardogs links. Every API route is staff-only unless it opts in with `allowMember`.
 - WDL: pending tournament applications with accept/reject + confirmation + audit log, and League members who are not in the clan (the League API has no removal endpoint).
 - Rosters: Raid Helper events, configurable templates, drag-and-drop editor (dnd-kit), draft saving with optimistic concurrency, reset, warnings, publish/update/republish to Discord.
+- Today (`/today`, the landing page after login): your next rostered event with a countdown and Confirm/Decline (same effect as the Discord buttons), who is in voice, your latest match and 30-day clan rank. On phones a bottom tab bar replaces the drawer for the main pages.
+- Live updates: `/api/live` is a server-sent-events stream (in-process bus, single container). Voice joins/leaves and roster changes refresh Briefing, Today and the roster editor immediately; the editor shows a banner if someone else saved. Caddy proxies this path without gzip/buffering.
+- Chart comparison: on a stats page, overlay the K/D line of the clan average or any clan member (`/api/compare`, built from stored matches only).
 - Security: OAuth `state` (cookie + single-use DB row), HMAC-hashed server-side sessions in HTTP-only `SameSite=Lax` cookies (`__Host-` prefix in production), per-session CSRF token + `Origin` check on every mutation, Postgres-backed rate limiting, zod input validation, audit logging, security headers, duplicate-submission guards.
 
 ## Setup

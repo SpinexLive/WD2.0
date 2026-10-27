@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useApi } from "@/lib/client";
-import { ErrorBanner, Skeleton, SyncInfo } from "@/components/ui";
+import { EmptyState, ErrorBanner, Skeleton, SyncInfo } from "@/components/ui";
 import type { LeaderboardRange, LeaderboardRow, LeaderboardSort } from "@/server/services/wardogsRcon";
 
 type Row = LeaderboardRow & { nickname: string | null };
@@ -71,7 +71,7 @@ export default function LeaderboardClient() {
       {error && <ErrorBanner message={error} onRetry={() => void load()} />}
       {data && data.mySteamId && !mine && <p className="text-xs text-stone/55">You aren&apos;t on this leaderboard for this view.</p>}
       {!data && !error && <div className="space-y-1.5">{Array.from({ length: 10 }, (_, i) => <Skeleton key={i} className="h-9 w-full" />)}</div>}
-      {data && rows.length === 0 && <p className="text-sm text-stone/55">No players found.</p>}
+      {data && rows.length === 0 && <EmptyState icon="infantry" title="No players found" hint="Try another time range or clear the search." />}
 
       {rows.length > 0 && (
         <div className="card overflow-x-auto">

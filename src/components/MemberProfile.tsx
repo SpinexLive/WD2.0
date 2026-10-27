@@ -7,6 +7,8 @@ import { Avatar, ErrorBanner, RegBadge, REG_LABEL, Skeleton } from "@/components
 
 type Reg = keyof typeof REG_LABEL;
 
+type CompareData = import("@/server/services/compare").CompareResult;
+
 interface ProfileMatch {
   id: number; endedAt: string | null; startedAt: string | null; map: string | null; server: string | null; faction: string | null;
   kills: number; deaths: number; kd: number; lobbyKd: number | null; players: number; mvp: boolean; durationS: number | null; cash: number | null;
@@ -25,6 +27,7 @@ interface Profile {
 const RED = "#C4495A";
 const AMBER = "#D4B06A";
 const SAGE = "#8FB59B";
+const BLUE = "#6CB8F0";
 const STONE = "#E8E6E1";
 const FACTION_COLORS: Record<string, string> = { lonestar: "#6CB8F0", manticore: "#1FC258", valkyra: "#E0384F" };
 const FACTION_LOGOS: Record<string, string> = {
@@ -70,12 +73,13 @@ function Tile({ label, value, sub, color, i }: { label: string; value: React.Rea
 }
 
 /** K/D per match as an area line, and the lobby's K/D as a dashed baseline. Hover for a match readout. */
-function TrendChart({ data }: { data: ProfileMatch[] }) {
+function TrendChart({ data, compare, compareLabel }: { data: ProfileMatch[]; compare?: Map<number, { kd: number | null; cash: number | null }> | null; compareLabel?: string }) {
   const W = 640, H = 220, L = 34, R = 44, T = 12, B = 24;
   const [hover, setHover] = useState<number | null>(null);
   const ref = useRef<SVGSVGElement>(null);
   const vals = data.map((m) => m.kd);
-  const max = Math.max(2, Math.ceil(Math.max(...vals, ...data.map((m) => m.lobbyKd ?? 0)) * 2) / 2);
+  const cmpKd = data.map((m) => compare?.get(m.id)?.kd ?? null);
+  const max = Math.max(2, Math.ceil(Math.max(...vals, ...cmpKd.map((v) => v ?? 0), ...data.map((m) => m.lobbyKd ?? 0)) * 2) / 2);
   const cashMax = Math.max(1, ...data.map((m) => m.cash ?? 0));
   const hasCash = data.some((m) => m.cash !== null);
   const yc = (v: number) => T + (1 - v / cashMax) * (H - T - B);
@@ -84,10 +88,12 @@ function TrendChart({ data }: { data: ProfileMatch[] }) {
   const line = (arr: number[]) => arr.map((v, i) => `${i ? "L" : "M"}${x(i).toFixed(1)},${y(v).toFixed(1)}`).join("");
   const area = `${line(vals)}L${x(vals.length - 1)},${H - B}L${x(0)},${H - B}Z`;
   const lobby = data.map((m, i) => (m.lobbyKd === null ? null : `${i ? "L" : "M"}${x(i).toFixed(1)},${y(m.lobbyKd).toFixed(1)}`));
+  const cmpPath = cmpKd.flatMap((v, i) => (v === null ? [] : [`${i ? "L" : "M"}${x(i).toFixed(1)},${y(v).toFixed(1)}`])).join("").replace(/^L/, "M");
   const ticks = [0, 0.5, 1].map((t) => t * max);
   const h = hover !== null ? data[hover]! : null;
+  const hc = hover !== null ? compare?.get(data[hover]!.id) ?? null : null;
 
-  function onMove(e: React.MouseEvent) {
+  function onMove(e: React.PointerEvent) {
     const r = ref.current?.getBoundingClientRect();
     if (!r) return;
     const px = ((e.clientX - r.left) / r.width) * W;
@@ -96,7 +102,7 @@ function TrendChart({ data }: { data: ProfileMatch[] }) {
 
   return (
     <div className="relative">
-      <svg ref={ref} viewBox={`0 0 ${W} ${H}`} className="w-full" role="img" aria-label="K/D trend per match" onMouseMove={onMove} onMouseLeave={() => setHover(null)}>
+      <svg ref={ref} viewBox={`0 0 ${W} ${H}`} className="w-full touch-pan-y" role="img" aria-label="K/D trend per match" onPointerMove={onMove} onPointerDown={onMove} onPointerLeave={() => setHover(null)}>
         <defs>
           <linearGradient id="kdfill" x1="0" x2="0" y1="0" y2="1"><stop offset="0%" stopColor={RED} stopOpacity="0.45" /><stop offset="100%" stopColor={RED} stopOpacity="0" /></linearGradient>
         </defs>
@@ -107,7 +113,7 @@ function TrendChart({ data }: { data: ProfileMatch[] }) {
         <path d={area} fill="url(#kdfill)" />
         <path d={lobby.filter(Boolean).join("")} fill="none" stroke={AMBER} strokeWidth="1.2" strokeDasharray="4 4" opacity="0.7" />
         <path d={line(vals)} fill="none" stroke={RED} strokeWidth="2" strokeLinejoin="round" className="m-draw" pathLength={1} />
-        {hasCash && (
+        {compare && cmpPath && <path d={cmpPath} fill="none" stroke={BLUE} strokeWidth="1.8" strokeLinejoin="round" />}        {hasCash && (
           <g>
             {[0, 0.5, 1].map((t) => <text key={t} x={W - R + 6} y={yc(t * cashMax) + 3} fontSize="10" fill={SAGE} opacity="0.8">{Math.round(t * cashMax).toLocaleString()}</text>)}
             <path d={data.flatMap((m, i) => (m.cash === null ? [] : [`${i ? "L" : "M"}${x(i).toFixed(1)},${yc(m.cash).toFixed(1)}`])).join("").replace(/^L/, "M")} fill="none" stroke={SAGE} strokeWidth="1.6" strokeLinejoin="round" />
@@ -121,6 +127,7 @@ function TrendChart({ data }: { data: ProfileMatch[] }) {
       </svg>
       <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-stone/55">
         <span><i className="mr-1 inline-block h-0.5 w-4 align-middle" style={{ background: RED }} />K/D per match</span>
+        {compare && <span><i className="mr-1 inline-block h-0.5 w-4 align-middle" style={{ background: BLUE }} />{compareLabel}</span>}
         {hasCash && <span><i className="mr-1 inline-block h-0.5 w-4 align-middle" style={{ background: SAGE }} />Cash earned (right axis)</span>}
         <span><i className="mr-1 inline-block h-0.5 w-4 align-middle border-t border-dashed" style={{ borderColor: AMBER }} />Lobby K/D</span>
         <span><i className="mr-1 inline-block h-2 w-2 rounded-full align-middle" style={{ background: AMBER }} />MVP</span>
@@ -130,6 +137,7 @@ function TrendChart({ data }: { data: ProfileMatch[] }) {
           <div className="font-semibold">{h.map ?? "Unknown map"} <span className="font-normal text-stone/50">#{h.id}</span></div>
           <div className="text-stone/60">{fmtDateTime(h.endedAt)}</div>
           <div className="tabular-nums">{h.kills} K / {h.deaths} D · <span style={{ color: kdColor(h.kd) }}>{h.kd.toFixed(2)}</span>{h.lobbyKd !== null && <span className="text-stone/50"> (lobby {h.lobbyKd.toFixed(2)})</span>}{h.cash !== null && <span style={{ color: SAGE }}> · ${h.cash.toLocaleString()}</span>}</div>
+          {hc && <div className="tabular-nums" style={{ color: BLUE }}>{compareLabel}: {hc.kd !== null ? hc.kd.toFixed(2) : "-"}{hc.cash !== null && ` · $${hc.cash.toLocaleString()}`}</div>}
         </div>
       )}
     </div>
@@ -281,6 +289,30 @@ export default function MemberProfile({ member: memberProp, registration, onClos
 
   const s = data?.stats;
 
+  const [cmpKey, setCmpKey] = useState("");
+  const [cmpOptions, setCmpOptions] = useState<{ id: string; name: string }[]>([]);
+  const [cmp, setCmp] = useState<CompareData | null>(null);
+  const [cmpError, setCmpError] = useState<string | null>(null);
+  const subjectQs = !inline && memberProp?.id ? `&subject=${encodeURIComponent(memberProp.id)}` : "";
+  const hasSteam = !!data?.steamId;
+  useEffect(() => {
+    if (!hasSteam) return;
+    api<{ options: { id: string; name: string }[] }>(`/api/compare?x=1${subjectQs}`).then((r) => setCmpOptions(r.options), () => undefined);
+  }, [api, hasSteam, subjectQs]);
+  useEffect(() => {
+    setCmp(null);
+    setCmpError(null);
+    if (!cmpKey) return;
+    let live = true;
+    api<CompareData>(`/api/compare?with=${encodeURIComponent(cmpKey)}${subjectQs}`).then(
+      (r) => live && setCmp(r),
+      (e) => live && setCmpError((e as Error).message),
+    );
+    return () => {
+      live = false;
+    };
+  }, [api, cmpKey, subjectQs]);
+  const cmpMap = useMemo(() => (cmp ? new Map(cmp.series.map((p) => [p.matchId, p])) : null), [cmp]);
   return (
     <div className={inline ? "w-full" : "fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-ink-950/85 p-3 backdrop-blur-sm md:p-8"} {...(inline ? {} : { role: "dialog", "aria-modal": true, "aria-label": `${member.displayName} profile`, onMouseDown: (e: React.MouseEvent) => e.target === e.currentTarget && onClose?.() })}>
       <div className={`m-modal card relative w-full p-4 md:p-6 ${inline ? "" : "max-w-6xl"}`}>
@@ -363,7 +395,32 @@ export default function MemberProfile({ member: memberProp, registration, onClos
             ) : (
               <>
                 <div className="grid gap-4 lg:grid-cols-3">
-                  <Panel title="K/D trend" sub={`${chrono.length} matches`} className="lg:col-span-2">{chrono.length >= 2 ? <TrendChart data={chrono} /> : <Empty>Need at least 2 matches for a trend.</Empty>}</Panel>
+                  <Panel title="K/D trend" sub={`${chrono.length} matches`} className="lg:col-span-2">
+                    {chrono.length >= 2 ? (
+                      <>
+                        <div className="mb-2 flex flex-wrap items-center gap-2 text-xs">
+                          <label className="text-stone/60" htmlFor="cmp">Compare with</label>
+                          <select id="cmp" className="input !w-auto !py-1 text-xs" value={cmpKey} onChange={(e) => setCmpKey(e.target.value)}>
+                            <option value="">Nobody</option>
+                            <option value="clan">Clan average</option>
+                            {cmpOptions.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
+                          </select>
+                          {cmpError && <span className="text-orange">{cmpError}</span>}
+                        </div>
+                        <TrendChart data={chrono} compare={cmpMap} compareLabel={cmp?.withLabel} />
+                        {cmp && (
+                          <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
+                            {[cmp.me, cmp.other].map((t, i) => (
+                              <div key={i} className="rounded border border-ink-700 p-2" style={{ borderColor: i ? BLUE : RED }}>
+                                <div className="truncate font-semibold">{t.label}</div>
+                                <div className="mt-0.5 tabular-nums text-stone/70">K/D {t.kd !== null ? t.kd.toFixed(2) : "-"} · avg cash {t.avgCash !== null ? t.avgCash.toLocaleString() : "-"} · {t.matches} {i === 1 && cmp.withLabel === "Clan average" ? "players" : "matches"}</div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </>
+                    ) : <Empty>Need at least 2 matches for a trend.</Empty>}
+                  </Panel>
                   <Panel title="Faction split"><FactionDonut data={chrono} /></Panel>
                 </div>
                 <div className="grid gap-4 lg:grid-cols-2">

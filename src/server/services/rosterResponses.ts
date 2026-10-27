@@ -6,6 +6,36 @@ import { editMessage } from "./discord";
 import { getEventDetail } from "./raidHelper";
 import { getRoster } from "./rosters";
 import { BUTTON_PREFIX, messagePayload, renderRosterMessages } from "./rosterPublish";
+import { publish } from "./bus";
+
+/** Same as clicking Confirm/Decline in Discord, but from the dashboard. Refreshes every published roster message. */
+export async function respondToRoster(eventId: string, userId: string, displayName: string, response: "accepted" | "declined"): Promise<boolean> {
+  const [row] = await query<{ id: string }>(
+    `SELECT r.id FROM rosters r JOIN roster_assignments a ON a.roster_id = r.id AND a.discord_id = $2 WHERE r.raid_helper_event_id = $1`,
+    [eventId, userId],
+  );
+  if (!row) return false;
+  await query(
+    `INSERT INTO roster_responses (roster_id, discord_id, response) VALUES ($1,$2,$3)
+     ON CONFLICT (roster_id, discord_id) DO UPDATE SET response = EXCLUDED.response, responded_at = now()`,
+    [row.id, userId, response],
+  );
+  await audit({ discordId: userId, displayName }, `roster.${response}`, "roster", row.id, { via: "dashboard" });
+  publish("roster", { eventId });
+  try {
+    const roster = await getRoster(eventId);
+    if (roster && roster.messages.length) {
+      const event = (await getEventDetail(eventId)).data;
+      const messages = await renderRosterMessages(roster, event);
+      for (const [idx, old] of roster.messages.entries()) {
+        if (messages[idx]) await editMessage(old.channelId, old.messageId, messagePayload(messages[idx]!, roster.id, idx, false)).catch(() => undefined);
+      }
+    }
+  } catch {
+    // The response is saved; the Discord message will catch up on the next refresh.
+  }
+  return true;
+}
 
 // DER prefix that wraps a raw 32-byte Ed25519 public key as SPKI.
 const SPKI_PREFIX = Buffer.from("302a300506032b6570032100", "hex");
@@ -53,6 +83,7 @@ export async function handleRosterButton(i: ButtonInteraction): Promise<unknown>
     [rosterId, userId, response],
   );
   await audit({ discordId: userId, displayName: userId }, `roster.${response}`, "roster", rosterId, {});
+  publish("roster", { eventId: row.raid_helper_event_id });
 
   try {
     const roster = await getRoster(row.raid_helper_event_id);

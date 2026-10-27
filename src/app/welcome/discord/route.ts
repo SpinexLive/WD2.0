@@ -37,7 +37,7 @@ export async function GET(req: NextRequest) {
     const { token, expires } = await createSession(member);
     await audit({ discordId: member.id, displayName: member.displayName }, "login", "user", member.id);
 
-    const res = NextResponse.redirect(new URL(hasAuthorisedRole(member.roles) ? "/members" : "/me", env().APP_URL));
+    const res = NextResponse.redirect(new URL("/today", env().APP_URL));
     res.cookies.set(SESSION_COOKIE, token, sessionCookieOptions(expires));
     res.cookies.delete({ name: STATE_COOKIE, path: "/" });
     return res;

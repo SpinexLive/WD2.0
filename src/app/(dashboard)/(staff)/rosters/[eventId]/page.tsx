@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { use, useCallback, useEffect, useState } from "react";
-import { useApi, type ApiError } from "@/lib/client";
+import { useApi, useApp, useLive, type ApiError } from "@/lib/client";
 import { ErrorBanner, Skeleton } from "@/components/ui";
 import { RosterEditor } from "@/components/RosterEditor";
 import type { Roster, RosterTemplate, SignupInfo } from "@/lib/rosterTypes";
@@ -39,21 +39,33 @@ export default function RosterPage({ params }: { params: Promise<{ eventId: stri
   );
   useEffect(() => void load(), [load]);
 
-  // Players confirm in Discord, so pick up their responses while the page is open (never replaces unsaved edits).
+  // Players confirm in Discord, so pick up their responses as they arrive (never replaces unsaved edits).
+  const { user } = useApp();
+  const [elsewhere, setElsewhere] = useState(false);
+  const refreshResponses = useCallback(async () => {
+    try {
+      const next = await api<Data>(`/api/rosters/${encodeURIComponent(eventId)}`);
+      setData((prev) => {
+        if (!prev?.roster || !next.roster) return prev;
+        if (prev.roster.version === next.roster.version) return { ...prev, roster: { ...prev.roster, responses: next.roster.responses } };
+        if (next.roster.lastEditorId !== user.id) setElsewhere(true);
+        return prev;
+      });
+    } catch {
+      // A failed background refresh should not raise an error banner.
+    }
+  }, [api, eventId, user.id]);
+  useLive(["roster"], (d) => {
+    if (!d.eventId || d.eventId === eventId) void refreshResponses();
+  });
   const published = data?.roster?.status === "published";
   useEffect(() => {
     if (!published) return;
-    const timer = setInterval(async () => {
-      if (document.hidden) return;
-      try {
-        const next = await api<Data>(`/api/rosters/${encodeURIComponent(eventId)}`);
-        setData((prev) => (prev?.roster && next.roster && prev.roster.version === next.roster.version ? { ...prev, roster: { ...prev.roster, responses: next.roster.responses } } : prev));
-      } catch {
-        // The next tick retries; a failed background refresh should not raise an error banner.
-      }
-    }, 20_000);
+    const timer = setInterval(() => {
+      if (!document.hidden) void refreshResponses();
+    }, 60_000);
     return () => clearInterval(timer);
-  }, [published, api, eventId]);
+  }, [published, refreshResponses]);
 
   async function create() {
     setCreating(true);
@@ -79,7 +91,12 @@ export default function RosterPage({ params }: { params: Promise<{ eventId: stri
       {back}
       {data.eventError && <ErrorBanner message={`Raid Helper event data unavailable: ${data.eventError}`} onRetry={() => load(true)} />}
       {error && <ErrorBanner message={error} />}
-
+      {elsewhere && (
+        <div className="flex items-center justify-between gap-3 rounded-md border border-blood-500/60 bg-blood-600/10 p-2 text-sm">
+          <span>Someone else changed this roster.</span>
+          <button className="btn-ghost" onClick={() => { setElsewhere(false); void load(true); }}>Load latest (discards your unsaved edits)</button>
+        </div>
+      )}
       {data.roster ? (
         <RosterEditor key={`${data.roster.id}:${data.roster.version}`} roster={data.roster} signups={data.signups} leagueAvailable={data.leagueAvailable} eventTitle={title} onReload={() => load(true)} />
       ) : (

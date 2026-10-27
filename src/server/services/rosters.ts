@@ -3,6 +3,7 @@ import type { PoolClient } from "pg";
 import { query, tx } from "@/lib/db";
 import { HttpError } from "@/lib/http";
 import { COMPETITIVE_PLAYER_CAP, type EventType, type PublishedMessage, type Roster, type RosterResponse, type RosterTemplate, type Squad } from "@/lib/rosterTypes";
+import { publish } from "./bus";
 
 const snowflake = z.string().regex(/^\d{15,22}$/);
 
@@ -158,6 +159,7 @@ export async function createRoster(eventId: string, templateKey: string, editorI
     if ((err as { code?: string }).code === "23505") throw new HttpError(409, "A roster already exists for this event", "exists");
     throw err;
   }
+  publish("roster", { eventId });
   return (await getRoster(eventId))!;
 }
 
@@ -207,6 +209,7 @@ export async function saveRoster(eventId: string, input: SaveInput, editorId: st
     const stale = before.rows.filter((b) => now.get(b.discord_id) !== b.name).map((b) => b.discord_id);
     if (stale.length) await c.query("DELETE FROM roster_responses WHERE roster_id = $1 AND discord_id = ANY($2::text[])", [rosterId, stale]);
   });
+  publish("roster", { eventId });
   return (await getRoster(eventId))!;
 }
 
@@ -219,6 +222,7 @@ export async function deleteRoster(eventId: string, version: number): Promise<{ 
     if (!(await getRoster(eventId))) throw new HttpError(404, "Roster not found", "not_found");
     throw new HttpError(409, "This roster was changed by someone else. Reload to see their changes.", "conflict");
   }
+  publish("roster", { eventId });
   return del[0];
 }
 
@@ -239,5 +243,6 @@ export async function resetRoster(eventId: string, version: number, editorId: st
     await c.query("DELETE FROM roster_responses WHERE roster_id = $1", [upd.rows[0].id]);
     await insertSquads(c, upd.rows[0].id, tpl.squads);
   });
+  publish("roster", { eventId });
   return (await getRoster(eventId))!;
 }

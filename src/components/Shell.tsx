@@ -16,9 +16,12 @@ const NAV: { href: string; label: string; logo?: string }[] = [
   { href: "/recruit", label: "Recruit" },
   { href: "/news", label: "News" },
 ];
+const TODAY_NAV: { href: string; label: string; logo?: string } = { href: "/today", label: "Today", logo: "/images/icons/accept.png" };
 const ME_NAV: { href: string; label: string; logo?: string } = { href: "/me", label: "My stats" };
 const BOARD_NAV: { href: string; label: string; logo?: string } = { href: "/leaderboard", label: "Leaderboard" };
 const ADMIN_NAV: { href: string; label: string; logo?: string } = { href: "/admin", label: "Admin" };
+const STAFF_TABS = [TODAY_NAV, NAV[2]!, NAV[3]!, BOARD_NAV];
+const MEMBER_TABS = [TODAY_NAV, ME_NAV, BOARD_NAV];
 
 function Inner({ children, isOwner, isAdmin }: { children: React.ReactNode; isOwner: boolean; isAdmin: boolean }) {
   const { user, csrfToken } = useApp();
@@ -32,7 +35,7 @@ function Inner({ children, isOwner, isAdmin }: { children: React.ReactNode; isOw
 
   const nav = (
     <nav className="flex flex-col gap-1 p-2 pt-3">
-      {(isAdmin ? [...NAV, BOARD_NAV, ME_NAV, ...(isOwner ? [ADMIN_NAV] : [])] : [ME_NAV, BOARD_NAV]).map((n) => (
+      {(isAdmin ? [TODAY_NAV, ...NAV, BOARD_NAV, ME_NAV, ...(isOwner ? [ADMIN_NAV] : [])] : [TODAY_NAV, ME_NAV, BOARD_NAV]).map((n) => (
         <Link key={n.href} href={n.href} onClick={() => setOpen(false)} className={`group relative rounded-lg px-3 py-2 text-[12px] font-bold uppercase tracking-[0.14em] transition ${path.startsWith(n.href) ? "bg-gradient-to-r from-blood-600/30 to-transparent text-stone before:absolute before:inset-y-1.5 before:left-0 before:w-[3px] before:rounded-full before:bg-blood-500" : "text-stone/55 hover:bg-ink-800/80 hover:text-stone"}`}>
           <span className="flex items-center gap-2"><Image src={n.logo ?? "/images/grey.png"} alt="" width={22} height={22} className="h-[22px] w-[22px] object-contain" />{n.label}</span>
         </Link>
@@ -64,8 +67,25 @@ function Inner({ children, isOwner, isAdmin }: { children: React.ReactNode; isOw
             <button className="btn-ghost !rounded-full !px-3 !py-1" onClick={logout}>Log out</button>
           </div>
         </header>
-        <main className="min-w-0 flex-1 p-4 md:min-h-0 md:overflow-y-auto md:p-4">{children}</main>
+        <main className="min-w-0 flex-1 p-4 pb-24 md:min-h-0 md:overflow-y-auto md:p-4 md:pb-4">{children}</main>
       </div>
+      <nav aria-label="Primary" className="fixed inset-x-0 bottom-0 z-30 flex border-t border-ink-700 bg-ink-950/95 pb-[env(safe-area-inset-bottom)] backdrop-blur-md md:hidden">
+        {(isAdmin ? STAFF_TABS : MEMBER_TABS).map((n) => {
+          const on = path.startsWith(n.href);
+          return (
+            <Link key={n.href} href={n.href} className={`flex flex-1 flex-col items-center gap-0.5 py-2 text-[10px] font-bold uppercase tracking-wider ${on ? "text-stone" : "text-stone/50"}`}>
+              <Image src={n.logo ?? "/images/grey.png"} alt="" width={20} height={20} className={`h-5 w-5 object-contain ${on ? "" : "opacity-60"}`} />
+              <span className={on ? "border-b-2 border-blood-500" : ""}>{n.label}</span>
+            </Link>
+          );
+        })}
+        {isAdmin && (
+          <button className="flex flex-1 flex-col items-center gap-0.5 py-2 text-[10px] font-bold uppercase tracking-wider text-stone/50" onClick={() => setOpen(true)}>
+            <span className="text-base leading-5">☰</span>
+            <span>More</span>
+          </button>
+        )}
+      </nav>
     </div>
   );
 }

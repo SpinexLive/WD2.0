@@ -3,7 +3,17 @@ www.{$DOMAIN} {
 }
 
 {$DOMAIN} {
-	encode gzip
 	header Strict-Transport-Security "max-age=63072000"
-	reverse_proxy app:3000
+
+	# gzip would buffer the event stream, so it gets its own unbuffered proxy
+	handle /api/live {
+		reverse_proxy app:3000 {
+			flush_interval -1
+		}
+	}
+
+	handle {
+		encode gzip
+		reverse_proxy app:3000
+	}
 }

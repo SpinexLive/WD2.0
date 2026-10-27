@@ -1,8 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { useApi } from "@/lib/client";
-import { ErrorBanner, Skeleton } from "@/components/ui";
+import { useApi, useLive } from "@/lib/client";
+import { EmptyState, ErrorBanner, Skeleton } from "@/components/ui";
 import type { Briefing } from "@/server/services/briefing";
 
 const RESPONSE_LABEL: Record<string, string> = { accepted: "Confirmed", declined: "Declined" };
@@ -22,9 +22,10 @@ export default function BriefingPage() {
   }, [api]);
   useEffect(() => {
     void load();
-    const t = setInterval(() => void load(), 15_000);
+    const t = setInterval(() => void load(), 60_000);
     return () => clearInterval(t);
   }, [load]);
+  useLive(["voice", "roster"], () => void load());
 
   return (
     <div className="mx-auto max-w-5xl space-y-4">
@@ -33,12 +34,12 @@ export default function BriefingPage() {
         <button className="btn-ghost" onClick={() => void load()}>Refresh</button>
       </div>
       <p className="text-sm text-stone/60">
-        Rosters for upcoming events and events that started in the last 2 hours, checked against the briefing voice channel. Updates every 15 seconds.
+        Rosters for upcoming events and events that started in the last 2 hours, checked against the briefing voice channel. Updates live as players join or leave voice.
       </p>
       {error && <ErrorBanner message={error} onRetry={load} />}
       {data && !data.voiceAvailable && <ErrorBanner message="Voice channel data isn't available yet (the bot is still connecting), so presence is unknown." />}
       {!data && !error && <Skeleton className="h-40 w-full" />}
-      {data?.rosters.length === 0 && <div className="card p-6 text-center text-sm text-stone/50">No rosters for upcoming events or events from the last 2 hours.</div>}
+      {data?.rosters.length === 0 && <EmptyState title="Nothing to brief" hint="No rosters for upcoming events or events from the last 2 hours." />}
 
       {data?.rosters.map((r) => {
         const here = r.players.filter((p) => p.inVoice).length;

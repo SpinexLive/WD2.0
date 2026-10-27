@@ -136,7 +136,19 @@ export function useToast() {
     return () => clearTimeout(t);
   }, [msg]);
   const node = msg && (
-    <div role="status" className={`fixed bottom-4 right-4 z-50 max-w-sm rounded-md border p-3 text-sm shadow-lg ${msg.tone === "ok" ? "border-ok/50 bg-ink-800" : "border-blood-500 bg-ink-800"}`}>{msg.text}</div>
+    <div role="status" className={`toast-in fixed bottom-20 right-4 z-50 max-w-sm rounded-md border p-3 text-sm shadow-lg md:bottom-4 ${msg.tone === "ok" ? "border-ok/50 bg-ink-800" : "border-blood-500 bg-ink-800"}`}>{msg.text}</div>
   );
   return { toast: setMsg, node };
+}
+
+/** Friendly placeholder for lists with nothing in them. */
+export function EmptyState({ icon = "pending", title, hint, children }: { icon?: IconName; title: string; hint?: string; children?: React.ReactNode }) {
+  return (
+    <div className="card flex flex-col items-center gap-2 p-8 text-center">
+      <Icon name={icon} size={36} className="opacity-50" />
+      <div className="font-semibold">{title}</div>
+      {hint && <p className="max-w-md text-sm text-stone/55">{hint}</p>}
+      {children}
+    </div>
+  );
 }

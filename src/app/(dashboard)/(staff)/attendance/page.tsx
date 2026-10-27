@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useApi } from "@/lib/client";
-import { ErrorBanner, Skeleton } from "@/components/ui";
+import { EmptyState, ErrorBanner, Skeleton } from "@/components/ui";
 import type { AttendanceReport } from "@/server/services/attendance";
 
 type Range = "30d" | "90d" | "all";
@@ -52,7 +52,7 @@ export default function AttendancePage() {
       <div className="flex gap-1" role="group" aria-label="Time range">{RANGES.map((r) => <button key={r.key} className={chip(range === r.key)} onClick={() => setRange(r.key)}>{r.label}</button>)}</div>
       {error && <ErrorBanner message={error} onRetry={load} />}
       {!data && !error && <Skeleton className="h-40 w-full" />}
-      {data && data.events.length === 0 && <div className="card p-6 text-center text-sm text-stone/50">No events recorded in this period yet.</div>}
+      {data && data.events.length === 0 && <EmptyState title="No events recorded yet" hint="Attendance is captured automatically while rostered events are running." />}
 
       {data && data.events.length > 0 && (
         <>
