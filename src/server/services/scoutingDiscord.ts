@@ -64,8 +64,10 @@ function promptPayload(e: EventRow, open: boolean) {
 export async function postFeedbackPrompt(eventId: string): Promise<{ channelId: string }> {
   const e = await loadEvent(eventId);
   if (!e || e.closed_at) throw new HttpError(409, "Open the match for feedback first", "not_open");
-  const event = (await getEvents().then((s) => s.data)).find((x) => x.id === eventId);
+  const event = (await getEvents(true).then((s) => s.data)).find((x) => x.id === eventId);
   if (!event?.channelId) throw new HttpError(400, "Raid Helper didn't report a channel for this event, so there is nowhere to post.", "no_channel");
+  await query("UPDATE scouting_events SET title = $2 WHERE event_id = $1", [eventId, event.title]);
+  e.title = event.title;
   const messageId = await postMessage(event.channelId, promptPayload(e, true));
   if (e.prompt_channel_id && e.prompt_message_id) await deleteMessage(e.prompt_channel_id, e.prompt_message_id).catch(() => undefined);
   await query("UPDATE scouting_events SET prompt_channel_id = $2, prompt_message_id = $3 WHERE event_id = $1", [eventId, event.channelId, messageId]);

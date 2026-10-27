@@ -119,7 +119,7 @@ export async function openEvent(eventId: string, teamA: string, teamB: string, a
   if (!event) throw new HttpError(404, "Raid Helper event not found", "not_found");
   await query(
     `INSERT INTO scouting_events (event_id, title, starts_at, team_a, team_b, opened_by, faction_a, faction_b) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
-     ON CONFLICT (event_id) DO UPDATE SET team_a = EXCLUDED.team_a, team_b = EXCLUDED.team_b, faction_a = EXCLUDED.faction_a, faction_b = EXCLUDED.faction_b, closed_at = NULL`,
+     ON CONFLICT (event_id) DO UPDATE SET title = EXCLUDED.title, starts_at = EXCLUDED.starts_at, team_a = EXCLUDED.team_a, team_b = EXCLUDED.team_b, faction_a = EXCLUDED.faction_a, faction_b = EXCLUDED.faction_b, closed_at = NULL`,
     [eventId, event.title, event.startTime ? new Date(event.startTime * 1000) : null, a, b, actorId, factionA, factionB],
   );
 }
