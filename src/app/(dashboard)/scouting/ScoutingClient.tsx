@@ -7,7 +7,7 @@ import type { TeamDetail, TeamRow } from "@/server/services/scouting";
 
 const fmt = (iso: string) => new Date(iso).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
 
-export default function ScoutingClient({ canDelete = false }: { canDelete?: boolean }) {
+export default function ScoutingClient({ isStaff = false }: { isStaff?: boolean }) {
   const api = useApi();
   const { toast, node } = useToast();
   const [teams, setTeams] = useState<TeamRow[] | null>(null);
@@ -100,16 +100,16 @@ export default function ScoutingClient({ canDelete = false }: { canDelete?: bool
                 <section className="card space-y-3 p-4">
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <h2 className="text-lg font-bold">{detail.name}</h2>
-                    <button className="btn-primary" disabled={busy || !detail.aiConfigured} onClick={() => void regenerate()}>{busy ? "Generating…" : detail.summary ? "Refresh overview" : "Generate overview"}</button>
+                    {isStaff && <button className="btn-primary" disabled={busy || !detail.aiConfigured} onClick={() => void regenerate()}>{busy ? "Generating…" : detail.summary ? "Refresh overview" : "Generate overview"}</button>}
                   </div>
-                  {!detail.aiConfigured && <p className="text-xs text-orange">AI overviews aren&apos;t configured on the server yet. The notes below are still available.</p>}
+                  {isStaff && !detail.aiConfigured && <p className="text-xs text-orange">AI overviews aren&apos;t configured on the server yet. The notes below are still available.</p>}
                   {detail.summary ? (
                     <>
                       <p className="whitespace-pre-wrap text-sm leading-relaxed">{detail.summary.text}</p>
-                      <p className="text-xs text-stone/50">AI-generated from {detail.summary.basedOn} note{detail.summary.basedOn === 1 ? "" : "s"} on {fmt(detail.summary.generatedAt)}{detail.summary.basedOn !== detail.observations.length ? ` · ${detail.observations.length - detail.summary.basedOn} newer, refresh to include` : ""}. Check it against the notes below.</p>
+                      <p className="text-xs text-stone/50">AI-generated from {detail.summary.basedOn} note{detail.summary.basedOn === 1 ? "" : "s"} on {fmt(detail.summary.generatedAt)}{detail.summary.basedOn !== detail.observations.length ? ` · ${detail.observations.length - detail.summary.basedOn} newer, staff can refresh to include` : ""}. Check it against the notes below.</p>
                     </>
                   ) : (
-                    <p className="text-sm text-stone/55">No overview generated yet.</p>
+                    <p className="text-sm text-stone/55">{isStaff ? "No overview generated yet." : "No overview yet. Ask staff to generate one."}</p>
                   )}
                 </section>
                 <section className="space-y-2">
@@ -118,7 +118,7 @@ export default function ScoutingClient({ canDelete = false }: { canDelete?: bool
                     <article key={i} className="card p-3">
                       <div className="mb-1 flex items-center justify-between gap-2 text-xs text-stone/55">
                         <span>{o.match} · {fmt(o.at)}</span>
-                        {canDelete && <button className="text-blood-500 hover:underline" onClick={() => void remove(o.id)}>Delete</button>}
+                        {isStaff && <button className="text-blood-500 hover:underline" onClick={() => void remove(o.id)}>Delete</button>}
                       </div>
                       <div className="space-y-2">
                         {(["overview", "strengths", "weaknesses", "tactics"] as const).filter((k) => o[k]).map((k) => (

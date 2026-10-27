@@ -16,5 +16,5 @@ export const POST = protectedRoute<{ key: string }>(
     await audit(session, "scouting.summary", "team", key, {});
     return teamDetail(key);
   },
-  { reviewerOnly: true },
+  {},
 );
