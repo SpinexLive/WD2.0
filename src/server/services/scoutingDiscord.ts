@@ -97,9 +97,9 @@ export async function postOverview(key: string): Promise<{ channelId: string }> 
 
 type Member = ButtonInteraction["member"];
 
-function bypassRoles(member: Member): boolean {
-  if (!member) return false;
-  const roles = Array.isArray(member.roles) ? member.roles : [...member.roles.cache.keys()];
+const memberRoles = (member: Member): string[] => (!member ? [] : Array.isArray(member.roles) ? member.roles : [...member.roles.cache.keys()]);
+
+function bypassRoles(roles: string[]): boolean {
   return hasAuthorisedRole(roles) || roles.includes(env().DISCORD_REVIEWER_ROLE_ID);
 }
 
@@ -124,38 +124,98 @@ const SECTIONS: { id: keyof Fields; label: string; placeholder: string }[] = [
   { id: "tactics", label: "Tactics to use against them", placeholder: "What we should do next time" },
 ];
 
-export async function onFeedbackButton(i: ButtonInteraction): Promise<void> {
-  const ref = parseId(i.customId);
-  const reply = (content: string) => i.reply({ content, flags: MessageFlags.Ephemeral });
-  if (!ref || i.guildId !== env().DISCORD_GUILD_ID) return void (await reply("That feedback button isn't valid."));
+interface FormSpec {
+  customId: string;
+  title: string;
+  fields: { id: keyof Fields; label: string; placeholder: string; value: string }[];
+}
+
+/** Shared by the gateway and the HTTP interactions endpoint: either an error message or the form to show. */
+export async function prepareForm(customId: string, guildId: string | null | undefined, userId: string, roles: string[]): Promise<{ error: string } | { form: FormSpec }> {
+  const ref = parseId(customId);
+  if (!ref || guildId !== env().DISCORD_GUILD_ID) return { error: "That feedback button isn't valid." };
   const e = await loadEvent(ref.eventId);
-  if (!e || e.closed_at) return void (await reply("Feedback for this match is closed."));
-  if (!(await canGive(ref.eventId, i.user.id, bypassRoles(i.member)))) return void (await reply("Only players on the roster for this match can give feedback."));
+  if (!e || e.closed_at) return { error: "Feedback for this match is closed." };
+  if (!(await canGive(ref.eventId, userId, bypassRoles(roles)))) return { error: "Only players on the roster for this match can give feedback." };
 
   const team = ref.slot === "a" ? e.team_a : e.team_b;
   const [mine] = await query<{ body: string; strengths: string; weaknesses: string; tactics: string }>(
     "SELECT body, strengths, weaknesses, tactics FROM scouting_observations WHERE event_id = $1 AND team_key = $2 AND author_id = $3",
-    [ref.eventId, teamKey(team), i.user.id],
+    [ref.eventId, teamKey(team), userId],
   );
   const existing: Fields = { overview: mine?.body ?? "", strengths: mine?.strengths ?? "", weaknesses: mine?.weaknesses ?? "", tactics: mine?.tactics ?? "" };
-  const modal = new ModalBuilder().setCustomId(`${FEEDBACK_MODAL}:${ref.eventId}:${ref.slot}`).setTitle(`Feedback: ${team}`.slice(0, 45));
-  for (const s of SECTIONS) {
-    const input = new TextInputBuilder().setCustomId(s.id).setLabel(s.label.slice(0, 45)).setStyle(TextInputStyle.Paragraph).setRequired(false).setMaxLength(2000).setPlaceholder(s.placeholder);
-    if (existing[s.id]) input.setValue(existing[s.id]);
+  return {
+    form: {
+      customId: `${FEEDBACK_MODAL}:${ref.eventId}:${ref.slot}`,
+      title: `Feedback: ${team}`.slice(0, 45),
+      fields: SECTIONS.map((s) => ({ id: s.id, label: s.label.slice(0, 45), placeholder: s.placeholder, value: existing[s.id] })),
+    },
+  };
+}
+
+/** Saves a submitted form and returns the message to show the player. */
+export async function submitForm(customId: string, guildId: string | null | undefined, userId: string, roles: string[], values: Partial<Fields>): Promise<string> {
+  const ref = parseId(customId);
+  if (!ref || guildId !== env().DISCORD_GUILD_ID) return "That form isn't valid.";
+  try {
+    const f: Fields = { overview: values.overview ?? "", strengths: values.strengths ?? "", weaknesses: values.weaknesses ?? "", tactics: values.tactics ?? "" };
+    await saveObservation(ref.eventId, ref.slot, userId, f, bypassRoles(roles));
+    return "Thanks, your feedback was saved. You can press the button again to edit it.";
+  } catch (err) {
+    return err instanceof HttpError ? err.message : "Something went wrong. Please try again.";
+  }
+}
+
+export async function onFeedbackButton(i: ButtonInteraction): Promise<void> {
+  const r = await prepareForm(i.customId, i.guildId, i.user.id, memberRoles(i.member));
+  if ("error" in r) return void (await i.reply({ content: r.error, flags: MessageFlags.Ephemeral }));
+  const modal = new ModalBuilder().setCustomId(r.form.customId).setTitle(r.form.title);
+  for (const f of r.form.fields) {
+    const input = new TextInputBuilder().setCustomId(f.id).setLabel(f.label).setStyle(TextInputStyle.Paragraph).setRequired(false).setMaxLength(2000).setPlaceholder(f.placeholder);
+    if (f.value) input.setValue(f.value);
     modal.addComponents(new ActionRowBuilder<TextInputBuilder>().addComponents(input));
   }
   await i.showModal(modal);
 }
 
 export async function onFeedbackModal(i: ModalSubmitInteraction): Promise<void> {
-  const ref = parseId(i.customId);
-  if (!ref || i.guildId !== env().DISCORD_GUILD_ID) return void (await i.reply({ content: "That form isn't valid.", flags: MessageFlags.Ephemeral }));
-  try {
-    const fields = Object.fromEntries(SECTIONS.map((s) => [s.id, i.fields.getTextInputValue(s.id)])) as unknown as Fields;
-    await saveObservation(ref.eventId, ref.slot, i.user.id, fields, bypassRoles(i.member));
-    await i.reply({ content: "Thanks, your feedback was saved. You can press the button again to edit it.", flags: MessageFlags.Ephemeral });
-  } catch (err) {
-    const msg = err instanceof HttpError ? err.message : "Something went wrong. Please try again.";
-    await i.reply({ content: msg, flags: MessageFlags.Ephemeral }).catch(() => undefined);
+  const values = Object.fromEntries(SECTIONS.map((s) => [s.id, i.fields.getTextInputValue(s.id)]));
+  const msg = await submitForm(i.customId, i.guildId, i.user.id, memberRoles(i.member), values);
+  await i.reply({ content: msg, flags: MessageFlags.Ephemeral }).catch(() => undefined);
+}
+
+interface RawInteraction {
+  type?: number;
+  guild_id?: string;
+  member?: { user?: { id?: string }; roles?: string[] };
+  user?: { id?: string };
+  data?: { custom_id?: string; components?: { components?: { custom_id?: string; value?: string }[] }[] };
+}
+
+const ephemeral = (content: string) => ({ type: 4, data: { content, flags: 64, allowed_mentions: { parse: [] } } });
+
+/** HTTP Interactions Endpoint variant: returns the raw response body for a feedback button (type 3) or form submit (type 5). */
+export async function handleFeedbackRaw(i: RawInteraction): Promise<unknown> {
+  const userId = i.member?.user?.id ?? i.user?.id;
+  const customId = i.data?.custom_id ?? "";
+  const roles = i.member?.roles ?? [];
+  if (!userId) return ephemeral("That feedback button isn't valid.");
+  if (i.type === 5) {
+    const values: Record<string, string> = {};
+    for (const row of i.data?.components ?? []) for (const c of row.components ?? []) if (c.custom_id) values[c.custom_id] = c.value ?? "";
+    return ephemeral(await submitForm(customId, i.guild_id, userId, roles, values));
   }
+  const r = await prepareForm(customId, i.guild_id, userId, roles);
+  if ("error" in r) return ephemeral(r.error);
+  return {
+    type: 9,
+    data: {
+      custom_id: r.form.customId,
+      title: r.form.title,
+      components: r.form.fields.map((f) => ({
+        type: 1,
+        components: [{ type: 4, custom_id: f.id, style: 2, label: f.label, required: false, max_length: 2000, placeholder: f.placeholder, ...(f.value ? { value: f.value } : {}) }],
+      })),
+    },
+  };
 }

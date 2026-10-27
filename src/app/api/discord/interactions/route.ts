@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { handleRosterButton, verifyDiscordSignature, type ButtonInteraction } from "@/server/services/rosterResponses";
+import { FEEDBACK_BUTTON, FEEDBACK_MODAL, handleFeedbackRaw } from "@/server/services/scoutingDiscord";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -17,6 +18,15 @@ export async function POST(req: NextRequest) {
     return new NextResponse("bad request", { status: 400 });
   }
   if (body.type === 1) return NextResponse.json({ type: 1 });
+  const customId = (body.data as { custom_id?: string } | undefined)?.custom_id ?? "";
+  if ((body.type === 3 && customId.startsWith(`${FEEDBACK_BUTTON}:`)) || (body.type === 5 && customId.startsWith(`${FEEDBACK_MODAL}:`))) {
+    try {
+      return NextResponse.json(await handleFeedbackRaw(body));
+    } catch (err) {
+      console.error("feedback interaction failed:", err instanceof Error ? err.message : "unknown");
+      return NextResponse.json({ type: 4, data: { content: "Something went wrong. Please try again.", flags: 64 } });
+    }
+  }
   if (body.type === 3) {
     try {
       return NextResponse.json(await handleRosterButton(body as ButtonInteraction));
