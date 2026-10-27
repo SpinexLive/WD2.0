@@ -1,7 +1,7 @@
 import { query } from "@/lib/db";
 import { env } from "@/lib/env";
 import { HttpError, ProviderError } from "@/lib/http";
-import { parseTeams, teamKey } from "@/lib/scouting";
+import { isFaction, parseTeams, teamKey, type Faction } from "@/lib/scouting";
 import { getEvents } from "./raidHelper";
 
 const MAX_OBS_FOR_AI = 60;
@@ -17,13 +17,13 @@ export interface MemberEvent {
   eventId: string;
   title: string;
   startsAt: string | null;
-  teams: { slot: "a" | "b"; name: string; mine: Fields | null }[];
+  teams: { slot: "a" | "b"; name: string; faction: Faction | null; mine: Fields | null }[];
 }
 
 /** Open events the user was rostered for, with their own existing observation for each team. */
 export async function memberEvents(discordId: string, isStaff = false): Promise<MemberEvent[]> {
-  const events = await query<{ event_id: string; title: string; starts_at: Date | null; team_a: string; team_b: string }>(
-    `SELECT e.event_id, e.title, e.starts_at, e.team_a, e.team_b
+  const events = await query<{ event_id: string; title: string; starts_at: Date | null; team_a: string; team_b: string; faction_a: string | null; faction_b: string | null }>(
+    `SELECT e.event_id, e.title, e.starts_at, e.team_a, e.team_b, e.faction_a, e.faction_b
        FROM scouting_events e
        WHERE e.closed_at IS NULL AND ($2::boolean OR EXISTS (SELECT 1 FROM rosters r JOIN roster_assignments a ON a.roster_id = r.id AND a.discord_id = $1 WHERE r.raid_helper_event_id = e.event_id))
       ORDER BY e.starts_at DESC NULLS LAST, e.opened_at DESC`,
@@ -40,8 +40,8 @@ export async function memberEvents(discordId: string, isStaff = false): Promise<
     title: e.title,
     startsAt: e.starts_at?.toISOString() ?? null,
     teams: [
-      { slot: "a" as const, name: e.team_a, mine: own.get(`${e.event_id}:${teamKey(e.team_a)}`) ?? null },
-      { slot: "b" as const, name: e.team_b, mine: own.get(`${e.event_id}:${teamKey(e.team_b)}`) ?? null },
+      { slot: "a" as const, name: e.team_a, faction: isFaction(e.faction_a) ? e.faction_a : null, mine: own.get(`${e.event_id}:${teamKey(e.team_a)}`) ?? null },
+      { slot: "b" as const, name: e.team_b, faction: isFaction(e.faction_b) ? e.faction_b : null, mine: own.get(`${e.event_id}:${teamKey(e.team_b)}`) ?? null },
     ],
   }));
 }
@@ -74,6 +74,8 @@ export interface ManageEvent {
   closed: boolean;
   teamA: string;
   teamB: string;
+  factionA: Faction | null;
+  factionB: Faction | null;
   observations: number;
   posted: boolean;
 }
@@ -82,7 +84,7 @@ export interface ManageEvent {
 export async function manageEvents(): Promise<ManageEvent[]> {
   const [events, rows, counts] = await Promise.all([
     getEvents().then((s) => s.data),
-    query<{ event_id: string; team_a: string; team_b: string; closed_at: Date | null; prompt_message_id: string | null }>("SELECT event_id, team_a, team_b, closed_at, prompt_message_id FROM scouting_events"),
+    query<{ event_id: string; team_a: string; team_b: string; closed_at: Date | null; prompt_message_id: string | null; faction_a: string | null; faction_b: string | null }>("SELECT event_id, team_a, team_b, closed_at, prompt_message_id, faction_a, faction_b FROM scouting_events"),
     query<{ event_id: string; n: string }>("SELECT event_id, count(*) AS n FROM scouting_observations GROUP BY event_id"),
   ]);
   const by = new Map(rows.map((r) => [r.event_id, r]));
@@ -99,6 +101,8 @@ export async function manageEvents(): Promise<ManageEvent[]> {
         closed: !!r?.closed_at,
         teamA: r?.team_a ?? guess[0] ?? "",
         teamB: r?.team_b ?? guess[1] ?? "",
+        factionA: isFaction(r?.faction_a) ? r.faction_a : null,
+        factionB: isFaction(r?.faction_b) ? r.faction_b : null,
         observations: n.get(e.id) ?? 0,
         posted: !!r?.prompt_message_id,
       };
@@ -106,7 +110,7 @@ export async function manageEvents(): Promise<ManageEvent[]> {
     .sort((a, b) => (b.startTime ?? 0) - (a.startTime ?? 0));
 }
 
-export async function openEvent(eventId: string, teamA: string, teamB: string, actorId: string): Promise<void> {
+export async function openEvent(eventId: string, teamA: string, teamB: string, actorId: string, factionA: Faction | null = null, factionB: Faction | null = null): Promise<void> {
   const a = teamA.trim();
   const b = teamB.trim();
   if (!a || !b) throw new HttpError(400, "Both opposing teams need a name", "bad_teams");
@@ -114,9 +118,9 @@ export async function openEvent(eventId: string, teamA: string, teamB: string, a
   const event = (await getEvents().then((s) => s.data)).find((e) => e.id === eventId);
   if (!event) throw new HttpError(404, "Raid Helper event not found", "not_found");
   await query(
-    `INSERT INTO scouting_events (event_id, title, starts_at, team_a, team_b, opened_by) VALUES ($1,$2,$3,$4,$5,$6)
-     ON CONFLICT (event_id) DO UPDATE SET team_a = EXCLUDED.team_a, team_b = EXCLUDED.team_b, closed_at = NULL`,
-    [eventId, event.title, event.startTime ? new Date(event.startTime * 1000) : null, a, b, actorId],
+    `INSERT INTO scouting_events (event_id, title, starts_at, team_a, team_b, opened_by, faction_a, faction_b) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+     ON CONFLICT (event_id) DO UPDATE SET team_a = EXCLUDED.team_a, team_b = EXCLUDED.team_b, faction_a = EXCLUDED.faction_a, faction_b = EXCLUDED.faction_b, closed_at = NULL`,
+    [eventId, event.title, event.startTime ? new Date(event.startTime * 1000) : null, a, b, actorId, factionA, factionB],
   );
 }
 

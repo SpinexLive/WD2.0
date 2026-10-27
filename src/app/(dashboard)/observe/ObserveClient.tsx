@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useApi } from "@/lib/client";
 import { EmptyState, ErrorBanner, Skeleton, useToast } from "@/components/ui";
 import type { Fields, MemberEvent } from "@/server/services/scouting";
+import { FACTIONS } from "@/lib/scouting";
 
 const SECTIONS = [
   { key: "overview", label: "Overview", hint: "General impression: playstyle, how they approached the match." },
@@ -38,7 +39,10 @@ function TeamBox({ eventId, team, onSaved }: { eventId: string; team: MemberEven
 
   return (
     <section className="card space-y-3 p-4">
-      <h3 className="text-sm font-semibold uppercase tracking-wider">{team.name}</h3>
+      <h3 className="flex items-center gap-2 text-sm font-semibold uppercase tracking-wider">
+        {team.faction && /* eslint-disable-next-line @next/next/no-img-element */ <img src={FACTIONS[team.faction].image} alt={FACTIONS[team.faction].label} title={FACTIONS[team.faction].label} className="h-6 w-6 object-contain" />}
+        {team.name}
+      </h3>
       {SECTIONS.map((s) => (
         <label key={s.key} className="block space-y-1">
           <span className="text-xs font-semibold text-stone/80">{s.label}</span>

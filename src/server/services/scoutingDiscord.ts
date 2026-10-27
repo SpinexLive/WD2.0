@@ -2,7 +2,7 @@ import { ActionRowBuilder, MessageFlags, ModalBuilder, TextInputBuilder, TextInp
 import { query } from "@/lib/db";
 import { env } from "@/lib/env";
 import { HttpError } from "@/lib/http";
-import { teamKey } from "@/lib/scouting";
+import { FACTIONS, isFaction, teamKey } from "@/lib/scouting";
 import { deleteMessage, editMessage, hasAuthorisedRole, postMessage } from "./discord";
 import { getEvents } from "./raidHelper";
 import { saveObservation, type Fields } from "./scouting";
@@ -11,18 +11,23 @@ export const FEEDBACK_BUTTON = "wdfb";
 export const FEEDBACK_MODAL = "wdfbm";
 const RED = 0x8b1a1a;
 
+const factionEmoji = (f: string | null) => (isFaction(f) ? `<:${f}:${FACTIONS[f].emojiId}>` : "");
+const factionButtonEmoji = (f: string | null) => (isFaction(f) ? { id: FACTIONS[f].emojiId, name: f } : undefined);
+
 interface EventRow {
   event_id: string;
   title: string;
   team_a: string;
   team_b: string;
   closed_at: Date | null;
+  faction_a: string | null;
+  faction_b: string | null;
   prompt_channel_id: string | null;
   prompt_message_id: string | null;
 }
 
 async function loadEvent(eventId: string): Promise<EventRow | null> {
-  const [r] = await query<EventRow>("SELECT event_id, title, team_a, team_b, closed_at, prompt_channel_id, prompt_message_id FROM scouting_events WHERE event_id = $1", [eventId]);
+  const [r] = await query<EventRow>("SELECT event_id, title, team_a, team_b, closed_at, faction_a, faction_b, prompt_channel_id, prompt_message_id FROM scouting_events WHERE event_id = $1", [eventId]);
   return r ?? null;
 }
 
@@ -36,7 +41,7 @@ function promptPayload(e: EventRow, open: boolean) {
           ? `How did **${e.title}** go?\nPick the team you want to give feedback on. It's anonymous to reviewers, and you can edit it later.`
           : `Feedback for **${e.title}** is now closed. Thanks to everyone who contributed.`,
         color: RED,
-        fields: open ? [{ name: "Opposing teams", value: `${e.team_a}\n${e.team_b}` }] : [],
+        fields: open ? [{ name: "Opposing teams", value: `${factionEmoji(e.faction_a)} ${e.team_a}\n${factionEmoji(e.faction_b)} ${e.team_b}`.replace(/^ /gm, "") }] : [],
       },
     ],
     components: open
@@ -44,8 +49,8 @@ function promptPayload(e: EventRow, open: boolean) {
           {
             type: 1,
             components: [
-              { type: 2, style: 2, label: `Feedback: ${e.team_a}`.slice(0, 80), custom_id: `${FEEDBACK_BUTTON}:${e.event_id}:a` },
-              { type: 2, style: 2, label: `Feedback: ${e.team_b}`.slice(0, 80), custom_id: `${FEEDBACK_BUTTON}:${e.event_id}:b` },
+              { type: 2, style: 2, label: `Feedback: ${e.team_a}`.slice(0, 80), emoji: factionButtonEmoji(e.faction_a), custom_id: `${FEEDBACK_BUTTON}:${e.event_id}:a` },
+              { type: 2, style: 2, label: `Feedback: ${e.team_b}`.slice(0, 80), emoji: factionButtonEmoji(e.faction_b), custom_id: `${FEEDBACK_BUTTON}:${e.event_id}:b` },
               { type: 2, style: 5, label: "Open dashboard", url: `${base}/observe` },
             ],
           },
