@@ -2,7 +2,7 @@ import { z } from "zod";
 import { protectedRoute } from "@/lib/apiGuard";
 import { resolveLinks } from "@/server/services/links";
 import { getAllClanMembers, getClanMembers } from "@/server/services/discord";
-import { getLeaderboard } from "@/server/services/wardogsRcon";
+import { getLeaderboard, MIN_KD_MATCHES } from "@/server/services/wardogsRcon";
 
 export const dynamic = "force-dynamic";
 
@@ -16,8 +16,9 @@ export const GET = protectedRoute(
   async ({ req, session }) => {
     const q = querySchema.parse(Object.fromEntries(req.nextUrl.searchParams));
     const force = req.nextUrl.searchParams.get("refresh") === "1";
-    const [board, links, clan, allClan] = await Promise.all([
-      getLeaderboard(q.range, q.sort, force),
+    // The API caps each list at the server-wide top 100, so a single sort holds few clan members. Pool several lists, then sort locally.
+    const [pools, links, clan, allClan] = await Promise.all([
+      Promise.all((["kills", "cash", "matches"] as const).map((s) => getLeaderboard(q.range, s, force))),
       resolveLinks().catch(() => null),
       getClanMembers().then((s) => s.data, () => []),
       getAllClanMembers().then((s) => s.data, () => []),
@@ -32,7 +33,13 @@ export const GET = protectedRoute(
       }
     }
     // Clan members only (linked to a Discord member with the clan or Wardogs role), ranked within the clan.
-    const rows = board.data.flatMap((r) => (nick.has(r.steamId) ? [{ ...r, nickname: nick.get(r.steamId)! }] : [])).map((r, i) => ({ ...r, rank: i + 1 }));
+    const merged = new Map(pools.flatMap((p) => p.data).map((r) => [r.steamId, r]));
+    const value = (r: { kills: number; kd: number; cash: number | null; matches: number }) => (q.sort === "kd" ? r.kd : q.sort === "cash" ? (r.cash ?? 0) : q.sort === "matches" ? r.matches : r.kills);
+    const rows = [...merged.values()]
+      .filter((r) => nick.has(r.steamId) && (q.sort !== "kd" || r.matches >= MIN_KD_MATCHES))
+      .sort((a, b) => value(b) - value(a) || b.kills - a.kills)
+      .map((r, i) => ({ ...r, nickname: nick.get(r.steamId)!, rank: i + 1 }));
+    const board = { fetchedAt: pools[0]!.fetchedAt, stale: pools.some((p) => p.stale) };
     return { range: q.range, sort: q.sort, rows, fetchedAt: board.fetchedAt, stale: board.stale, mySteamId: links?.steamIds.get(session.discordId) ?? null };
   },
   { allowMember: true },
