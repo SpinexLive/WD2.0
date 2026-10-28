@@ -6,10 +6,15 @@ import { HttpError, ProviderError, requestJson } from "@/lib/http";
 import type { Session } from "@/lib/session";
 import { getGuildMembers, type DiscordMember } from "./discord";
 import { getLeagueMembers, type LeagueMember } from "./wardogsLeague";
+import { DiscordAPIError, REST, Routes } from "discord.js";
 
 const API = "https://discord.com/api/v10";
 const LOCK = 331022;
 const bot = () => ({ Authorization: `Bot ${env().DISCORD_BOT_TOKEN}` });
+// Keep bucket state across syncs and development reloads. REST queues requests
+// using Discord's response headers and waits out Retry-After, including long 429s.
+const restState = globalThis as unknown as { __wdlRoleRest?: REST };
+const roleRest = () => (restState.__wdlRoleRest ??= new REST({ version: "10", rejectOnRateLimit: null }).setToken(env().DISCORD_BOT_TOKEN));
 interface Role { id: string; name: string; position: number; managed: boolean; permissions: string }
 interface Settings { role_id: string | null; last_synced_at: Date | null; last_added: number; last_error: string | null }
 
@@ -80,15 +85,15 @@ export async function syncWdlRole(actor: Pick<Session, "discordId" | "displayNam
       if (members.stale || league.stale) throw new Error("Discord or WDL data is outdated. No roles were assigned; try again later.");
       for (const member of wdlRoleRecipients(members.data, league.data, roleId, env().DISCORD_MEMBER_ROLE_ID)) {
         try {
-          await requestJson({ provider: "discord", method: "PUT", url: `${API}/guilds/${env().DISCORD_GUILD_ID}/members/${member.id}/roles/${roleId}`, headers: bot(), retries: 1 });
+          await roleRest().put(Routes.guildMemberRole(env().DISCORD_GUILD_ID, member.id, roleId));
           added++;
         } catch (err) {
-          if (err instanceof ProviderError && err.code === "10007") continue; // Member left during the sync.
+          if (err instanceof DiscordAPIError && String(err.code) === "10007") continue; // Member left during the sync.
           throw err;
         }
       }
     } catch (err) {
-      error = err instanceof ProviderError && err.status === 403
+      error = (err instanceof ProviderError || err instanceof DiscordAPIError) && err.status === 403
         ? "The bot could not assign the role. Check Manage Roles and its role position."
         : (err as Error).message;
     }
