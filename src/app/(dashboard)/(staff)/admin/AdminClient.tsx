@@ -6,12 +6,13 @@ import { ErrorBanner, Skeleton } from "@/components/ui";
 import WhitelistPanel from "./WhitelistPanel";
 import GoldPanel from "./GoldPanel";
 import StatusPanel from "./StatusPanel";
+import WdlRolePanel from "./WdlRolePanel";
 
 interface Overview {
   audit: { id: string; actor: string | null; action: string; targetType: string | null; targetId: string | null; details: unknown; at: string }[];
 }
 
-type Tab = "whitelist" | "gold" | "status" | "audit";
+type Tab = "whitelist" | "gold" | "wdl-role" | "status" | "audit";
 
 const fmt = (v: string | null) => (v ? new Date(v).toLocaleString("en-GB", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" }) : "-");
 
@@ -35,7 +36,7 @@ export default function AdminClient() {
   }, [api]);
   useEffect(() => void load(), [load]);
 
-  const tabs: [Tab, string][] = [["whitelist", "Whitelist links"], ["gold", "Gold price"], ["status", "Status"], ["audit", "Audit log"]];
+  const tabs: [Tab, string][] = [["whitelist", "Whitelist links"], ["gold", "Gold price"], ["wdl-role", "WDL role"], ["status", "Status"], ["audit", "Audit log"]];
 
   return (
     <div className="flex flex-col gap-4 md:h-full">
@@ -46,7 +47,7 @@ export default function AdminClient() {
 
       {error && <ErrorBanner message={error} onRetry={load} />}
 
-      <div className="flex gap-1 border-b border-ink-700">
+      <div className="flex flex-wrap gap-1 border-b border-ink-700">
         {tabs.map(([k, label]) => (
           <button key={k} onClick={() => setTab(k)} className={`border-b-2 px-3 py-2 text-sm font-semibold uppercase tracking-[0.12em] ${tab === k ? "border-blood-500 text-stone" : "border-transparent text-stone/50 hover:text-stone"}`}>{label}</button>
         ))}
@@ -57,6 +58,8 @@ export default function AdminClient() {
           <WhitelistPanel onChanged={load} />
         ) : tab === "gold" ? (
           <GoldPanel />
+        ) : tab === "wdl-role" ? (
+          <WdlRolePanel />
         ) : tab === "status" ? (
           <StatusPanel />
         ) : loading && !data ? (

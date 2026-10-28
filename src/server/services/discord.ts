@@ -134,7 +134,7 @@ export async function getAllClanMembers(force = false): Promise<Snapshot<Discord
   return { ...snap, data: snap.data.filter((m) => m.roles.includes(role)) };
 }
 
-function getGuildMembers(force = false): Promise<Snapshot<DiscordMember[]>> {
+export function getGuildMembers(force = false): Promise<Snapshot<DiscordMember[]>> {
   return cached("discord:guild-members", 5 * 60_000, async () => {
     const all: DiscordMember[] = [];
     let after = "0";

@@ -4,6 +4,8 @@ export async function register() {
     startRosterGateway();
     const { startGoldScheduler } = await import("./server/services/gold");
     startGoldScheduler();
+    const { startWdlRoleScheduler } = await import("./server/services/wdlRole");
+    startWdlRoleScheduler();
     const { startMonitor } = await import("./server/services/monitor");
     startMonitor();
   }
