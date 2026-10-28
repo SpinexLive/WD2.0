@@ -6,7 +6,7 @@ import type { Session } from "@/lib/session";
 
 const API = "https://discord.com/api/v10";
 const SOURCE = "https://wardogshub.gg/gold-market/";
-const PREFIX = "┊🪙┊";
+const PREFIX = "💰┊ɢᴏʟᴅ ʙᴀʀ";
 const VIEW_CHANNEL = 1n << 10n;
 const CONNECT = 1n << 20n;
 const RUN_HOUR_UTC = 1;
@@ -39,7 +39,7 @@ export async function fetchGoldPrice(): Promise<GoldPrice> {
   return price;
 }
 
-export const channelName = (rate: number) => `${PREFIX}Gold Bar $${rate.toLocaleString("en-US")}`;
+export const channelName = (rate: number) => `${PREFIX}ㆍ$${rate.toLocaleString("en-US")}`;
 
 function mapDiscord(err: unknown): never {
   if (err instanceof ProviderError && (err.code === "50013" || err.code === "50001" || err.status === 403)) {
@@ -105,7 +105,7 @@ export async function createGoldChannel(actor: Session, categoryId: string) {
       headers: bot(),
       retries: 0,
       body: {
-        name: price ? channelName(price.rate) : `${PREFIX}Gold Bar`,
+        name: price ? channelName(price.rate) : PREFIX,
         type: 2,
         parent_id: categoryId,
         permission_overwrites: [

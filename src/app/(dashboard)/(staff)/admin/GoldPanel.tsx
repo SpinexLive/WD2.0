@@ -49,7 +49,7 @@ export default function GoldPanel() {
   return (
     <div className="space-y-4 p-4">
       <p className="text-sm text-stone/60">
-        A voice channel named <span className="font-mono">┊🪙┊Gold Bar $…</span> that shows the day&apos;s gold bar price from wardogshub.gg. It is hidden from everyone except the clan member role, who can see it but not join. The name updates every day at 01:00 UTC.
+        A voice channel named <span className="font-mono">💰┊ɢᴏʟᴅ ʙᴀʀㆍ$…</span> that shows the day&apos;s gold bar price from wardogshub.gg. It is hidden from everyone except the clan member role, who can see it but not join. The name updates every day at 01:00 UTC.
       </p>
       {error && <ErrorBanner message={error} onRetry={load} />}
       {data?.categoriesError && <ErrorBanner message={data.categoriesError} onRetry={load} />}

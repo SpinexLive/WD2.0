@@ -26,7 +26,7 @@ describe("gold price parsing", () => {
     expect(parseGoldPrice(html, "2026-10-28")).toBeNull();
   });
   it("builds the channel name with the prefix", () => {
-    expect(channelName(641905)).toBe("┊🪙┊Gold Bar $641,905");
+    expect(channelName(641905)).toBe("💰┊ɢᴏʟᴅ ʙᴀʀㆍ$641,905");
   });
 });
 
