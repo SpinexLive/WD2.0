@@ -171,7 +171,21 @@ describe("Discord embeds", () => {
     expect(e[0]!.description).toMatch(/^Bring mics\./);
     expect(e[0]!.description).toContain("Date:");
     expect(e[0]!.description).toContain("**Time:** <t:1900000000:t>");
-    expect(e[0]!.fields[0]).toMatchObject({ name: "COMMAND • Commander", value: `${STATUS_ICON.pending} <@${id(1)}>` });
+    expect(e[0]!.fields[0]).toMatchObject({ name: "COMMAND • Commander", value: `${STATUS_ICON.pending} Boss` });
+  });
+  it("shows every vacant slot, including completely empty squads, without counting vacancies as players", () => {
+    const partial = squad("Partial", 4, { slots: [null, { ...ref(1), isLeader: false }, null, { ...ref(2), isLeader: true }] });
+    const [message] = buildRosterMessages(input([partial, squad("Empty", 3)]));
+    const fields = message!.embed.fields;
+    expect(fields[0]!.value.split("\n")).toEqual([
+      expect.stringContaining("**P2**"),
+      "Free Slot - Sign up",
+      `${STATUS_ICON.pending} P1`,
+      "Free Slot - Sign up",
+    ]);
+    expect(fields[1]!.value.split("\n")).toEqual(Array(3).fill("Free Slot - Sign up"));
+    expect(message!.mentions).toEqual([id(2), id(1)]);
+    expect(message!.embed.footer?.text).toContain("0 confirmed | 2 pending | 0 declined");
   });
   it("splits very large rosters while respecting Discord limits", () => {
     const embeds = buildRosterEmbeds(input(fill(40, 30)));
@@ -192,12 +206,12 @@ describe("Discord embeds", () => {
     expect(fields.length).toBeGreaterThan(1);
     expect(fields.every((f) => f.value.length <= 1024)).toBe(true);
   });
-  it("always mentions every assigned player and shows their confirmation status", () => {
+  it("shows escaped names and confirmation status while retaining notification recipients", () => {
     const sq = squad("S", 2, { slots: [{ discordId: id(1), displayName: "@everyone *hi*", avatarUrl: null, isLeader: false }, { discordId: id(2), displayName: "B", avatarUrl: null, isLeader: false }] });
     const [m] = buildRosterMessages({ ...input([sq]), responses: { [id(1)]: "accepted", [id(2)]: "declined" } });
     expect(m!.mentions).toEqual([id(1), id(2)]);
-    expect(m!.embed.fields[0]!.value).toContain(`${STATUS_ICON.accepted} <@${id(1)}>`);
-    expect(m!.embed.fields[0]!.value).toContain(`${STATUS_ICON.declined} <@${id(2)}>`);
+    expect(m!.embed.fields[0]!.value).toContain(`${STATUS_ICON.accepted} @\u200beveryone \\*hi\\*`);
+    expect(m!.embed.fields[0]!.value).toContain(`${STATUS_ICON.declined} B`);
     expect(m!.embed.fields[0]!.value).not.toContain("@everyone");
     expect(m!.embed.footer?.text).toBe("1 confirmed | 0 pending | 1 declined | ★ = Squad Leader");
     expect(mentionContent(m!.mentions, true)).toBe(`Roster posted for confirmation: <@${id(1)}> <@${id(2)}>`);

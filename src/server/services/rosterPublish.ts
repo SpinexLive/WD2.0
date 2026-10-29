@@ -7,7 +7,7 @@ import type { Session } from "@/lib/session";
 import type { Roster, RosterWarning, SignupInfo } from "@/lib/rosterTypes";
 import { validateRoster } from "@/lib/rosterValidation";
 import { buildRosterMessages, mentionContent, type DiscordEmbed, type RosterMessage } from "@/server/embed";
-import { deleteMessage, DiscordMessageMissing, editMessage, getClanMembers, getPostableChannels, postMessage, type DiscordMessagePayload } from "./discord";
+import { deleteMessage, DiscordMessageMissing, editMessage, getGuildMembers, getClanMembers, getPostableChannels, postMessage, type DiscordMessagePayload } from "./discord";
 import { getEventDetail, type RaidHelperEventDetail, type RaidHelperSignup } from "./raidHelper";
 import { getLeagueApplications, getLeagueMembers, registrationStatus } from "./wardogsLeague";
 import { getRoster } from "./rosters";
@@ -44,6 +44,9 @@ export function messagePayload(m: RosterMessage, rosterId: string, index: number
 }
 
 export async function renderRosterMessages(roster: Roster, event: RaidHelperEventDetail): Promise<RosterMessage[]> {
+  const members = await getGuildMembers(true);
+  if (members.stale) throw new HttpError(503, "Current Discord server nicknames are unavailable. Try again shortly.", "discord_unavailable");
+  const names = new Map(members.data.map((m) => [m.id, m.displayName]));
   return buildRosterMessages({
     eventTitle: event.title,
     startTime: event.startTime,
@@ -51,7 +54,10 @@ export async function renderRosterMessages(roster: Roster, event: RaidHelperEven
     thumbnailUrl: `${env().APP_URL}/images/icon.png`,
     eventType: roster.eventType,
     eventUrl: event.discordUrl,
-    squads: roster.squads,
+    squads: roster.squads.map((s) => ({
+      ...s,
+      slots: s.slots.map((p) => p ? { ...p, displayName: names.get(p.discordId) ?? p.displayName } : null),
+    })),
     responses: roster.responses,
   });
 }
@@ -242,7 +248,7 @@ async function update(roster: Roster, embeds: RosterMessage[], actor: Session) {
 
   const added: string[] = [];
   try {
-    for (let i = old.length; i < embeds.length; i++) added.push(await postMessage(channelId, messagePayload(embeds[i]!, roster.id, i, true)));
+    for (let i = old.length; i < embeds.length; i++) added.push(await postMessage(channelId, messagePayload(embeds[i]!, roster.id, i, false)));
   } catch (err) {
     await Promise.allSettled(added.map((id) => deleteMessage(channelId, id)));
     throw err;

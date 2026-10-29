@@ -49,14 +49,14 @@ const clip = (s: string, n: number) => (s.length > n ? `${s.slice(0, n - 1)}…`
 type Field = { name: string; value: string; inline: false; ids: string[] };
 
 function playerLine(p: NonNullable<Squad["slots"][number]>, responses: Record<string, RosterResponse>): string {
-  const who = `<@${p.discordId}>`;
+  const who = escapeMd(p.displayName);
   return `${STATUS_ICON[responses[p.discordId] ?? "pending"]} ${p.isLeader ? `**${who}** ★` : who}`;
 }
 
 function squadPlayers(s: Squad) {
-  const filled = s.slots.filter((p): p is NonNullable<typeof p> => p !== null);
-  // Leader first, then slot order.
-  return [...filled.filter((p) => p.isLeader), ...filled.filter((p) => !p.isLeader)];
+  const slots = Array.from({ length: s.size }, (_, i) => s.slots[i] ?? null);
+  // Leader first, then remaining slots (including vacancies) in slot order.
+  return [...slots.filter((p) => p?.isLeader), ...slots.filter((p) => !p?.isLeader)];
 }
 
 function fieldsFor(squads: Squad[], responses: Record<string, RosterResponse>): Field[] {
@@ -82,10 +82,10 @@ function fieldsFor(squads: Squad[], responses: Record<string, RosterResponse>): 
         ids = [];
       };
       for (const p of players) {
-        const line = playerLine(p, responses);
+        const line = p ? playerLine(p, responses) : "Free Slot - Sign up";
         if (value && value.length + 1 + line.length > MAX_FIELD_VALUE) flush();
         value = value ? `${value}\n${line}` : line;
-        ids.push(p.discordId);
+        if (p) ids.push(p.discordId);
       }
       flush();
     }
