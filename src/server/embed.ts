@@ -51,7 +51,7 @@ type Field = { name: string; value: string; inline: false; ids: string[] };
 function playerLine(p: NonNullable<Squad["slots"][number]>, responses: Record<string, RosterResponse>): string {
   const who = escapeMd(p.displayName);
   const label = p.isLeader ? `**${who}** ★` : who;
-  return p.discordId ? `${STATUS_ICON[responses[p.discordId] ?? "pending"]} ${label}` : `${label} (Mercenary)`;
+  return p.discordId ? `${STATUS_ICON[responses[p.discordId] ?? "pending"]} ${label}` : `☠️ ${label}`;
 }
 
 function squadPlayers(s: Squad) {

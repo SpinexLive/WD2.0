@@ -33,7 +33,7 @@ beforeEach(() => {
 
 it("refreshes member nicknames while preserving a mercenary's manually entered name", async () => {
   const [message] = await renderRosterMessages(roster(true), { title: "Event", startTime: null } as RaidHelperEventDetail);
-  expect(message!.embed.fields[0]!.value).toContain("Guest (Mercenary)");
+  expect(message!.embed.fields[0]!.value).toContain("☠️ Guest");
   expect(message!.embed.fields[0]!.value).toContain("Current nickname");
   const payload = messagePayload(message!, "roster", 0, true);
   expect(payload.allowed_mentions.users).toEqual([memberId]);

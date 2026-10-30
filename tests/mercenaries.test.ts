@@ -23,7 +23,7 @@ describe("named mercenaries", () => {
   it("shows a mercenary without a response icon, ping, or pending confirmation", () => {
     const [message] = buildRosterMessages({ eventTitle: "Match", startTime: null, eventType: "weekly", eventUrl: null, squads: [squad("A", [merc, member, null])] });
     expect(message!.embed.fields[0]!.value.split("\n")).toEqual([
-      "Guest \\*One\\* (Mercenary)", `${STATUS_ICON.pending} Member`, "Free Slot - Sign up",
+      "☠️ Guest \\*One\\*", `${STATUS_ICON.pending} Member`, "Free Slot - Sign up",
     ]);
     expect(message!.mentions).toEqual([member.discordId]);
     expect(message!.embed.footer?.text).toContain("0 confirmed | 1 pending | 0 declined");
