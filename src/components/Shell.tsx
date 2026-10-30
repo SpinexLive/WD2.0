@@ -6,25 +6,8 @@ import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import { AppProvider, useApp } from "@/lib/client";
 import { Avatar } from "./ui";
-
-const NAV: { href: string; label: string; logo?: string }[] = [
-  { href: "/members", label: "Members", logo: "/images/icons/wardogs.png" },
-  { href: "/wdl", label: "WDL", logo: "/images/WDL.webp" },
-  { href: "/rosters", label: "Rosters", logo: "/images/icons/infantry.png" },
-  { href: "/briefing", label: "Briefing" },
-  { href: "/attendance", label: "Attendance" },
-  { href: "/recruit", label: "Recruit" },
-  { href: "/news", label: "News" },
-];
-const TODAY_NAV: { href: string; label: string; logo?: string } = { href: "/today", label: "Today", logo: "/images/icons/accept.png" };
-const ME_NAV: { href: string; label: string; logo?: string } = { href: "/me", label: "My stats" };
-const BOARD_NAV: { href: string; label: string; logo?: string } = { href: "/leaderboard", label: "Leaderboard" };
-const OBSERVE_NAV: { href: string; label: string; logo?: string } = { href: "/observe", label: "Match Feedback" };
-const SCOUT_NAV: { href: string; label: string; logo?: string } = { href: "/scouting", label: "Scouting" };
-const SETUP_NAV: { href: string; label: string; logo?: string } = { href: "/feedback-setup", label: "Feedback setup" };
-const ADMIN_NAV: { href: string; label: string; logo?: string } = { href: "/admin", label: "Admin" };
-const STAFF_TABS = [TODAY_NAV, NAV[2]!, NAV[3]!, BOARD_NAV];
-const MEMBER_TABS = [TODAY_NAV, ME_NAV, BOARD_NAV];
+import { SidebarNav } from "./SidebarNav";
+import { STAFF_TABS, MEMBER_TABS } from "@/lib/navigation";
 
 function ViewAsPicker({ csrfToken }: { csrfToken: string }) {
   const [open, setOpen] = useState(false);
@@ -68,7 +51,7 @@ function ViewAsPicker({ csrfToken }: { csrfToken: string }) {
   );
 }
 
-function Inner({ children, isOwner, isAdmin, isReviewer, canViewAs, viewingAs }: { children: React.ReactNode; isOwner: boolean; isAdmin: boolean; isReviewer: boolean; canViewAs: boolean; viewingAs: string | null }) {
+function Inner({ children, isOwner, isAdmin, isReviewer, canManageNews, canViewAs, viewingAs }: { children: React.ReactNode; isOwner: boolean; isAdmin: boolean; isReviewer: boolean; canManageNews: boolean; canViewAs: boolean; viewingAs: string | null }) {
   const { user, csrfToken } = useApp();
   const path = usePathname();
   const [open, setOpen] = useState(false);
@@ -83,25 +66,17 @@ function Inner({ children, isOwner, isAdmin, isReviewer, canViewAs, viewingAs }:
     window.location.href = "/";
   }
 
-  const nav = (
-    <nav className="flex flex-col gap-1 p-2 pt-3">
-      {(isAdmin ? [TODAY_NAV, ...NAV, SETUP_NAV, BOARD_NAV, OBSERVE_NAV, SCOUT_NAV, ME_NAV, ...(isOwner ? [ADMIN_NAV] : [])] : [TODAY_NAV, ME_NAV, BOARD_NAV, OBSERVE_NAV, ...(isReviewer ? [SCOUT_NAV] : [])]).map((n) => (
-        <Link key={n.href} href={n.href} onClick={() => setOpen(false)} className={`group relative rounded-lg px-3 py-2 text-[12px] font-bold uppercase tracking-[0.14em] transition ${path.startsWith(n.href) ? "bg-gradient-to-r from-blood-600/30 to-transparent text-stone before:absolute before:inset-y-1.5 before:left-0 before:w-[3px] before:rounded-full before:bg-blood-500" : "text-stone/55 hover:bg-ink-800/80 hover:text-stone"}`}>
-          <span className="flex items-center gap-2"><Image src={n.logo ?? "/images/grey.png"} alt="" width={22} height={22} className="h-[22px] w-[22px] object-contain" />{n.label}</span>
-        </Link>
-      ))}
-    </nav>
-  );
+  const nav = <SidebarNav access={{ isAdmin, isReviewer, isOwner, canManageNews }} onNavigate={() => setOpen(false)} />;
 
   return (
     <div className="flex min-h-screen md:h-screen md:overflow-hidden">
-      <aside className="sticky top-0 hidden h-screen w-52 shrink-0 border-r border-ink-700/80 bg-gradient-to-b from-ink-900 to-ink-950 md:block">
+      <aside className="sticky top-0 hidden h-screen w-60 shrink-0 flex-col border-r border-ink-700/80 bg-gradient-to-b from-ink-900 to-ink-950 md:flex">
         <div className="flex items-center gap-3 border-b border-ink-700 px-4 py-3"><Image src="/images/icon.png" alt="" width={32} height={32} priority /><div><div className="text-lg font-bold leading-none tracking-[0.25em] text-stone">REMNANT</div><div className="mt-1 text-[10px] uppercase tracking-[0.3em] text-blood-400">Command</div></div></div>
         {nav}
       </aside>
       {open && (
         <div className="fixed inset-0 z-40 md:hidden" onClick={() => setOpen(false)}>
-          <div className="h-full w-52 border-r border-ink-700 bg-ink-950" onClick={(e) => e.stopPropagation()}>
+          <div className="flex h-full w-60 flex-col border-r border-ink-700 bg-ink-950" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center gap-3 border-b border-ink-700 px-4 py-3"><Image src="/images/icon.png" alt="" width={32} height={32} priority /><div><div className="text-lg font-bold leading-none tracking-[0.25em] text-stone">REMNANT</div><div className="mt-1 text-[10px] uppercase tracking-[0.3em] text-blood-400">Command</div></div></div>
             {nav}
           </div>
@@ -135,21 +110,19 @@ function Inner({ children, isOwner, isAdmin, isReviewer, canViewAs, viewingAs }:
             </Link>
           );
         })}
-        {isAdmin && (
-          <button className="flex flex-1 flex-col items-center gap-0.5 py-2 text-[10px] font-bold uppercase tracking-wider text-stone/50" onClick={() => setOpen(true)}>
+          <button className="flex flex-1 flex-col items-center gap-0.5 py-2 text-[10px] font-bold uppercase tracking-wider text-stone/50" aria-label="Open all navigation" aria-expanded={open} onClick={() => setOpen(true)}>
             <span className="text-base leading-5">☰</span>
             <span>More</span>
           </button>
-        )}
       </nav>
     </div>
   );
 }
 
-export function Shell(props: { user: { id: string; displayName: string; username: string; avatarUrl: string }; csrfToken: string; isOwner?: boolean; isAdmin?: boolean; isReviewer?: boolean; canViewAs?: boolean; viewingAs?: string | null; children: React.ReactNode }) {
+export function Shell(props: { user: { id: string; displayName: string; username: string; avatarUrl: string }; csrfToken: string; isOwner?: boolean; isAdmin?: boolean; isReviewer?: boolean; canManageNews?: boolean; canViewAs?: boolean; viewingAs?: string | null; children: React.ReactNode }) {
   return (
     <AppProvider value={{ user: props.user, csrfToken: props.csrfToken }}>
-      <Inner isOwner={!!props.isOwner} isAdmin={props.isAdmin !== false} isReviewer={!!props.isReviewer} canViewAs={!!props.canViewAs} viewingAs={props.viewingAs ?? null}>{props.children}</Inner>
+      <Inner isOwner={!!props.isOwner} isAdmin={props.isAdmin !== false} isReviewer={!!props.isReviewer} canManageNews={!!props.canManageNews} canViewAs={!!props.canViewAs} viewingAs={props.viewingAs ?? null}>{props.children}</Inner>
     </AppProvider>
   );
 }

@@ -4,6 +4,7 @@ import { query } from "./db";
 import { env, isProduction } from "./env";
 import { fetchGuildMember, getAllClanMembers, hasAuthorisedRole, hasMemberRole, type DiscordMember } from "@/server/services/discord";
 import { ProviderError } from "./http";
+import { hasNewsRole } from "./permissions";
 
 export const SESSION_COOKIE = isProduction ? "__Host-remnant_session" : "remnant_session";
 export const VIEWAS_COOKIE = "remnant_viewas";
@@ -25,6 +26,8 @@ export interface Session {
   isAdmin: boolean;
   /** Holds the scouting reviewer role. */
   isReviewer: boolean;
+  /** News management requires the Prime role specifically. */
+  canManageNews: boolean;
   /** Set while a staff member is previewing the dashboard as this member (read-only). */
   viewingAs?: { adminId: string; adminName: string };
 }
@@ -86,7 +89,7 @@ async function getRealSession(): Promise<Session | null> {
     }
   }
 
-  return { id, discordId: row.discord_id, username: row.username, displayName: row.display_name, avatarUrl: row.avatar_url, csrfToken: row.csrf_token, isAdmin: hasAuthorisedRole(row.roles ?? []), isReviewer: (row.roles ?? []).includes(env().DISCORD_REVIEWER_ROLE_ID) };
+  return { id, discordId: row.discord_id, username: row.username, displayName: row.display_name, avatarUrl: row.avatar_url, csrfToken: row.csrf_token, isAdmin: hasAuthorisedRole(row.roles ?? []), isReviewer: (row.roles ?? []).includes(env().DISCORD_REVIEWER_ROLE_ID), canManageNews: hasNewsRole(row.roles ?? []) };
 }
 
 /**
@@ -101,7 +104,7 @@ export async function getSession(): Promise<Session | null> {
   const members = await getAllClanMembers().then((s) => s.data, () => []);
   const m = members.find((x) => x.id === target);
   if (!m) return real;
-  return { ...real, discordId: m.id, username: m.username, displayName: m.displayName, avatarUrl: m.avatarUrl, isAdmin: false, isReviewer: false, viewingAs: { adminId: real.discordId, adminName: real.displayName } };
+  return { ...real, discordId: m.id, username: m.username, displayName: m.displayName, avatarUrl: m.avatarUrl, isAdmin: false, isReviewer: false, canManageNews: false, viewingAs: { adminId: real.discordId, adminName: real.displayName } };
 }
 
 /** The signed-in person regardless of any "view as" choice. */

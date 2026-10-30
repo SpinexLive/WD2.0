@@ -15,6 +15,8 @@ export interface Ctx<P = Record<string, string>> {
 type Handler<P> = (ctx: Ctx<P>) => Promise<unknown>;
 
 export interface GuardOptions {
+  /** News management is restricted to the Prime role, including reads. */
+  newsOnly?: boolean;
   /** Let signed-in clan members (no authorised role) call this route. Everything else is staff-only. */
   allowMember?: boolean;
   /** Mutations are refused while a staff member is previewing as someone else, unless the route opts in. */
@@ -55,6 +57,7 @@ export function protectedRoute<P = Record<string, string>>(handler: Handler<P>, 
     try {
       const session = await getSession();
       if (!session) throw new HttpError(401, "Not signed in or access revoked", "unauthenticated");
+      if (options.newsOnly && !session.canManageNews) throw new HttpError(403, "News management is limited to the Prime role", "forbidden");
       if (options.reviewerOrStaff) {
         if (!session.isReviewer && !session.isAdmin) throw new HttpError(403, "Scouting feedback is limited to reviewers and staff", "forbidden");
       } else if (options.reviewerOnly) {

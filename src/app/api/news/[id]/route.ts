@@ -10,9 +10,9 @@ const idOf = (id: string) => {
   return id;
 };
 
-export const PUT = protectedRoute<{ id: string }>(async ({ req, session, params }) => ({ post: await updateNews(session, idOf(params.id), newsSchema.parse(await req.json())) }));
+export const PUT = protectedRoute<{ id: string }>(async ({ req, session, params }) => ({ post: await updateNews(session, idOf(params.id), newsSchema.parse(await req.json())) }), { newsOnly: true });
 
 export const DELETE = protectedRoute<{ id: string }>(async ({ session, params }) => {
   await deleteNews(session, idOf(params.id));
   return { ok: true };
-});
+}, { newsOnly: true });
