@@ -27,9 +27,9 @@ export const BUTTON_PREFIX = "wdr";
 
 export function messagePayload(m: RosterMessage, rosterId: string, index: number, ping: boolean): DiscordMessagePayload {
   return {
-    content: mentionContent(m.mentions, index === 0),
+    content: mentionContent(m.mentions, index === 0) ?? "",
     embeds: [m.embed],
-    components: [
+    components: m.mentions.length ? [
       {
         type: 1,
         components: [
@@ -37,7 +37,7 @@ export function messagePayload(m: RosterMessage, rosterId: string, index: number
           { type: 2, style: 4, label: "Decline", emoji: { id: "1389367851470553108", name: "no" }, custom_id: `${BUTTON_PREFIX}:${rosterId}:decline` },
         ],
       },
-    ],
+    ] : [],
     // Everyone listed is always pinged when a message is first posted; edits never re-ping.
     allowed_mentions: ping ? { parse: [], users: m.mentions.slice(0, 100) } : { parse: [] },
   };
@@ -56,7 +56,7 @@ export async function renderRosterMessages(roster: Roster, event: RaidHelperEven
     eventUrl: event.discordUrl,
     squads: roster.squads.map((s) => ({
       ...s,
-      slots: s.slots.map((p) => p ? { ...p, displayName: names.get(p.discordId) ?? p.displayName } : null),
+      slots: s.slots.map((p) => p?.discordId ? { ...p, displayName: names.get(p.discordId) ?? p.displayName } : p),
     })),
     responses: roster.responses,
   });
@@ -111,7 +111,7 @@ export async function enrichSignups(raw: RaidHelperSignup[], force = false, with
 export async function buildPreview(roster: Roster, event: RaidHelperEventDetail): Promise<{ embeds: DiscordEmbed[]; messages: RosterMessage[]; names: Record<string, string>; warnings: RosterWarning[] }> {
   const messages = await renderRosterMessages(roster, event);
   const { signups } = await enrichSignups(event.signups);
-  const names = Object.fromEntries(roster.squads.flatMap((s) => s.slots.flatMap((p) => (p ? [[p.discordId, p.displayName] as const] : []))));
+  const names = Object.fromEntries(roster.squads.flatMap((s) => s.slots.flatMap((p) => (p?.discordId ? [[p.discordId, p.displayName] as const] : []))));
   return { embeds: messages.map((m) => m.embed), messages, names, warnings: validateRoster(roster, signups) };
 }
 
@@ -125,7 +125,7 @@ export async function remindPending(eventId: string, actor: Session) {
   const first = roster.messages[0];
   if (!first) throw new HttpError(409, "Publish this roster to Discord before sending reminders.", "not_published");
 
-  const assigned = new Set(roster.squads.flatMap((s) => s.slots.flatMap((p) => (p ? [p.discordId] : []))));
+  const assigned = new Set(roster.squads.flatMap((s) => s.slots.flatMap((p) => (p?.discordId ? [p.discordId] : []))));
   const pending = [...assigned].filter((id) => !roster.responses[id]);
   if (pending.length === 0) throw new HttpError(409, "Nobody is pending: everyone assigned has responded.", "nobody_pending");
 

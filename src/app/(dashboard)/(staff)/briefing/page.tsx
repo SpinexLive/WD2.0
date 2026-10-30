@@ -19,9 +19,9 @@ function PlayerRow({ p, voiceAvailable }: { p: BriefingPlayer; voiceAvailable: b
       )}
       <div className="min-w-0 flex-1">
         <div className="truncate text-sm font-medium">{p.name}{p.isLeader && <span className="ml-1 text-[10px] uppercase text-blood-300">SL</span>}</div>
-        <div className="truncate text-xs text-stone/50">{p.response ? RESPONSE_LABEL[p.response] ?? p.response : "No response"}</div>
+        <div className="truncate text-xs text-stone/50">{!p.discordId ? "Mercenary" : p.response ? RESPONSE_LABEL[p.response] ?? p.response : "No response"}</div>
       </div>
-      {!voiceAvailable ? (
+      {!p.discordId ? <span className="text-xs text-stone/40">Not tracked</span> : !voiceAvailable ? (
         <span className="text-xs text-stone/40">Unknown</span>
       ) : (
         <span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${p.inVoice ? "bg-green-500/15 text-green-400" : "bg-blood-600/20 text-blood-300"}`}>{p.inVoice ? "In voice" : "Not in voice"}</span>
@@ -31,7 +31,8 @@ function PlayerRow({ p, voiceAvailable }: { p: BriefingPlayer; voiceAvailable: b
 }
 
 function RosterView({ r, voiceAvailable }: { r: BriefingRoster; voiceAvailable: boolean }) {
-  const here = r.players.filter((p) => p.inVoice).length;
+  const members = r.players.filter((p) => p.discordId);
+  const here = members.filter((p) => p.inVoice).length;
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
@@ -39,7 +40,7 @@ function RosterView({ r, voiceAvailable }: { r: BriefingRoster; voiceAvailable: 
           <h2 className="text-lg font-bold">{r.title}</h2>
           <div className="text-xs text-stone/55">{fmt(r.startTime)} · {r.status === "published" ? "Published" : "Not published"}</div>
         </div>
-        <div className="text-sm tabular-nums"><span className={here === r.players.length && r.players.length > 0 ? "text-green-400" : ""}>{here}</span><span className="text-stone/50"> / {r.players.length} in voice</span></div>
+        <div className="text-sm tabular-nums"><span className={here === members.length && members.length > 0 ? "text-green-400" : ""}>{here}</span><span className="text-stone/50"> / {members.length} in voice</span></div>
       </div>
       {r.squads.length === 0 ? (
         <EmptyState title="No squads" hint="This roster has no squads yet." />
@@ -52,9 +53,9 @@ function RosterView({ r, voiceAvailable }: { r: BriefingRoster; voiceAvailable: 
               <section key={`${s.name}-${i}`} className="card overflow-hidden">
                 <header className="flex items-center justify-between gap-2 bg-ink-800/60 px-3 py-2">
                   <h3 className="truncate text-sm font-semibold uppercase tracking-wider">{s.name}</h3>
-                  <span className="shrink-0 text-xs tabular-nums text-stone/60">{voiceAvailable ? `${present}/${filled.length} in voice` : `${filled.length}/${s.size}`}</span>
+                  <span className="shrink-0 text-xs tabular-nums text-stone/60">{voiceAvailable ? `${present}/${filled.filter((p) => p.discordId).length} in voice` : `${filled.length}/${s.size}`}</span>
                 </header>
-                {filled.length === 0 ? <p className="border-t border-ink-700/60 px-3 py-3 text-xs text-stone/45">Empty squad</p> : <ul>{filled.map((p) => <PlayerRow key={p.discordId} p={p} voiceAvailable={voiceAvailable} />)}</ul>}
+                {filled.length === 0 ? <p className="border-t border-ink-700/60 px-3 py-3 text-xs text-stone/45">Empty squad</p> : <ul>{filled.map((p) => <PlayerRow key={p.discordId ?? p.mercenaryId} p={p} voiceAvailable={voiceAvailable} />)}</ul>}
               </section>
             );
           })}

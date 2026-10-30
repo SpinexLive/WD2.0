@@ -3,7 +3,7 @@
 import { DndContext, DragOverlay, KeyboardSensor, PointerSensor, pointerWithin, rectIntersection, useDraggable, useDroppable, useSensor, useSensors, type CollisionDetection, type DragEndEvent, type DragStartEvent } from "@dnd-kit/core";
 import { useEffect, useMemo, useState } from "react";
 import { useApi, type ApiError } from "@/lib/client";
-import { movePlayer, newSquad, resizeSquad, setLeader, type PlayerRef } from "@/lib/rosterOps";
+import { movePlayer, playerKey, newSquad, resizeSquad, setLeader, type PlayerRef } from "@/lib/rosterOps";
 import { COMPETITIVE_PLAYER_CAP } from "@/lib/rosterTypes";
 import { validateRoster } from "@/lib/rosterValidation";
 import type { Roster, SignupInfo, Squad } from "@/lib/rosterTypes";
@@ -91,6 +91,8 @@ export function RosterEditor({ roster, signups, leagueAvailable, eventTitle, onR
   const [editingId, setEditingId] = useState<string | null>(null);
   const [newLeader, setNewLeader] = useState(false);
   const [newSize, setNewSize] = useState(2);
+  const [mercSlot, setMercSlot] = useState<{ squadId: string; index: number } | null>(null);
+  const [mercName, setMercName] = useState("");
 
   useEffect(() => {
     if (!dirty) return;
@@ -113,7 +115,7 @@ export function RosterEditor({ roster, signups, leagueAvailable, eventTitle, onR
   };
 
   const signupById = useMemo(() => new Map((signups ?? []).map((s) => [s.discordId, s])), [signups]);
-  const assigned = useMemo(() => new Set(squads.flatMap((s) => s.slots.flatMap((p) => (p ? [p.discordId] : [])))), [squads]);
+  const assigned = useMemo(() => new Set(squads.flatMap((s) => s.slots.flatMap((p) => (p?.discordId ? [p.discordId] : [])))), [squads]);
   const roleCounts = useMemo(() => {
     const m = new Map<string, number>();
     for (const s of signups ?? []) if (!s.absent && !assigned.has(s.discordId)) m.set(s.role ?? "No role", (m.get(s.role ?? "No role") ?? 0) + 1);
@@ -139,7 +141,7 @@ export function RosterEditor({ roster, signups, leagueAvailable, eventTitle, onR
 
   function onDragStart(e: DragStartEvent) {
     const player = e.active.data.current as PlayerRef | undefined;
-    if (player) setActive({ player, role: signupById.get(player.discordId)?.role ?? null });
+    if (player) setActive({ player, role: signupById.get(player.discordId ?? "")?.role ?? null });
   }
 
   function quickAssign(player: PlayerRef) {
@@ -225,7 +227,7 @@ export function RosterEditor({ roster, signups, leagueAvailable, eventTitle, onR
   const total = squads.reduce((n, s) => n + s.size, 0);
   const counts = useMemo(() => {
     const c = { accepted: 0, declined: 0, pending: 0 };
-    for (const id of assigned) c[roster.responses[id] ?? "pending"]++;
+    for (const id of assigned) if (id) c[roster.responses[id] ?? "pending"]++;
     return c;
   }, [assigned, roster.responses]);
   const editing = squads.find((s) => s.id === editingId) ?? null;
@@ -269,7 +271,7 @@ export function RosterEditor({ roster, signups, leagueAvailable, eventTitle, onR
       {signups !== null && !leagueAvailable && settings.warnUnregistered && <WarnBanner>Wardogs League data is unavailable or outdated; registration is shown as Unknown.</WarnBanner>}
 
       <div className="card flex flex-wrap items-center gap-x-4 gap-y-1 px-3 py-1.5 text-xs">
-        <span className={`font-semibold tabular-nums ${cap !== Infinity && total > cap ? "text-blood-300" : ""}`} title="Assigned players / total positions">{assigned.size}/{total} assigned{cap !== Infinity ? ` (max ${cap})` : ""}</span>
+        <span className={`font-semibold tabular-nums ${cap !== Infinity && total > cap ? "text-blood-300" : ""}`} title="Assigned players / total positions">{squads.reduce((n, s) => n + s.slots.filter(Boolean).length, 0)}/{total} assigned{cap !== Infinity ? ` (max ${cap})` : ""}</span>
         <label className="flex items-center gap-1.5"><input type="checkbox" checked={settings.warnUnregistered} onChange={(e) => edit(() => setSettings({ ...settings, warnUnregistered: e.target.checked }))} />Warn if not registered with Wardogs League</label>
         {roster.messages.length > 0 && (
           <span className="flex items-center gap-2 tabular-nums" title="Confirmations from the Discord roster post">
@@ -344,15 +346,16 @@ export function RosterEditor({ roster, signups, leagueAvailable, eventTitle, onR
                     {sq.slots.map((p, i) => (
                       <Slot key={i} squadId={sq.id} index={i}>
                         {p ? (
-                          <Chip id={`p:${p.discordId}`} player={p} dim={flagged.has(p.discordId)} onDoubleClick={() => edit(() => setSquads((s) => movePlayer(s, p, { kind: "pool" })))}>
+                          <Chip id={`p:${playerKey(p)}`} player={p} dim={!!p.discordId && flagged.has(p.discordId)} onDoubleClick={() => edit(() => setSquads((s) => movePlayer(s, p, { kind: "pool" })))}>
                             <span className="min-w-0 flex-1 truncate">{p.displayName}</span>
-                            {roster.messages.length > 0 && <ResponseMark response={roster.responses[p.discordId]} />}
-                            {signupById.get(p.discordId) && <RegDot status={signupById.get(p.discordId)!.registration} />}
-                            <button className={`shrink-0 rounded px-0.5 ${p.isLeader ? "" : "opacity-30 grayscale hover:opacity-80"}`} title={p.isLeader ? "Remove squad leader" : "Make squad leader"} onPointerDown={(e) => e.stopPropagation()} onClick={() => edit(() => setSquads((s) => setLeader(s, sq.id, p.discordId)))}><Icon name="leader" size={16} /></button>
-                            <button className="px-0.5 text-xs text-stone/50 hover:text-blood-300" title="Return to Available" onPointerDown={(e) => e.stopPropagation()} onClick={() => edit(() => setSquads((s) => movePlayer(s, p, { kind: "pool" })))}>✕</button>
+                            {!p.discordId && <button type="button" className="text-[10px] text-warn" title="Edit mercenary name" onPointerDown={(e) => e.stopPropagation()} onClick={() => { setMercName(p.displayName); setMercSlot({ squadId: sq.id, index: i }); }}>Mercenary</button>}
+                            {p.discordId && roster.messages.length > 0 && <ResponseMark response={roster.responses[p.discordId]} />}
+                            {p.discordId && signupById.get(p.discordId) && <RegDot status={signupById.get(p.discordId)!.registration} />}
+                            <button className={`shrink-0 rounded px-0.5 ${p.isLeader ? "" : "opacity-30 grayscale hover:opacity-80"}`} title={p.isLeader ? "Remove squad leader" : "Make squad leader"} onPointerDown={(e) => e.stopPropagation()} onClick={() => edit(() => setSquads((s) => setLeader(s, sq.id, playerKey(p))))}><Icon name="leader" size={16} /></button>
+                            <button className="px-0.5 text-xs text-stone/50 hover:text-blood-300" title={p.discordId ? "Return to Available" : "Remove mercenary"} onPointerDown={(e) => e.stopPropagation()} onClick={() => edit(() => setSquads((s) => movePlayer(s, p, { kind: "pool" })))}>✕</button>
                           </Chip>
                         ) : (
-                          <div className="px-1.5 py-0.5 text-[11px] text-stone/35">Empty {i + 1}</div>
+                          <div className="flex items-center justify-between gap-1 px-1.5 py-0.5 text-[11px]"><span className="text-stone/35">Empty {i + 1}</span><button type="button" className="text-stone/60 hover:text-stone" aria-label={`Add mercenary to ${sq.name} slot ${i + 1}`} onClick={() => { setMercName(""); setMercSlot({ squadId: sq.id, index: i }); }}>+ Add merc</button></div>
                         )}
                       </Slot>
                     ))}
@@ -397,6 +400,28 @@ export function RosterEditor({ roster, signups, leagueAvailable, eventTitle, onR
           </ul>
         )}
       </details>
+      {mercSlot && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink-950/80 p-4 backdrop-blur-sm" role="dialog" aria-modal="true" aria-label="Mercenary" onMouseDown={(e) => e.target === e.currentTarget && setMercSlot(null)} onKeyDown={(e) => e.key === "Escape" && setMercSlot(null)}>
+          <form className="card w-full max-w-sm p-4 shadow-xl" onSubmit={(e) => {
+            e.preventDefault();
+            const name = mercName.trim();
+            if (!name) return;
+            const squad = squads.find((s) => s.id === mercSlot.squadId);
+            if (!squad || mercSlot.index >= squad.size || squad.slots[mercSlot.index]?.discordId) { setMercSlot(null); return; }
+            const existing = squad.slots[mercSlot.index];
+            const mercenaryId = existing?.mercenaryId ?? crypto.randomUUID();
+            edit(() => setSquads((items) => items.map((s) => s.id !== mercSlot.squadId ? s : {
+              ...s, slots: s.slots.map((p, i) => i === mercSlot.index ? { discordId: null, mercenaryId, displayName: name, avatarUrl: null, isLeader: existing?.isLeader ?? false } : p),
+            })));
+            setMercSlot(null);
+          }}>
+            <h2 className="text-base font-bold">Mercenary</h2>
+            <label className="mt-3 block text-xs">Name<input autoFocus required className="input mt-1" maxLength={64} value={mercName} onChange={(e) => setMercName(e.target.value)} /></label>
+            <p className="mt-2 text-xs text-stone/60">Mercenaries do not need to confirm or decline.</p>
+            <div className="mt-4 flex justify-end gap-2"><button type="button" className="btn-ghost" onClick={() => setMercSlot(null)}>Cancel</button><button type="submit" className="btn-primary" disabled={!mercName.trim()}>Save mercenary</button></div>
+          </form>
+        </div>
+      )}
       {confirmRemind && (
         <ConfirmDialog title="Remind pending players?" confirmLabel={`Ping ${counts.pending}`} busy={saving} onConfirm={remind} onCancel={() => setConfirmRemind(false)}>
           This posts a message in the roster&apos;s Discord channel that pings the {counts.pending} assigned player{counts.pending === 1 ? "" : "s"} who haven&apos;t confirmed or declined, asking them to respond.

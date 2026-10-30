@@ -1,3 +1,4 @@
+import { playerKey } from "./rosterOps";
 import type { RegistrationStatus, Roster, RosterWarning, SignupInfo } from "./rosterTypes";
 
 /**
@@ -27,28 +28,34 @@ export function validateRoster(roster: Pick<Roster, "squads" | "settings" | "eve
     }
 
     for (const p of filled) {
-      const prev = seen.get(p!.discordId);
+      const prev = seen.get(playerKey(p!));
       if (prev) {
-        out.push({ type: "duplicate", severity: "error", squadId: squad.id, discordId: p!.discordId, message: `${p!.displayName} is assigned twice (${prev} and ${squad.name})` });
+        out.push({ type: "duplicate", severity: "error", squadId: squad.id, discordId: p!.discordId ?? undefined, message: `${p!.displayName} is assigned twice (${prev} and ${squad.name})` });
       } else {
-        seen.set(p!.discordId, squad.name);
+        seen.set(playerKey(p!), squad.name);
+      }
+      if (p!.discordId === null) {
+        if (!p!.mercenaryId || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(p!.mercenaryId) || !p!.displayName.trim()) {
+          out.push({ type: "invalid", severity: "error", squadId: squad.id, message: `${squad.name}: invalid mercenary` });
+        }
+        continue;
       }
       if (!/^\d{15,22}$/.test(p!.discordId)) {
-        out.push({ type: "invalid", severity: "error", squadId: squad.id, discordId: p!.discordId, message: `${p!.displayName} has an invalid Discord ID` });
+        out.push({ type: "invalid", severity: "error", squadId: squad.id, discordId: p!.discordId ?? undefined, message: `${p!.displayName} has an invalid Discord ID` });
       }
 
       if (signups) {
         const s = signupById.get(p!.discordId);
         if (!s) {
-          out.push({ type: "not_signed_up", severity: "warning", squadId: squad.id, discordId: p!.discordId, message: `${p!.displayName} is no longer signed up in Raid Helper` });
+          out.push({ type: "not_signed_up", severity: "warning", squadId: squad.id, discordId: p!.discordId ?? undefined, message: `${p!.displayName} is no longer signed up in Raid Helper` });
         } else {
-          if (s.absent) out.push({ type: "absent", severity: "warning", squadId: squad.id, discordId: p!.discordId, message: `${p!.displayName} is marked absent in Raid Helper` });
+          if (s.absent) out.push({ type: "absent", severity: "warning", squadId: squad.id, discordId: p!.discordId ?? undefined, message: `${p!.displayName} is marked absent in Raid Helper` });
           const reg: RegistrationStatus = s.registration;
           if (roster.settings.warnUnregistered) {
             if (reg === "not_registered" || reg === "pending") {
-              out.push({ type: "unregistered", severity: "warning", squadId: squad.id, discordId: p!.discordId, message: `${p!.displayName} is ${reg === "pending" ? "pending" : "not registered"} with Wardogs League` });
+              out.push({ type: "unregistered", severity: "warning", squadId: squad.id, discordId: p!.discordId ?? undefined, message: `${p!.displayName} is ${reg === "pending" ? "pending" : "not registered"} with Wardogs League` });
             } else if (reg === "unknown") {
-              out.push({ type: "registration_unknown", severity: "warning", squadId: squad.id, discordId: p!.discordId, message: `${p!.displayName}: Wardogs League registration could not be confirmed` });
+              out.push({ type: "registration_unknown", severity: "warning", squadId: squad.id, discordId: p!.discordId ?? undefined, message: `${p!.displayName}: Wardogs League registration could not be confirmed` });
             }
           }
         }

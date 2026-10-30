@@ -6,7 +6,8 @@ export const BRIEFING_VOICE_CHANNEL_ID = "1546197103498363031";
 const LOOKBACK_S = 2 * 3600;
 
 export interface BriefingPlayer {
-  discordId: string;
+  discordId: string | null;
+  mercenaryId?: string;
   name: string;
   avatarUrl: string | null;
   squad: string;
@@ -48,7 +49,7 @@ export async function buildBriefing() {
       name: s.name,
       size: s.size,
       slots: s.slots.map((p) =>
-        p ? { discordId: p.discordId, name: p.displayName, avatarUrl: p.avatarUrl, squad: s.name, isLeader: p.isLeader, response: roster.responses[p.discordId] ?? null, inVoice: present.has(p.discordId) } : null,
+        p ? { discordId: p.discordId, mercenaryId: p.mercenaryId, name: p.displayName, avatarUrl: p.avatarUrl, squad: s.name, isLeader: p.isLeader, response: p.discordId ? roster.responses[p.discordId] ?? null : null, inVoice: !!p.discordId && present.has(p.discordId) } : null,
       ),
     }));
     const players = squads.flatMap((s) => s.slots.flatMap((p) => (p ? [p] : [])));

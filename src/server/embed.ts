@@ -50,7 +50,8 @@ type Field = { name: string; value: string; inline: false; ids: string[] };
 
 function playerLine(p: NonNullable<Squad["slots"][number]>, responses: Record<string, RosterResponse>): string {
   const who = escapeMd(p.displayName);
-  return `${STATUS_ICON[responses[p.discordId] ?? "pending"]} ${p.isLeader ? `**${who}** ★` : who}`;
+  const label = p.isLeader ? `**${who}** ★` : who;
+  return p.discordId ? `${STATUS_ICON[responses[p.discordId] ?? "pending"]} ${label}` : `${label} (Mercenary)`;
 }
 
 function squadPlayers(s: Squad) {
@@ -85,7 +86,7 @@ function fieldsFor(squads: Squad[], responses: Record<string, RosterResponse>): 
         const line = p ? playerLine(p, responses) : "Free Slot - Sign up";
         if (value && value.length + 1 + line.length > MAX_FIELD_VALUE) flush();
         value = value ? `${value}\n${line}` : line;
-        if (p) ids.push(p.discordId);
+        if (p?.discordId) ids.push(p.discordId);
       }
       flush();
     }
@@ -125,7 +126,7 @@ export function buildRosterMessages(input: EmbedInput): RosterMessage[] {
   }
   groups.push(current);
 
-  const everyone = input.squads.flatMap((s) => s.slots.flatMap((p) => (p ? [p.discordId] : [])));
+  const everyone = input.squads.flatMap((s) => s.slots.flatMap((p) => (p?.discordId ? [p.discordId] : [])));
   const confirmed = everyone.filter((id) => responses[id] === "accepted").length;
   const declined = everyone.filter((id) => responses[id] === "declined").length;
   const counts = `${confirmed} confirmed | ${everyone.length - confirmed - declined} pending | ${declined} declined | ★ = Squad Leader`;

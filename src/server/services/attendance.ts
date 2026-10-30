@@ -20,7 +20,7 @@ export async function snapshotAttendance(): Promise<void> {
     if (done.has(e.id)) continue;
     const roster = await getRoster(e.id);
     if (!roster) continue;
-    const players = roster.squads.flatMap((s) => s.slots.flatMap((p) => (p ? [{ id: p.discordId, name: p.displayName, response: roster.responses[p.discordId] ?? null }] : [])));
+    const players = roster.squads.flatMap((s) => s.slots.flatMap((p) => (p?.discordId ? [{ id: p.discordId, name: p.displayName, response: roster.responses[p.discordId] ?? null }] : [])));
     await tx(async (c) => {
       await c.query("INSERT INTO attendance_events (event_id, title, starts_at, rostered, in_voice) VALUES ($1,$2,to_timestamp($3),$4,$5) ON CONFLICT DO NOTHING", [e.id, e.title, e.startTime, players.length, players.filter((p) => present.has(p.id)).length]);
       for (const p of players) {

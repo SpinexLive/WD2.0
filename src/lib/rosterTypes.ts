@@ -4,7 +4,9 @@ export const COMPETITIVE_PLAYER_CAP = 32;
 export type RegistrationStatus = "registered" | "pending" | "not_registered" | "unknown";
 
 export interface SlotPlayer {
-  discordId: string;
+  /** Null for a named mercenary who has no Discord confirmation workflow. */
+  discordId: string | null;
+  mercenaryId?: string;
   displayName: string;
   avatarUrl: string | null;
   isLeader: boolean;

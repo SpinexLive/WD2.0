@@ -4,10 +4,11 @@ import { query, tx } from "@/lib/db";
 import { HttpError } from "@/lib/http";
 import { COMPETITIVE_PLAYER_CAP, type EventType, type PublishedMessage, type Roster, type RosterResponse, type RosterTemplate, type Squad } from "@/lib/rosterTypes";
 import { publish } from "./bus";
+import { playerKey } from "@/lib/rosterOps";
 
 const snowflake = z.string().regex(/^\d{15,22}$/);
 
-export const slotSchema = z
+const memberSlotSchema = z
   .object({
     discordId: snowflake,
     displayName: z.string().min(1).max(64),
@@ -15,6 +16,16 @@ export const slotSchema = z
     isLeader: z.boolean(),
   })
   .strict();
+
+const mercenarySlotSchema = z.object({
+  discordId: z.null(),
+  mercenaryId: z.string().uuid(),
+  displayName: z.string().trim().min(1).max(64),
+  avatarUrl: z.null(),
+  isLeader: z.boolean(),
+}).strict();
+
+export const slotSchema = z.union([memberSlotSchema, mercenarySlotSchema]);
 
 export const squadSchema = z
   .object({
@@ -74,8 +85,8 @@ export async function getRoster(eventId: string): Promise<Roster | null> {
       "SELECT id, name, category, size, leader_required FROM roster_squads WHERE roster_id = $1 ORDER BY position",
       [r.id],
     ),
-    query<{ squad_id: string; slot_index: number; discord_id: string; display_name: string; avatar_url: string | null; is_leader: boolean }>(
-      "SELECT squad_id, slot_index, discord_id, display_name, avatar_url, is_leader FROM roster_assignments WHERE roster_id = $1",
+    query<{ squad_id: string; slot_index: number; discord_id: string | null; mercenary_id: string | null; display_name: string; avatar_url: string | null; is_leader: boolean }>(
+      "SELECT squad_id, slot_index, discord_id, mercenary_id, display_name, avatar_url, is_leader FROM roster_assignments WHERE roster_id = $1",
       [r.id],
     ),
     query<{ part_index: number; channel_id: string; message_id: string; published_at: Date; updated_at: Date | null }>(
@@ -92,7 +103,7 @@ export async function getRoster(eventId: string): Promise<Roster | null> {
     const slots: Squad["slots"] = Array.from({ length: s.size }, () => null);
     for (const a of assignments) {
       if (a.squad_id === s.id && a.slot_index < s.size) {
-        slots[a.slot_index] = { discordId: a.discord_id, displayName: a.display_name, avatarUrl: a.avatar_url, isLeader: a.is_leader };
+        slots[a.slot_index] = { discordId: a.discord_id, ...(a.mercenary_id ? { mercenaryId: a.mercenary_id } : {}), displayName: a.display_name, avatarUrl: a.avatar_url, isLeader: a.is_leader };
       }
     }
     return { id: s.id, name: s.name, category: s.category, size: s.size, leaderRequired: s.leader_required, slots };
@@ -135,8 +146,8 @@ async function insertSquads(client: PoolClient, rosterId: string, squads: Squad[
         const p = s.slots[j];
         if (!p) continue;
         await client.query(
-          `INSERT INTO roster_assignments (roster_id, squad_id, slot_index, discord_id, display_name, avatar_url, is_leader) VALUES ($1,$2,$3,$4,$5,$6,$7)`,
-          [rosterId, squadId, j, p.discordId, p.displayName, p.avatarUrl, p.isLeader],
+          `INSERT INTO roster_assignments (roster_id, squad_id, slot_index, discord_id, display_name, avatar_url, is_leader, mercenary_id) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+          [rosterId, squadId, j, p.discordId, p.displayName, p.avatarUrl, p.isLeader, p.mercenaryId ?? null],
         );
       }
     }
@@ -171,8 +182,8 @@ export async function saveRoster(eventId: string, input: SaveInput, editorId: st
     if (s.slots.filter((p) => p?.isLeader).length > 1) throw new HttpError(400, `${s.name} has more than one leader`, "invalid_roster");
     for (const p of s.slots) {
       if (!p) continue;
-      if (seen.has(p.discordId)) throw new HttpError(400, `${p.displayName} is assigned to more than one position`, "duplicate_assignment");
-      seen.add(p.discordId);
+      if (seen.has(playerKey(p))) throw new HttpError(400, `${p.displayName} is assigned to more than one position`, "duplicate_assignment");
+      seen.add(playerKey(p));
     }
   }
 
@@ -205,7 +216,7 @@ export async function saveRoster(eventId: string, input: SaveInput, editorId: st
     await c.query("DELETE FROM roster_squads WHERE roster_id = $1", [rosterId]);
     await insertSquads(c, rosterId, input.squads);
     // A player who was removed or moved to a different squad has to confirm again.
-    const now = new Map(input.squads.flatMap((s) => s.slots.flatMap((p) => (p ? [[p.discordId, s.name] as const] : []))));
+    const now = new Map(input.squads.flatMap((s) => s.slots.flatMap((p) => (p?.discordId ? [[p.discordId, s.name] as const] : []))));
     const stale = before.rows.filter((b) => now.get(b.discord_id) !== b.name).map((b) => b.discord_id);
     if (stale.length) await c.query("DELETE FROM roster_responses WHERE roster_id = $1 AND discord_id = ANY($2::text[])", [rosterId, stale]);
   });

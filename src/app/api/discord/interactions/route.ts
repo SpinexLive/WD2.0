@@ -1,5 +1,7 @@
-import { NextResponse, type NextRequest } from "next/server";
-import { handleRosterButton, verifyDiscordSignature, type ButtonInteraction } from "@/server/services/rosterResponses";
+import { after, NextResponse, type NextRequest } from "next/server";
+import { verifyDiscordSignature } from "@/server/services/rosterResponses";
+import { BUTTON_PREFIX } from "@/server/services/rosterPublish";
+import { finishRosterInteraction, type DeferredRosterInteraction } from "@/server/services/rosterInteractions";
 import { FEEDBACK_BUTTON, FEEDBACK_MODAL, handleFeedbackRaw } from "@/server/services/scoutingDiscord";
 
 export const dynamic = "force-dynamic";
@@ -27,13 +29,12 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ type: 4, data: { content: "Something went wrong. Please try again.", flags: 64 } });
     }
   }
-  if (body.type === 3) {
-    try {
-      return NextResponse.json(await handleRosterButton(body as ButtonInteraction));
-    } catch (err) {
-      console.error("roster button failed:", err instanceof Error ? err.message : "unknown");
-      return NextResponse.json({ type: 4, data: { content: "Something went wrong. Please try again.", flags: 64 } });
+  if (body.type === 3 && customId.startsWith(`${BUTTON_PREFIX}:`)) {
+    if (typeof body.application_id !== "string" || !/^\d+$/.test(body.application_id) || typeof body.token !== "string" || !/^[\w.-]+$/.test(body.token)) {
+      return new NextResponse("invalid interaction credentials", { status: 400 });
     }
+    after(() => finishRosterInteraction(body as unknown as DeferredRosterInteraction));
+    return NextResponse.json({ type: 6 });
   }
   return new NextResponse("unsupported interaction", { status: 400 });
 }
