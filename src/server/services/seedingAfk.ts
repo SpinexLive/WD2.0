@@ -3,7 +3,7 @@ import type { PoolClient } from "pg";
 import { z } from "zod";
 import { query, independentQuery, tx } from "@/lib/db";
 import { env } from "@/lib/env";
-import { balancedDestination, isSeedingState, seedingSettingsSchema, type SeedingSettings } from "@/lib/seedingAfk";
+import { balancedDestination, seedingSettingsSchema, type SeedingSettings } from "@/lib/seedingAfk";
 import { postMessage, editMessage, type DiscordMessagePayload } from "./discord";
 import { resolveLinks } from "./links";
 import { seedingSnapshot, moveSeedingPlayer, remindSeedingPlayer } from "./seedingRcon";
@@ -11,9 +11,9 @@ import { seedingSnapshot, moveSeedingPlayer, remindSeedingPlayer } from "./seedi
 export const SEEDING_BUTTON = "seeding-afk";
 const LOCK = 824024;
 interface Runtime {
-  sessionId?: string; bootAt?: number; map?: string; state?: string; stateAt?: number;
-  feedServerId?: string; matchId?: string; terminated?: boolean; reason?: string;
-  lastError?: string | null; lastPollAt?: string; lastFeedAt?: number; count?: number; seen?: string[];
+  sessionId?: string; bootAt?: number; map?: string; terminated?: boolean; reason?: string;
+  thresholdReached?: boolean; countBased?: boolean;
+  lastError?: string | null; lastPollAt?: string; count?: number;
 }
 interface Store { settings: SeedingSettings; runtime: Runtime }
 interface Registration { discord_id: string; steam_id: string; session_id: string; registered_at: Date; next_switch_at: Date; next_reminder_at: Date }
@@ -51,25 +51,29 @@ async function exclusive<T>(fn: (c: PoolClient, s: Store) => Promise<T>): Promis
 async function observe(c: PoolClient, s: Store) {
   const live = await seedingSnapshot();
   const r = s.runtime;
-  const changed = r.bootAt === undefined || Math.abs(r.bootAt - live.bootAt) > 5000 || (r.map !== undefined && r.map !== live.map);
-  if (changed) {
-    await terminate(c, s, "Server session changed; waiting for a new pre-match event");
+  const changed = !r.sessionId || r.bootAt === undefined || Math.abs(r.bootAt - live.bootAt) > 5000 || r.map !== live.map;
+  if (changed || !r.countBased) {
+    await c.query("DELETE FROM seeding_afk_players");
+    // Preserve a threshold stop when upgrading an existing running session.
+    r.thresholdReached = changed ? false : r.thresholdReached || r.reason === "Player threshold reached";
     r.sessionId = randomUUID();
-    // A feed event received after this boot can establish the initial state.
-    if (!r.stateAt || r.stateAt < live.bootAt || (r.map !== undefined && r.map !== live.map)) {
-      r.state = undefined; r.stateAt = undefined;
-    }
     r.bootAt = live.bootAt;
+    r.countBased = true;
+    await log(c, "session_started");
   }
   r.map = live.map;
   r.count = live.count;
   r.lastPollAt = new Date().toISOString();
   if (!s.settings.enabled) await terminate(c, s, "Protection disabled");
-  else if (live.count >= s.settings.threshold) {
-    if (r.reason !== "Player threshold reached") await log(c, "threshold_reached", null, { count: live.count, threshold: s.settings.threshold });
+  else if (live.count >= s.settings.threshold || r.thresholdReached) {
+    if (!r.thresholdReached) await log(c, "threshold_reached", null, { count: live.count, threshold: s.settings.threshold });
+    r.thresholdReached = true;
     await terminate(c, s, "Player threshold reached");
-  } else if (!r.lastFeedAt || Date.now() - r.lastFeedAt > 300_000) await terminate(c, s, "Game event feed is silent; waiting for a new pre-match session");
-  else if (!isSeedingState(r.state)) await terminate(c, s, "Server is not confirmed to be seeding");
+  } else {
+    // A healthy low-count observation allows new consent after a transient outage.
+    r.terminated = false;
+    r.reason = "Seeding (below player threshold)";
+  }
   r.lastError = null;
   return live;
 }
@@ -94,14 +98,14 @@ export async function seedingTick() {
       await persist(c, s);
       return s.runtime.terminated ? [] : registered.map((p) => p.discord_id);
     } catch (e) {
-      // An outage invalidates consent for the old session. Recovery requires a new pre-match event.
+      // An outage invalidates consent for the old session. Recovery requires fresh player registration.
       s.runtime.lastError = (e as Error).message;
       await terminate(c, s, "RCON unavailable or safety data incomplete");
     }
     await persist(c, s);
     return [];
   });
-  // Release the lock between players so returns, match events and settings changes can run.
+  // Release the lock between players so returns and settings changes can run.
   for (const discordId of candidates) {
     await seedingReminder(discordId);
     await tx(async (c) => {
@@ -187,7 +191,7 @@ export async function seedingButton(input: { guildId?: string | null; channelId?
     if (!s.settings.enabled) return "Seeding AFK protection is disabled.";
     let live;
     try { live = await observe(c, s); } catch { await terminate(c, s, "RCON unavailable or safety data incomplete"); return "Cannot verify the game session. Protection is stopped; please try later."; }
-    if (s.runtime.terminated || !s.runtime.sessionId) return `Protection is stopped: ${s.runtime.reason ?? "waiting for the game event feed"}.`;
+    if (s.runtime.terminated || !s.runtime.sessionId) return `Protection is stopped: ${s.runtime.reason ?? "waiting for a server player count"}.`;
     const links = await resolveLinks(true);
     if (links.source.stale) return "Account links are stale. Please try again shortly.";
     const steamId = links.steamIds.get(input.userId);
@@ -202,61 +206,17 @@ export async function seedingButton(input: { guildId?: string | null; channelId?
   });
 }
 
-export const seedingFeedSchema = z.object({ serverId: z.string().min(1).max(100), events: z.array(z.object({
-  eventId: z.string().min(1).max(100), type: z.string().max(100), state: z.string().max(200).optional(),
-  matchId: z.string().max(100).optional(), playerSteamId: z.string().optional(), players: z.number().int().nonnegative().optional(),
-})).max(1000) });
-export async function receiveSeedingFeed(body: z.infer<typeof seedingFeedSchema>) {
-  await exclusive(async (c, s) => {
-    const r = s.runtime;
-    r.lastFeedAt = Date.now();
-    if (r.feedServerId && r.feedServerId !== body.serverId) {
-      await terminate(c, s, "Game process restarted");
-      r.state = undefined; r.stateAt = undefined; r.seen = []; r.matchId = undefined;
-    }
-    r.feedServerId = body.serverId;
-    for (const event of body.events) {
-      if (r.seen?.includes(event.eventId)) continue;
-      r.seen = [...(r.seen ?? []), event.eventId].slice(-200);
-      if (event.type === "player_left" && event.playerSteamId) {
-        const removed = await c.query("DELETE FROM seeding_afk_players WHERE steam_id=$1 RETURNING discord_id", [event.playerSteamId]);
-        for (const p of removed.rows) await log(c, "disconnected", p.discord_id, { steamId: event.playerSteamId });
-      }
-      const thresholdObserved = event.players !== undefined && event.players >= s.settings.threshold;
-      if (thresholdObserved) {
-        await log(c, "threshold_reached", null, { count: event.players, threshold: s.settings.threshold });
-        await terminate(c, s, "Player threshold reached");
-      }
-      if (event.type === "match_ended") { await terminate(c, s, "Match ended"); r.state = "MatchState.PostMatch"; }
-      if (event.type !== "match_state" || !event.state) continue;
-      const newSeeding = isSeedingState(event.state) && (!isSeedingState(r.state) || (!!event.matchId && !!r.matchId && event.matchId !== r.matchId));
-      if (newSeeding) {
-        await c.query("DELETE FROM seeding_afk_players");
-        r.sessionId = randomUUID(); r.terminated = false; r.reason = "Seeding";
-        // Verify this feed belongs to the currently running game before accepting consent.
-        const live = await seedingSnapshot();
-        r.bootAt = live.bootAt; r.map = live.map; r.count = live.count;
-        if (live.count >= s.settings.threshold && !thresholdObserved) await log(c, "threshold_reached", null, { count: live.count, threshold: s.settings.threshold });
-        if (!s.settings.enabled || live.count >= s.settings.threshold || thresholdObserved) await terminate(c, s, !s.settings.enabled ? "Protection disabled" : "Player threshold reached");
-        await log(c, "session_started");
-      }
-      r.state = event.state; r.stateAt = Date.now(); r.matchId = event.matchId ?? r.matchId;
-      if (!isSeedingState(event.state)) await terminate(c, s, "Seeding ended");
-    }
-  });
-}
-
 function embed(s: SeedingSettings): DiscordMessagePayload {
-  return { embeds: [{ title: s.title, description: `${s.description}\n\nLinked accounts only. Switch interval: ${s.intervalSeconds}s. You will receive a private in-game reminder every minute. Click I'm back to stop reminders and team switching. Protection stops at ${s.threshold} players or when the match begins. Moves can be skipped for team balance.`, color: 0xeab308 }],
+  return { embeds: [{ title: s.title, description: `${s.description}\n\nLinked accounts only. Switch interval: ${s.intervalSeconds}s. You will receive a private in-game reminder every minute. Click I'm back to stop reminders and team switching. Protection stops at ${s.threshold} players. Moves can be skipped for team balance.`, color: 0xeab308 }],
     components: [{ type: 1, components: [
-      { type: 2, style: 2, label: "Seeding AFK", emoji: { name: "🟡" }, custom_id: `${SEEDING_BUTTON}:register`, disabled: !s.enabled },
-      { type: 2, style: 3, label: "I'm back", emoji: { name: "🟢" }, custom_id: `${SEEDING_BUTTON}:back` },
+      { type: 2, style: 2, label: "Seeding AFK", emoji: { name: "🌱" }, custom_id: `${SEEDING_BUTTON}:register`, disabled: !s.enabled },
+      { type: 2, style: 3, label: "I'm back", emoji: { name: "👋" }, custom_id: `${SEEDING_BUTTON}:back` },
     ] }], allowed_mentions: { parse: [] } };
 }
 export async function seedingStatus() {
   const [row] = await query<{ settings: SeedingSettings; runtime: Runtime }>("SELECT settings,runtime FROM seeding_afk WHERE id=true");
   return { ...row, registrations: await query<Registration>("SELECT * FROM seeding_afk_players ORDER BY registered_at"), accountLinkRequired: true,
-    rconConfigured: !!(env().GAME_RCON_URL && env().GAME_RCON_PASSWORD), feedConfigured: !!env().SEEDING_AFK_FEED_TOKEN };
+    rconConfigured: !!(env().GAME_RCON_URL && env().GAME_RCON_PASSWORD) };
 }
 export async function saveSeedingSettings(settings: SeedingSettings, actorId: string) {
   await exclusive(async (c, s) => {

@@ -8,11 +8,10 @@ export const seedingSettingsSchema = z.object({
   channelId: snowflake.nullable().default(null),
   messageId: snowflake.nullable().default(null),
   title: z.string().trim().min(1).max(256).default("Seeding AFK protection"),
-  description: z.string().trim().min(1).max(3000).default("Register while seeding. Protection ends when the player threshold is reached or the match starts."),
+  description: z.string().trim().min(1).max(3000).default("Register while seeding. Protection ends when the player threshold is reached."),
 }).strict();
 export type SeedingSettings = z.infer<typeof seedingSettingsSchema>;
 export interface SeedingPlayer { steamId: string; name: string; faction: string }
-export const isSeedingState = (state?: string) => /^MatchState\.PreMatch\.WaitingForPlayers(?:\.PlayerCount)?$/.test(state ?? "");
 
 /** Never worsen the existing spread; require the resulting teams to be within one. */
 export function balancedDestination(players: SeedingPlayer[], factions: string[], steamId: string, limit = 1): string | null {

@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { balancedDestination, isSeedingState, seedingSettingsSchema } from "@/lib/seedingAfk";
+import { balancedDestination, seedingSettingsSchema } from "@/lib/seedingAfk";
 
 const fake = vi.hoisted(() => ({
   settings: {} as Record<string, unknown>, runtime: {} as Record<string, unknown>,
@@ -10,7 +10,7 @@ const snapshot = vi.hoisted(() => vi.fn());
 const move = vi.hoisted(() => vi.fn());
 const remind = vi.hoisted(() => vi.fn());
 const links = vi.hoisted(() => vi.fn());
-vi.mock("@/lib/env", () => ({ env: () => ({ DISCORD_GUILD_ID: "guild", GAME_RCON_URL: "http://game", GAME_RCON_PASSWORD: "secret", SEEDING_AFK_FEED_TOKEN: "token" }) }));
+vi.mock("@/lib/env", () => ({ env: () => ({ DISCORD_GUILD_ID: "guild", GAME_RCON_URL: "http://game", GAME_RCON_PASSWORD: "secret" }) }));
 vi.mock("@/server/services/seedingRcon", () => ({ seedingSnapshot: snapshot, moveSeedingPlayer: move, remindSeedingPlayer: remind }));
 vi.mock("@/server/services/links", () => ({ resolveLinks: links }));
 vi.mock("@/server/services/discord", () => ({ postMessage: vi.fn(), editMessage: vi.fn() }));
@@ -45,7 +45,7 @@ vi.mock("@/lib/db", () => {
     tx: async (fn: (c: unknown) => unknown) => fn({ query: run }) };
 });
 
-import { receiveSeedingFeed, saveSeedingSettings, seedingButton, seedingTick } from "@/server/services/seedingAfk";
+import { saveSeedingSettings, seedingButton, seedingTick } from "@/server/services/seedingAfk";
 
 const steam = "76561198000000001";
 const players = [{ steamId: steam, name: "A", faction: "A" }, { steamId: "76561198000000002", name: "B", faction: "A" }, { steamId: "76561198000000003", name: "C", faction: "B" }];
@@ -57,17 +57,14 @@ function consent(id = "user", steamId = steam) {
 beforeEach(() => {
   vi.clearAllMocks();
   fake.settings = seedingSettingsSchema.parse({ channelId: input.channelId, messageId: input.messageId });
-  fake.runtime = { sessionId: "session", bootAt: 1000, map: "map", state: "MatchState.PreMatch.WaitingForPlayers.PlayerCount", stateAt: Date.now(), lastFeedAt: Date.now(), terminated: false };
+  fake.runtime = { sessionId: "session", bootAt: 1000, map: "map", countBased: true, thresholdReached: false, terminated: false };
   fake.registrations = []; fake.logs = [];
   snapshot.mockResolvedValue(live()); move.mockResolvedValue(undefined); remind.mockResolvedValue(undefined);
   links.mockResolvedValue({ steamIds: new Map([["user", steam]]), source: { stale: false } });
 });
 
 describe("seeding safety decisions", () => {
-  it("uses strict pre-match states and validates configurable defaults", () => {
-    expect(isSeedingState("MatchState.PreMatch.WaitingForPlayers.PlayerCount")).toBe(true);
-    expect(isSeedingState("MatchState.Playing.KOTH")).toBe(false);
-    expect(isSeedingState(undefined)).toBe(false);
+  it("validates configurable defaults", () => {
     expect(seedingSettingsSchema.parse({})).toMatchObject({ enabled: true, threshold: 20, intervalSeconds: 120 });
     expect(seedingSettingsSchema.safeParse({ threshold: 0 }).success).toBe(false);
   });
@@ -143,10 +140,24 @@ describe("consent and polling", () => {
     consent(); fake.settings.enabled = false; await seedingTick();
     expect(fake.registrations).toHaveLength(0); expect(move).not.toHaveBeenCalled();
   });
-  it("stops when the game feed becomes silent", async () => {
-    consent(); fake.runtime.lastFeedAt = Date.now() - 301_000;
-    await seedingTick(); expect(fake.registrations).toHaveLength(0); expect(move).not.toHaveBeenCalled();
-    expect(fake.runtime.reason).toContain("feed is silent");
+  it("starts from player count alone without a feed or token", async () => {
+    fake.runtime = {};
+    expect(await seedingButton(input)).toContain("You are registered");
+    expect(fake.runtime.terminated).toBe(false);
+    expect(fake.runtime.countBased).toBe(true);
+  });
+  it("recovers after an outage without restoring old registrations", async () => {
+    consent(); snapshot.mockRejectedValueOnce(new Error("offline")); await seedingTick();
+    await seedingTick(); expect(fake.runtime.terminated).toBe(false);
+    expect(fake.registrations).toHaveLength(0); expect(move).not.toHaveBeenCalled();
+    expect(await seedingButton(input)).toContain("You are registered");
+  });
+  it("starts a fresh session after map change while preserving threshold stops until then", async () => {
+    snapshot.mockResolvedValueOnce({ ...live(), count: 20 }); await seedingTick();
+    await seedingTick(); expect(await seedingButton(input)).toContain("Protection is stopped");
+    snapshot.mockResolvedValue({ ...live(), map: "next" }); await seedingTick();
+    expect(fake.runtime.terminated).toBe(false);
+    expect(await seedingButton(input)).toContain("You are registered");
   });
 });
 describe("private in-game reminders", () => {
@@ -175,23 +186,5 @@ describe("private in-game reminders", () => {
     await seedingTick(); await seedingTick();
     expect(remind).toHaveBeenCalledTimes(1); expect(fake.runtime.terminated).toBe(false);
     expect(move).toHaveBeenCalledTimes(1);
-  });
-});
-
-describe("game events", () => {
-  it("terminates on match start and allows a new pre-match session", async () => {
-    consent(); await receiveSeedingFeed({ serverId: "boot", events: [{ eventId: "1", type: "match_state", state: "MatchState.Playing.KOTH" }] });
-    expect(fake.registrations).toHaveLength(0); expect(fake.runtime.terminated).toBe(true);
-    await receiveSeedingFeed({ serverId: "boot", events: [{ eventId: "2", type: "match_state", state: "MatchState.PreMatch.WaitingForPlayers.PlayerCount" }] });
-    expect(fake.runtime.terminated).toBe(false); expect(fake.runtime.sessionId).not.toBe("session");
-  });
-  it("does not reactivate on duplicate state events after threshold shutdown", async () => {
-    await receiveSeedingFeed({ serverId: "boot", events: [{ eventId: "1", type: "player_joined", players: 20 }] });
-    await receiveSeedingFeed({ serverId: "boot", events: [{ eventId: "2", type: "match_state", state: "MatchState.PreMatch.WaitingForPlayers.PlayerCount" }] });
-    expect(fake.runtime.terminated).toBe(true);
-  });
-  it("removes disconnected consent immediately from the feed", async () => {
-    consent(); await receiveSeedingFeed({ serverId: "boot", events: [{ eventId: "1", type: "player_left", playerSteamId: steam }] });
-    expect(fake.registrations).toHaveLength(0);
   });
 });

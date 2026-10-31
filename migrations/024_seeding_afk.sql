@@ -1,6 +1,6 @@
 CREATE TABLE seeding_afk (
   id boolean PRIMARY KEY DEFAULT true CHECK (id),
-  settings jsonb NOT NULL DEFAULT '{"enabled":true,"intervalSeconds":120,"threshold":20,"channelId":null,"messageId":null,"title":"Seeding AFK protection","description":"Register while seeding. Protection ends when the player threshold is reached or the match starts."}',
+  settings jsonb NOT NULL DEFAULT '{"enabled":true,"intervalSeconds":120,"threshold":20,"channelId":null,"messageId":null,"title":"Seeding AFK protection","description":"Register while seeding. Protection ends when the player threshold is reached."}',
   runtime jsonb NOT NULL DEFAULT '{}'
 );
 INSERT INTO seeding_afk (id) VALUES (true);
