@@ -3,6 +3,8 @@ import { verifyDiscordSignature } from "@/server/services/rosterResponses";
 import { BUTTON_PREFIX } from "@/server/services/rosterPublish";
 import { finishRosterInteraction, type DeferredRosterInteraction } from "@/server/services/rosterInteractions";
 import { FEEDBACK_BUTTON, FEEDBACK_MODAL, handleFeedbackRaw } from "@/server/services/scoutingDiscord";
+import { SEEDING_BUTTON, seedingButton } from "@/server/services/seedingAfk";
+import { requestJson } from "@/lib/http";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -21,6 +23,22 @@ export async function POST(req: NextRequest) {
   }
   if (body.type === 1) return NextResponse.json({ type: 1 });
   const customId = (body.data as { custom_id?: string } | undefined)?.custom_id ?? "";
+  if (body.type === 3 && customId.startsWith(`${SEEDING_BUTTON}:`)) {
+    if (typeof body.application_id !== "string" || !/^\d+$/.test(body.application_id) || typeof body.token !== "string" || !/^[\w.-]+$/.test(body.token)) return new NextResponse("invalid interaction credentials", { status: 400 });
+    const applicationId = body.application_id;
+    const token = body.token;
+    after(async () => {
+      let content = "Seeding protection could not be updated. Please try again.";
+      try {
+        const member = body.member as { user?: { id?: string } } | undefined;
+        if (member?.user?.id) content = await seedingButton({ guildId: body.guild_id as string, channelId: body.channel_id as string,
+          messageId: (body.message as { id?: string } | undefined)?.id, userId: member.user.id, customId });
+      } catch (e) { console.error("seeding interaction failed:", (e as Error).message); }
+      await requestJson({ provider: "discord", method: "PATCH", url: `https://discord.com/api/v10/webhooks/${applicationId}/${token}/messages/@original`,
+        body: { content, allowed_mentions: { parse: [] } }, retries: 0 }).catch(() => console.error("seeding interaction reply failed"));
+    });
+    return NextResponse.json({ type: 5, data: { flags: 64 } });
+  }
   if ((body.type === 3 && customId.startsWith(`${FEEDBACK_BUTTON}:`)) || (body.type === 5 && customId.startsWith(`${FEEDBACK_MODAL}:`))) {
     try {
       return NextResponse.json(await handleFeedbackRaw(body));

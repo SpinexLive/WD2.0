@@ -18,8 +18,11 @@ export interface ResolvedLinks {
 }
 
 /** Official Wardogs links (GET /links) with hand links taking precedence. There is no name matching. */
-export async function resolveLinks(): Promise<ResolvedLinks> {
-  const manual = await getManualLinks().catch(() => new Map<string, string>());
+export async function resolveLinks(strictManual = false): Promise<ResolvedLinks> {
+  const manual = await getManualLinks().catch((err: unknown) => {
+    if (strictManual) throw err;
+    return new Map<string, string>();
+  });
   let snap: Snapshot<Map<string, string>> | null = null;
   let error: string | null = null;
   try {

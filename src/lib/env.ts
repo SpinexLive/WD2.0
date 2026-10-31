@@ -37,6 +37,8 @@ const schema = z.object({
   // Direct game-server RCON HTTP API (fast); both must be set to use it, otherwise the hosted API is used.
   GAME_RCON_URL: z.string().url().optional(),
   GAME_RCON_PASSWORD: z.string().min(1).optional(),
+  // Dedicated bearer token for the configured game server's seeding AFK event feed.
+  SEEDING_AFK_FEED_TOKEN: z.string().min(32).optional(),
   // Members of this role can read the compiled scouting feedback on opposing teams.
   DISCORD_REVIEWER_ROLE_ID: snowflake.default("1546477974461882418"),
   // Channel that receives AI scouting overviews posted by staff.

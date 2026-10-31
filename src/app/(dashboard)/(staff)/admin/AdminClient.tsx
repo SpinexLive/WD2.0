@@ -7,12 +7,13 @@ import WhitelistPanel from "./WhitelistPanel";
 import GoldPanel from "./GoldPanel";
 import StatusPanel from "./StatusPanel";
 import WdlRolePanel from "./WdlRolePanel";
+import SeedingAfkPanel from "./SeedingAfkPanel";
 
 interface Overview {
   audit: { id: string; actor: string | null; action: string; targetType: string | null; targetId: string | null; details: unknown; at: string }[];
 }
 
-type Tab = "whitelist" | "gold" | "wdl-role" | "status" | "audit";
+type Tab = "whitelist" | "gold" | "wdl-role" | "seeding-afk" | "status" | "audit";
 
 const fmt = (v: string | null) => (v ? new Date(v).toLocaleString("en-GB", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" }) : "-");
 
@@ -36,7 +37,7 @@ export default function AdminClient() {
   }, [api]);
   useEffect(() => void load(), [load]);
 
-  const tabs: [Tab, string][] = [["whitelist", "Whitelist links"], ["gold", "Gold price"], ["wdl-role", "WDL role"], ["status", "Status"], ["audit", "Audit log"]];
+  const tabs: [Tab, string][] = [["whitelist", "Whitelist links"], ["gold", "Gold price"], ["wdl-role", "WDL role"], ["seeding-afk", "Seeding AFK"], ["status", "Status"], ["audit", "Audit log"]];
 
   return (
     <div className="flex flex-col gap-4 md:h-full">
@@ -60,6 +61,8 @@ export default function AdminClient() {
           <GoldPanel />
         ) : tab === "wdl-role" ? (
           <WdlRolePanel />
+        ) : tab === "seeding-afk" ? (
+          <SeedingAfkPanel />
         ) : tab === "status" ? (
           <StatusPanel />
         ) : loading && !data ? (

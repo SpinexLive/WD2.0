@@ -4,6 +4,7 @@ import { setVoice } from "./voice";
 import { BUTTON_PREFIX } from "./rosterPublish";
 import { handleRosterButton } from "./rosterResponses";
 import { FEEDBACK_BUTTON, FEEDBACK_MODAL, onFeedbackButton, onFeedbackModal } from "./scoutingDiscord";
+import { SEEDING_BUTTON, seedingButton } from "./seedingAfk";
 
 const g = globalThis as unknown as { __rosterGateway?: Client };
 
@@ -52,7 +53,19 @@ export function startRosterGateway(): void {
   client.on("voiceStateUpdate", (_old, next) => refreshVoice(next.guild));
   client.on("interactionCreate", (i) => {
     if (i.isButton()) {
-      if (i.customId.startsWith(`${FEEDBACK_BUTTON}:`)) void onFeedbackButton(i).catch((e: Error) => console.error("feedback button failed:", e.message));
+      if (i.customId.startsWith(`${SEEDING_BUTTON}:`)) {
+        void (async () => {
+          await i.deferReply({ flags: MessageFlags.Ephemeral });
+          try {
+            const content = await seedingButton({ guildId: i.guildId, channelId: i.channelId, messageId: i.message.id, userId: i.user.id, customId: i.customId });
+            await i.editReply({ content, allowedMentions: { parse: [] } });
+          } catch (e) {
+            console.error("seeding button failed:", (e as Error).message);
+            await i.editReply("Seeding protection could not be updated. Please try again.");
+          }
+        })().catch((e: Error) => console.error("seeding interaction failed:", e.message));
+      }
+      else if (i.customId.startsWith(`${FEEDBACK_BUTTON}:`)) void onFeedbackButton(i).catch((e: Error) => console.error("feedback button failed:", e.message));
       else void onButton(i);
     } else if (i.isModalSubmit() && i.customId.startsWith(`${FEEDBACK_MODAL}:`)) {
       void onFeedbackModal(i).catch((e: Error) => console.error("feedback form failed:", e.message));
