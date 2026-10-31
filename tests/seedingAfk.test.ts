@@ -13,7 +13,7 @@ const links = vi.hoisted(() => vi.fn());
 vi.mock("@/lib/env", () => ({ env: () => ({ DISCORD_GUILD_ID: "guild", GAME_RCON_URL: "http://game", GAME_RCON_PASSWORD: "secret" }) }));
 vi.mock("@/server/services/seedingRcon", () => ({ seedingSnapshot: snapshot, moveSeedingPlayer: move, remindSeedingPlayer: remind }));
 vi.mock("@/server/services/links", () => ({ resolveLinks: links }));
-vi.mock("@/server/services/discord", () => ({ postMessage: vi.fn(), editMessage: vi.fn() }));
+vi.mock("@/server/services/discord", () => ({ postMessage: vi.fn(), editMessage: vi.fn(), getGuildMembers: vi.fn().mockResolvedValue({ data: [] }) }));
 vi.mock("@/lib/db", () => {
   async function run(sql: string, params: unknown[] = []): Promise<{ rows: unknown[]; rowCount: number }> {
     let rows: unknown[] = [];
@@ -30,7 +30,8 @@ vi.mock("@/lib/db", () => {
       rows = fake.registrations.filter((p) => p.discord_id === params[0] && p.session_id === params[1] && p.next_reminder_at.getTime() <= Date.now());
       for (const p of rows as typeof fake.registrations) p.next_reminder_at = new Date(Date.now() + 60_000);
     } else if (sql.startsWith("UPDATE seeding_afk_players")) {
-      rows = fake.registrations.filter((p) => p.discord_id === params[0] && p.session_id === params[2]);
+      rows = fake.registrations.filter((p) => (Array.isArray(params[0]) ? params[0].includes(p.discord_id) : p.discord_id === params[0]) && p.session_id === params[2]);
+      if (Array.isArray(params[0]) && rows.length !== 2) rows = [];
       for (const p of rows as typeof fake.registrations) p.next_switch_at = new Date(Date.now() + Number(params[1]) * 1000);
     } else if (sql.startsWith("INSERT INTO seeding_afk_players")) {
       if (!fake.registrations.some((p) => p.discord_id === params[0] || p.steam_id === params[1])) {
@@ -45,7 +46,7 @@ vi.mock("@/lib/db", () => {
     tx: async (fn: (c: unknown) => unknown) => fn({ query: run }) };
 });
 
-import { saveSeedingSettings, seedingButton, seedingTick } from "@/server/services/seedingAfk";
+import { saveSeedingSettings, seedingButton, seedingTick, startSeedingScheduler, adminRegisterSeedingPlayer, adminRemoveSeedingPlayer } from "@/server/services/seedingAfk";
 
 const steam = "76561198000000001";
 const players = [{ steamId: steam, name: "A", faction: "A" }, { steamId: "76561198000000002", name: "B", faction: "A" }, { steamId: "76561198000000003", name: "C", faction: "B" }];
@@ -68,11 +69,10 @@ describe("seeding safety decisions", () => {
     expect(seedingSettingsSchema.parse({})).toMatchObject({ enabled: true, threshold: 20, intervalSeconds: 120 });
     expect(seedingSettingsSchema.safeParse({ threshold: 0 }).success).toBe(false);
   });
-  it("moves only to a balanced different faction, including three factions", () => {
+  it("prefers the smallest other faction without blocking unbalanced moves", () => {
     expect(balancedDestination(players, ["A", "B"], steam)).toBe("B");
-    expect(balancedDestination([...players, { steamId: "4", name: "D", faction: "B" }], ["A", "B"], steam)).toBeNull();
+    expect(balancedDestination([...players, { steamId: "4", name: "D", faction: "B" }], ["A", "B"], steam)).toBe("B");
     expect(balancedDestination(players, ["A", "B", "C"], steam)).toBe("C");
-    expect(balancedDestination(players, ["A", "B"], steam, 0)).toBeNull();
     expect(balancedDestination(players, ["A", "B"], "unknown")).toBeNull();
   });
 });
@@ -106,10 +106,10 @@ describe("consent and polling", () => {
     expect(fake.registrations.map((p) => p.discord_id)).toEqual(["other"]);
     fake.registrations = []; await seedingTick(); expect(move).not.toHaveBeenCalled();
   });
-  it("removes disconnected players and skips balance violations", async () => {
+  it("removes disconnected players and keeps switching when teams are uneven", async () => {
     consent("gone", "76561198000000999"); await seedingTick(); expect(fake.registrations).toHaveLength(0);
     consent(); snapshot.mockResolvedValue({ ...live(), balanceLimit: 0 });
-    await seedingTick(); expect(move).not.toHaveBeenCalled();
+    await seedingTick(); expect(move).toHaveBeenCalledWith(steam, "B");
   });
   it("latches threshold shutdown even after population falls or settings are changed", async () => {
     consent(); snapshot.mockResolvedValueOnce({ ...live(), count: 20 });
@@ -160,6 +160,65 @@ describe("consent and polling", () => {
     expect(await seedingButton(input)).toContain("You are registered");
   });
 });
+describe("update preservation", () => {
+  it("preserves registrations on dashboard worker startup", async () => {
+    consent(); fake.registrations[0]!.next_switch_at = new Date(Date.now() + 120_000);
+    const before = structuredClone(fake.registrations);
+    const globals = globalThis as unknown as { __seedingTimer?: NodeJS.Timeout };
+    try {
+      startSeedingScheduler();
+      await vi.waitFor(() => expect(snapshot).toHaveBeenCalled());
+      expect(fake.registrations).toEqual(before);
+    } finally {
+      clearInterval(globals.__seedingTimer); delete globals.__seedingTimer;
+    }
+  });
+  it("preserves registrations and cooldowns when settings are saved", async () => {
+    consent(); const before = structuredClone(fake.registrations);
+    await saveSeedingSettings(seedingSettingsSchema.parse({ ...fake.settings, title: "New title" }), "admin");
+    expect(fake.registrations).toEqual(before);
+  });
+  it("preserves existing same-session registrations during a count-mode upgrade", async () => {
+    consent(); fake.runtime.countBased = undefined;
+    await seedingTick(); expect(fake.registrations).toHaveLength(1);
+  });
+});
+
+describe("manual administration", () => {
+  it("adds a linked connected player without changing other registrations or cooldowns", async () => {
+    consent(); const before = structuredClone(fake.registrations[0]);
+    links.mockResolvedValue({ steamIds: new Map([["user", steam], ["partner", "76561198000000003"]]), source: { stale: false } });
+    await adminRegisterSeedingPlayer("76561198000000003", "admin");
+    expect(fake.registrations).toHaveLength(2); expect(fake.registrations[0]).toEqual(before);
+    expect(fake.logs.some((entry) => entry[0] === "admin" && entry[2] === "seeding_afk.admin_registered")).toBe(true);
+    await adminRegisterSeedingPlayer("76561198000000003", "admin"); expect(fake.registrations).toHaveLength(2);
+  });
+  it("rejects unlinked, disconnected and disabled registrations", async () => {
+    await expect(adminRegisterSeedingPlayer("76561198000000003", "admin")).rejects.toThrow("unique linked Discord");
+    await expect(adminRegisterSeedingPlayer("76561198000000999", "admin")).rejects.toThrow("connected");
+    fake.settings.enabled = false;
+    await expect(adminRegisterSeedingPlayer(steam, "admin")).rejects.toThrow("disabled");
+    expect(fake.registrations).toHaveLength(0);
+  });
+  it("rejects threshold registration and persists the session shutdown", async () => {
+    consent(); snapshot.mockResolvedValue({ ...live(), count: 20 });
+    await expect(adminRegisterSeedingPlayer(steam, "admin")).rejects.toThrow("threshold reached");
+    expect(fake.runtime.thresholdReached).toBe(true); expect(fake.registrations).toHaveLength(0);
+  });
+  it("removes only the selected account and lets an admin-added player withdraw in Discord", async () => {
+    consent("other", "76561198000000003");
+    await adminRegisterSeedingPlayer(steam, "admin");
+    await seedingButton({ ...input, customId: "seeding-afk:back" });
+    expect(fake.registrations.map((p) => p.discord_id)).toEqual(["other"]);
+    await adminRemoveSeedingPlayer("other", "admin"); expect(fake.registrations).toHaveLength(0);
+  });
+  it("keeps registrations when the game server rejects a move", async () => {
+    consent(); move.mockRejectedValueOnce(new Error("Rejected by server"));
+    await seedingTick(); expect(fake.registrations).toHaveLength(1);
+    expect(fake.runtime.terminated).toBe(false);
+  });
+});
+
 describe("private in-game reminders", () => {
   it("reminds after registration and every minute independently of team moves", async () => {
     await seedingButton(input);

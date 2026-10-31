@@ -21,13 +21,9 @@ export async function seedingSnapshot() {
     factionScores: z.array(z.object({ name: z.string().min(1) })).min(2) }).parse(await game("/v1/status"));
   const roster = z.object({ players: z.array(playerSchema), count: z.number().int().nonnegative() }).parse(await game("/v1/players"));
   if (roster.count !== roster.players.length || new Set(roster.players.map((p) => p.steamId)).size !== roster.count) throw new Error("Incomplete game player list");
-  const config = z.object({ text: z.string() }).parse(await game("/v1/config"));
-  const lock = config.text.match(/^\s*bLockOverpopulatedTeamsConfig\s*=\s*(True|False)\s*$/im)?.[1];
-  const threshold = config.text.match(/^\s*OverpopulatedTeamThresholdConfig\s*=\s*(\d+(?:\.\d+)?)\s*$/im)?.[1];
-  if (!lock || threshold === undefined) throw new Error("Cannot verify server team balance settings");
   return { bootAt: start - health.uptimeSeconds * 1000, map: status.map,
     count: Math.max(status.players.current, roster.count), players: roster.players,
-    factions: status.factionScores.map((f) => f.name), balanceLimit: lock.toLowerCase() === "true" ? Number(threshold) : 1 };
+    factions: status.factionScores.map((f) => f.name) };
 }
 
 export async function moveSeedingPlayer(steamId: string, faction: string) {

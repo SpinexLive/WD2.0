@@ -1,8 +1,8 @@
 import { randomUUID } from "node:crypto";
 import type { PoolClient } from "pg";
-import { z } from "zod";
 import { query, independentQuery, tx } from "@/lib/db";
 import { env } from "@/lib/env";
+import { HttpError } from "@/lib/http";
 import { balancedDestination, seedingSettingsSchema, type SeedingSettings } from "@/lib/seedingAfk";
 import { postMessage, editMessage, getGuildMembers, type DiscordMessagePayload } from "./discord";
 import { resolveLinks } from "./links";
@@ -52,7 +52,7 @@ async function observe(c: PoolClient, s: Store) {
   const live = await seedingSnapshot();
   const r = s.runtime;
   const changed = !r.sessionId || r.bootAt === undefined || Math.abs(r.bootAt - live.bootAt) > 5000 || r.map !== live.map;
-  if (changed || !r.countBased) {
+  if (changed) {
     await c.query("DELETE FROM seeding_afk_players");
     // Preserve a threshold stop when upgrading an existing running session.
     r.thresholdReached = changed ? false : r.thresholdReached || r.reason === "Player threshold reached";
@@ -61,6 +61,7 @@ async function observe(c: PoolClient, s: Store) {
     r.countBased = true;
     await log(c, "session_started");
   }
+  r.countBased = true;
   r.map = live.map;
   r.count = live.count;
   r.lastPollAt = new Date().toISOString();
@@ -117,18 +118,24 @@ export async function seedingTick() {
     try {
       const live = await observe(c, s);
       if (!s.runtime.terminated) {
-        const faction = balancedDestination(live.players, live.factions, p.steam_id, live.balanceLimit);
+        const faction = balancedDestination(live.players, live.factions, p.steam_id);
         // Commit the cooldown separately BEFORE the HTTP write, surviving worker crashes and ambiguous timeouts.
         // A concurrent return can delete this row while safety reads are in progress.
-        const reserved = await independentQuery("UPDATE seeding_afk_players SET next_switch_at=now()+($2 * interval '1 second') WHERE discord_id=$1 AND session_id=$3 RETURNING discord_id", [p.discord_id, s.settings.intervalSeconds, s.runtime.sessionId]);
+        const reserved = await independentQuery("UPDATE seeding_afk_players SET next_switch_at=now()+($2 * interval '1 second') WHERE discord_id=$1 AND session_id=$3 RETURNING discord_id", [p.discord_id, faction ? s.settings.intervalSeconds : 15, s.runtime.sessionId]);
         if (reserved.length) {
           if (!live.players.some((x) => x.steamId === p.steam_id)) {
             await c.query("DELETE FROM seeding_afk_players WHERE discord_id=$1", [p.discord_id]);
             await log(c, "disconnected", p.discord_id);
-          } else if (!faction) await log(c, "balance_skipped", p.discord_id, { steamId: p.steam_id });
+          } else if (!faction) await log(c, "move_skipped", p.discord_id, { steamId: p.steam_id, reason: "No valid different faction" });
           else {
-            await moveSeedingPlayer(p.steam_id, faction);
-            await log(c, "team_switched", p.discord_id, { steamId: p.steam_id, faction });
+            try {
+              await moveSeedingPlayer(p.steam_id, faction);
+              await log(c, "team_switched", p.discord_id, { steamId: p.steam_id, faction });
+            } catch (e) {
+              s.runtime.lastError = (e as Error).message;
+              await log(c, "move_failed", p.discord_id, { error: s.runtime.lastError });
+              // A server refusal must not unregister players. Re-observe at the next interval.
+            }
           }
         }
       }
@@ -202,12 +209,12 @@ export async function seedingButton(input: { guildId?: string | null; channelId?
     const result = await c.query("INSERT INTO seeding_afk_players (discord_id,steam_id,session_id,next_switch_at) VALUES ($1,$2,$3,now()+($4 * interval '1 second')) ON CONFLICT DO NOTHING RETURNING discord_id",
       [input.userId, steamId, s.runtime.sessionId, s.settings.intervalSeconds]);
     if (result.rowCount) await log(c, "registered", input.userId, { steamId, faction: player.faction });
-    return result.rowCount ? "You are registered as Seeding AFK. Team moves only happen when safe and balanced; protection ends when seeding finishes." : "You or this game account are already registered.";
+    return result.rowCount ? "You are registered as Seeding AFK. Moves prefer the smallest other team; protection ends when seeding finishes." : "You or this game account are already registered.";
   });
 }
 
 function embed(s: SeedingSettings): DiscordMessagePayload {
-  return { embeds: [{ title: s.title, description: `${s.description}\n\nLinked accounts only. Switch interval: ${s.intervalSeconds}s. You will receive a private in-game reminder every minute. Click I'm back to stop reminders and team switching. Protection stops at ${s.threshold} players. Moves can be skipped for team balance.`, color: 0xeab308 }],
+  return { embeds: [{ title: s.title, description: `${s.description}\n\nLinked accounts only. Switch interval: ${s.intervalSeconds}s. You will receive a private in-game reminder every minute. Click I'm back to stop reminders and team switching. Protection stops at ${s.threshold} players. Team moves prefer the smallest other team.`, color: 0xeab308 }],
     components: [{ type: 1, components: [
       { type: 2, style: 2, label: "Seeding AFK", emoji: { name: "🌱" }, custom_id: `${SEEDING_BUTTON}:register`, disabled: !s.enabled },
       { type: 2, style: 3, label: "I'm back", emoji: { name: "👋" }, custom_id: `${SEEDING_BUTTON}:back` },
@@ -221,12 +228,54 @@ export async function seedingStatus() {
   return { ...row, registrations: registrations.map((player) => ({ ...player, displayName: names.get(player.discord_id) ?? player.discord_id })), accountLinkRequired: true,
     rconConfigured: !!(env().GAME_RCON_URL && env().GAME_RCON_PASSWORD) };
 }
+
+/** Connected, linked accounts available for owner registration. Provider failures leave the existing list intact. */
+export async function seedingAdminPlayers() {
+  const [live, links, members] = await Promise.all([seedingSnapshot(), resolveLinks(true), getGuildMembers().catch(() => null)]);
+  if (links.source.stale) throw new HttpError(503, "Account links are stale. Try again shortly.");
+  const names = new Map(members?.data.map((m) => [m.id, m.displayName]) ?? []);
+  return { players: live.players.map((p) => {
+    const matches = [...links.steamIds].filter(([, steamId]) => steamId === p.steamId);
+    const discordId = matches.length === 1 ? matches[0]![0] : null;
+    return { ...p, discordId, displayName: discordId ? names.get(discordId) ?? p.name : p.name };
+  }) };
+}
+
+export async function adminRegisterSeedingPlayer(steamId: string, actorId: string) {
+  let stopped: string | undefined;
+  await exclusive(async (c, s) => {
+    if (!s.settings.enabled) throw new HttpError(409, "Seeding AFK protection is disabled.");
+    const live = await observe(c, s);
+    if (s.runtime.terminated || !s.runtime.sessionId) { stopped = s.runtime.reason ?? "Protection is stopped"; return; }
+    const player = live.players.find((p) => p.steamId === steamId);
+    if (!player || !live.factions.includes(player.faction)) throw new HttpError(409, "Player must be connected and on a team.");
+    const links = await resolveLinks(true);
+    if (links.source.stale) throw new HttpError(503, "Account links are stale. Try again shortly.");
+    const matches = [...links.steamIds].filter(([, id]) => id === steamId);
+    if (matches.length !== 1) throw new HttpError(409, "Player needs a unique linked Discord account before being registered.");
+    const discordId = matches[0]![0];
+    const added = await c.query("INSERT INTO seeding_afk_players (discord_id,steam_id,session_id,next_switch_at) VALUES ($1,$2,$3,now()+($4 * interval '1 second')) ON CONFLICT DO NOTHING RETURNING discord_id", [discordId, steamId, s.runtime.sessionId, s.settings.intervalSeconds]);
+    if (added.rowCount) await log(c, "admin_registered", actorId, { discordId, steamId, faction: player.faction });
+  });
+  if (stopped) throw new HttpError(409, stopped);
+  return seedingStatus();
+}
+
+export async function adminRemoveSeedingPlayer(discordId: string, actorId: string) {
+  // Remove consent before waiting for an already-in-flight action to finish.
+  await query("DELETE FROM seeding_afk_players WHERE discord_id=$1", [discordId]);
+  await exclusive(async (c) => {
+    await c.query("DELETE FROM seeding_afk_players WHERE discord_id=$1", [discordId]);
+    await log(c, "admin_unregistered", actorId, { discordId });
+  });
+  return seedingStatus();
+}
 export async function saveSeedingSettings(settings: SeedingSettings, actorId: string) {
   await exclusive(async (c, s) => {
-    // Configuration changes revoke existing consent. They cannot unlatch the current session.
-    await c.query("DELETE FROM seeding_afk_players");
+    // Routine settings/embeds preserve consent and existing cooldowns.
     s.settings = settings;
     if (!settings.enabled) await terminate(c, s, "Protection disabled");
+    else await observe(c, s);
     await log(c, "settings_changed", actorId, { settings });
   });
   return seedingStatus();
@@ -245,8 +294,8 @@ const globalState = globalThis as unknown as { __seedingTimer?: NodeJS.Timeout }
 export function startSeedingScheduler() {
   if (process.env.NEXT_PHASE === "phase-production-build" || globalState.__seedingTimer) return;
   const run = () => void seedingTick().catch((e: Error) => console.error("Seeding AFK worker:", e.message));
-  // Restart revokes registrations, including when another process is still running.
-  void exclusive(async (c, s) => { await c.query("DELETE FROM seeding_afk_players"); await log(c, "registrations_cleared", null, { reason: "Dashboard worker started" }); }).then(run).catch((e: Error) => console.error("Seeding AFK startup:", e.message));
+  // Updates preserve database registrations; the first observation validates the game session.
+  run();
   globalState.__seedingTimer = setInterval(run, 15_000);
   globalState.__seedingTimer.unref();
 }

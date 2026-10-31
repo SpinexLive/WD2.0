@@ -13,18 +13,10 @@ export const seedingSettingsSchema = z.object({
 export type SeedingSettings = z.infer<typeof seedingSettingsSchema>;
 export interface SeedingPlayer { steamId: string; name: string; faction: string }
 
-/** Never worsen the existing spread; require the resulting teams to be within one. */
-export function balancedDestination(players: SeedingPlayer[], factions: string[], steamId: string, limit = 1): string | null {
+/** Always choose another faction, preferring the smallest destination team. */
+export function balancedDestination(players: SeedingPlayer[], factions: string[], steamId: string): string | null {
   const player = players.find((p) => p.steamId === steamId);
   if (!player || !factions.includes(player.faction) || factions.length < 2 || new Set(factions).size !== factions.length) return null;
-  if (players.some((p) => !factions.includes(p.faction))) return null;
-  const counts = factions.map((f) => players.filter((p) => p.faction === f).length);
-  const spread = Math.max(...counts) - Math.min(...counts);
-  const source = factions.indexOf(player.faction);
-  for (const target of factions.map((f, i) => ({ f, i })).filter(({ i }) => i !== source).sort((a, b) => counts[a.i]! - counts[b.i]!)) {
-    const after = counts.map((n, i) => n + (i === source ? -1 : i === target.i ? 1 : 0));
-    const difference = Math.max(...after) - Math.min(...after);
-    if (difference <= Math.min(1, limit) && difference <= spread) return target.f;
-  }
-  return null;
+  const counts = new Map(factions.map((f) => [f, players.filter((p) => p.faction === f).length]));
+  return factions.filter((f) => f !== player.faction).sort((a, b) => counts.get(a)! - counts.get(b)!)[0] ?? null;
 }
