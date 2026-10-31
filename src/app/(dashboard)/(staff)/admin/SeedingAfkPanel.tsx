@@ -8,7 +8,7 @@ import type { SeedingSettings } from "@/lib/seedingAfk";
 interface Status {
   settings: SeedingSettings;
   runtime: { reason?: string; lastError?: string; lastPollAt?: string; count?: number; terminated?: boolean };
-  registrations: { discord_id: string; steam_id: string; registered_at: string; next_switch_at: string }[];
+  registrations: { discord_id: string; displayName: string; steam_id: string; registered_at: string; next_switch_at: string }[];
   rconConfigured: boolean;
 }
 export default function SeedingAfkPanel() {
@@ -55,7 +55,7 @@ export default function SeedingAfkPanel() {
       <div className="card p-3 text-sm"><p>{status.runtime.reason ?? "Waiting for server player count"} · {status.runtime.count ?? "?"} players</p><p className="text-stone/60">Last poll: {status.runtime.lastPollAt ? new Date(status.runtime.lastPollAt).toLocaleString("en-GB") : "Not yet"}</p></div>
       {status.runtime.lastError && <ErrorBanner message={status.runtime.lastError} />}
       <p className="text-sm">Registered players: {status.registrations.length}</p>
-      <div className="overflow-auto"><table className="w-full text-left text-sm"><thead><tr><th className="th">Discord ID</th><th className="th">Steam ID</th><th className="th">Next check</th></tr></thead><tbody>{status.registrations.map((p) => <tr key={p.discord_id}><td className="p-2">{p.discord_id}</td><td className="p-2">{p.steam_id}</td><td className="p-2">{new Date(p.next_switch_at).toLocaleString("en-GB")}</td></tr>)}</tbody></table></div>
+      <div className="overflow-auto"><table className="w-full text-left text-sm"><thead><tr><th className="th">Discord nickname</th><th className="th">Steam ID</th><th className="th">Next check</th></tr></thead><tbody>{status.registrations.map((p) => <tr key={p.discord_id}><td className="p-2" title={p.discord_id}>{p.displayName}</td><td className="p-2">{p.steam_id}</td><td className="p-2">{new Date(p.next_switch_at).toLocaleString("en-GB")}</td></tr>)}</tbody></table></div>
       <p className="text-xs text-stone/60">Registration, return, disconnect, switch, threshold and termination events appear in the Admin audit log.</p>
     </>}
   </div>;

@@ -4,7 +4,7 @@ import { z } from "zod";
 import { query, independentQuery, tx } from "@/lib/db";
 import { env } from "@/lib/env";
 import { balancedDestination, seedingSettingsSchema, type SeedingSettings } from "@/lib/seedingAfk";
-import { postMessage, editMessage, type DiscordMessagePayload } from "./discord";
+import { postMessage, editMessage, getGuildMembers, type DiscordMessagePayload } from "./discord";
 import { resolveLinks } from "./links";
 import { seedingSnapshot, moveSeedingPlayer, remindSeedingPlayer } from "./seedingRcon";
 
@@ -215,7 +215,10 @@ function embed(s: SeedingSettings): DiscordMessagePayload {
 }
 export async function seedingStatus() {
   const [row] = await query<{ settings: SeedingSettings; runtime: Runtime }>("SELECT settings,runtime FROM seeding_afk WHERE id=true");
-  return { ...row, registrations: await query<Registration>("SELECT * FROM seeding_afk_players ORDER BY registered_at"), accountLinkRequired: true,
+  const registrations = await query<Registration>("SELECT * FROM seeding_afk_players ORDER BY registered_at");
+  const members = registrations.length ? await getGuildMembers().catch(() => null) : null;
+  const names = new Map(members?.data.map((member) => [member.id, member.displayName]) ?? []);
+  return { ...row, registrations: registrations.map((player) => ({ ...player, displayName: names.get(player.discord_id) ?? player.discord_id })), accountLinkRequired: true,
     rconConfigured: !!(env().GAME_RCON_URL && env().GAME_RCON_PASSWORD) };
 }
 export async function saveSeedingSettings(settings: SeedingSettings, actorId: string) {
