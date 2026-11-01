@@ -20,6 +20,7 @@ export default function RecruitPage() {
   const [tab, setTab] = useState<Tab>("new");
   const [search, setSearch] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
+  const [rescanning, setRescanning] = useState(false);
 
   const load = useCallback(async () => {
     setError(null);
@@ -30,6 +31,28 @@ export default function RecruitPage() {
     }
   }, [api]);
   useEffect(() => void load(), [load]);
+
+  async function rescan() {
+    setRescanning(true);
+    try {
+      await api("/api/recruit/rescan", { method: "POST" });
+      // The sync runs in the background; poll until it finishes, then rebuild the report.
+      for (let i = 0; i < 90; i++) {
+        await new Promise((r) => setTimeout(r, 2000));
+        const s = await api<{ syncing: boolean; pending: number; error: string | null }>("/api/recruit/rescan");
+        if (!s.syncing) {
+          await load();
+          toast({ text: s.error ? `Rescanned: ${s.error}` : "Rescan complete", tone: s.error ? "err" : "ok" });
+          return;
+        }
+      }
+      toast({ text: "Rescan is still running in the background; press Refresh later.", tone: "err" });
+    } catch (e) {
+      toast({ text: (e as Error).message, tone: "err" });
+    } finally {
+      setRescanning(false);
+    }
+  }
 
   async function mark(steamId: string, status: Tab, note?: string) {
     setBusy(steamId);
@@ -57,10 +80,13 @@ export default function RecruitPage() {
     <div className="mx-auto max-w-5xl space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h1 className="page-title">Recruit</h1>
-        <button className="btn-ghost" onClick={() => void load()}>Refresh</button>
+        <div className="flex gap-2">
+          <button className="btn-ghost" disabled={rescanning} onClick={() => void rescan()}>{rescanning ? "Rescanning…" : "Rescan"}</button>
+          <button className="btn-ghost" disabled={rescanning} onClick={() => void load()}>Refresh</button>
+        </div>
       </div>
       <p className="text-sm text-stone/60">
-        Players on the game server with at least {data?.minMatches ?? 5} stored matches whose K/D and average cash are within 10% of our top 10 clan members. Anyone already linked to a clan member is excluded. Stats cover the Wardogs game server only.
+        Players on the game server with at least {data?.minMatches ?? 3} stored matches whose K/D and average cash are within 10% of our top 10 clan members. Anyone already linked to a clan member is excluded. Stats cover the Wardogs game server only.
       </p>
       {error && <ErrorBanner message={error} onRetry={load} />}
 

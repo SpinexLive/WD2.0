@@ -6,7 +6,7 @@ import type { Session } from "@/lib/session";
 import { getAllClanMembers, getClanMembers } from "./discord";
 import { resolveLinks } from "./links";
 
-export const MIN_MATCHES = 5;
+export const MIN_MATCHES = 3;
 /** A candidate must reach this share of the top-10 average on both K/D and cash. */
 export const TOLERANCE = 0.9;
 const TOP_N = 10;
