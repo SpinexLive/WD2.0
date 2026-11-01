@@ -12,6 +12,9 @@ const SECONDARY = 2;
 
 const emojiText = (i: LoadoutItem) => `<:${i.key}:${i.emojiId}>`;
 
+/** Button rows: primary weapons, support/utility, aircraft, ground vehicles. Must sum to the item count and leave one row for "Show my unlocks". */
+const ROW_SIZES = [4, 4, 2, 5];
+
 const splitUnlock = (i: LoadoutItem) => {
   const m = /^(.*?)\s*\(Level (\d+)\)$/.exec(i.unlock);
   return { role: m?.[1] ?? i.unlock, level: m?.[2] ?? "-" };
@@ -19,10 +22,11 @@ const splitUnlock = (i: LoadoutItem) => {
 
 function embedPayload(): DiscordMessagePayload {
   const rows = [];
-  for (let n = 0; n < LOADOUT_ITEMS.length; n += 5) {
+  let n = 0;
+  for (const size of ROW_SIZES) {
     rows.push({
       type: 1,
-      components: LOADOUT_ITEMS.slice(n, n + 5).map((i) => ({
+      components: LOADOUT_ITEMS.slice(n, (n += size)).map((i) => ({
         type: 2,
         style: DANGER,
         label: i.name,
