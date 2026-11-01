@@ -27,7 +27,7 @@ export function navigationGroups(access: NavAccess): NavGroup[] {
   groups.push({ id: "intelligence", label: "Match intelligence", items: [
     { href: "/observe", label: "Match Feedback" },
     ...(access.isAdmin || access.isReviewer ? [{ href: "/scouting", label: "Scouting" }] : []),
-    ...(access.isAdmin ? [{ href: "/feedback-setup", label: "Feedback setup" }] : []),
+    ...(access.isAdmin ? [{ href: "/feedback-setup", label: "Feedback setup" }, { href: "/loadout", label: "Loadout unlocks" }] : []),
   ] });
   groups.push({ id: "performance", label: "Performance", items: [ME_NAV, BOARD_NAV] });
   const management = [

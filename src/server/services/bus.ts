@@ -1,4 +1,4 @@
-export type LiveTopic = "voice" | "roster";
+export type LiveTopic = "voice" | "roster" | "loadout";
 export interface LiveEvent {
   topic: LiveTopic;
   data: Record<string, unknown>;

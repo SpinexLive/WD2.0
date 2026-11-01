@@ -3,6 +3,7 @@ import { verifyDiscordSignature } from "@/server/services/rosterResponses";
 import { BUTTON_PREFIX } from "@/server/services/rosterPublish";
 import { finishRosterInteraction, type DeferredRosterInteraction } from "@/server/services/rosterInteractions";
 import { FEEDBACK_BUTTON, FEEDBACK_MODAL, handleFeedbackRaw } from "@/server/services/scoutingDiscord";
+import { LOADOUT_BUTTON, handleLoadoutRaw } from "@/server/services/loadout";
 import { SEEDING_BUTTON, seedingButton } from "@/server/services/seedingAfk";
 import { requestJson } from "@/lib/http";
 
@@ -38,6 +39,14 @@ export async function POST(req: NextRequest) {
         body: { content, allowed_mentions: { parse: [] } }, retries: 0 }).catch(() => console.error("seeding interaction reply failed"));
     });
     return NextResponse.json({ type: 5, data: { flags: 64 } });
+  }
+  if (body.type === 3 && customId.startsWith(`${LOADOUT_BUTTON}:`)) {
+    try {
+      return NextResponse.json(await handleLoadoutRaw(body));
+    } catch (err) {
+      console.error("loadout interaction failed:", err instanceof Error ? err.message : "unknown");
+      return NextResponse.json({ type: 4, data: { content: "Something went wrong. Please try again.", flags: 64 } });
+    }
   }
   if ((body.type === 3 && customId.startsWith(`${FEEDBACK_BUTTON}:`)) || (body.type === 5 && customId.startsWith(`${FEEDBACK_MODAL}:`))) {
     try {

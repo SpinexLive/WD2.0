@@ -52,7 +52,7 @@ export function useApi() {
   return useMemo(() => call, [call]);
 }
 
-type LiveTopic = "voice" | "roster";
+type LiveTopic = "voice" | "roster" | "loadout";
 type LiveHandler = (data: { eventId?: string }) => void;
 const liveHandlers = new Map<LiveTopic, Set<LiveHandler>>();
 let liveSource: EventSource | null = null;
@@ -60,7 +60,7 @@ let liveSource: EventSource | null = null;
 function ensureLive() {
   if (liveSource || typeof EventSource === "undefined") return;
   const es = new EventSource("/api/live");
-  for (const topic of ["voice", "roster"] as const) {
+  for (const topic of ["voice", "roster", "loadout"] as const) {
     es.addEventListener(topic, (ev) => {
       let data = {};
       try {

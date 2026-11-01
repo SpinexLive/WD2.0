@@ -4,6 +4,7 @@ import { setVoice } from "./voice";
 import { BUTTON_PREFIX } from "./rosterPublish";
 import { handleRosterButton } from "./rosterResponses";
 import { FEEDBACK_BUTTON, FEEDBACK_MODAL, onFeedbackButton, onFeedbackModal } from "./scoutingDiscord";
+import { LOADOUT_BUTTON, handleLoadoutRaw } from "./loadout";
 import { SEEDING_BUTTON, seedingButton } from "./seedingAfk";
 
 const g = globalThis as unknown as { __rosterGateway?: Client };
@@ -64,6 +65,14 @@ export function startRosterGateway(): void {
             await i.editReply("Seeding protection could not be updated. Please try again.");
           }
         })().catch((e: Error) => console.error("seeding interaction failed:", e.message));
+      }
+      else if (i.customId.startsWith(`${LOADOUT_BUTTON}:`)) {
+        void (async () => {
+          const res = (await handleLoadoutRaw({ member: { user: { id: i.user.id }, roles: Array.isArray(i.member?.roles) ? (i.member.roles as string[]) : [...(i.member?.roles.cache.keys() ?? [])] }, data: { custom_id: i.customId } })) as { type: number; data: { content: string; components: never[] } };
+          const payload = { content: res.data.content, components: res.data.components, allowedMentions: { parse: [] as never[] } };
+          if (res.type === 7) await i.update(payload);
+          else await i.reply({ ...payload, flags: MessageFlags.Ephemeral });
+        })().catch((e: Error) => console.error("loadout button failed:", e.message));
       }
       else if (i.customId.startsWith(`${FEEDBACK_BUTTON}:`)) void onFeedbackButton(i).catch((e: Error) => console.error("feedback button failed:", e.message));
       else void onButton(i);
