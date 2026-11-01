@@ -2,7 +2,7 @@ import { query } from "@/lib/db";
 import { env } from "@/lib/env";
 import { HttpError } from "@/lib/http";
 import { LOADOUT_ITEMS, itemByKey, type LoadoutItem } from "@/lib/loadout";
-import { deleteMessage, getAllClanMembers, postMessage, type DiscordMessagePayload } from "./discord";
+import { deleteMessage, getClanMembers, postMessage, type DiscordMessagePayload } from "./discord";
 import { publish } from "./bus";
 
 export const LOADOUT_BUTTON = "wdlo";
@@ -74,7 +74,7 @@ export async function postLoadoutEmbed(channelId: string, actorId: string): Prom
 
 export async function loadoutTable() {
   const [members, unlocks, config] = await Promise.all([
-    getAllClanMembers().then((s) => s.data),
+    getClanMembers().then((s) => s.data),
     query<{ discord_id: string; item_key: string }>("SELECT discord_id, item_key FROM loadout_unlocks"),
     getConfig(),
   ]);
