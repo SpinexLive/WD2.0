@@ -26,13 +26,14 @@ function embedPayload(): DiscordMessagePayload {
       })),
     });
   }
+  rows.push({ type: 1, components: [{ type: 2, style: SECONDARY, label: "Show my unlocks", custom_id: `${LOADOUT_BUTTON}:me` }] });
   return {
     embeds: [
       {
         title: "Loadout unlock tracker",
         description:
           "Press the button for each item you have **unlocked in game**. You'll be asked to confirm before it is saved, and you can press an item again to remove it.\n\n" +
-          LOADOUT_ITEMS.map((i) => `${emojiText(i)} ${i.name}`).join("\n"),
+          LOADOUT_ITEMS.map((i) => `${emojiText(i)} ${i.name} - ${i.unlock}`).join("\n"),
         color: RED,
       },
     ],
@@ -96,6 +97,13 @@ export async function handleLoadoutRaw(i: RawInteraction): Promise<unknown> {
   const [, action, key] = (i.data?.custom_id ?? "").split(":");
   if (!userId) return reply("That button isn't valid.");
   if (action === "no") return reply("Cancelled. Nothing was changed.", [], true);
+  if (action === "me") {
+    const mine = new Set((await query<{ item_key: string }>("SELECT item_key FROM loadout_unlocks WHERE discord_id = $1", [userId])).map((r) => r.item_key));
+    const line = (i: LoadoutItem) => `${emojiText(i)} ${i.name} - ${i.unlock}`;
+    const have = LOADOUT_ITEMS.filter((i) => mine.has(i.key));
+    const missing = LOADOUT_ITEMS.filter((i) => !mine.has(i.key));
+    return reply(`**Unlocked (${have.length}/${LOADOUT_ITEMS.length})**\n${have.map(line).join("\n") || "None yet"}\n\n**Not unlocked**\n${missing.map(line).join("\n") || "Everything unlocked!"}`);
+  }
   const item = key ? itemByKey(key) : undefined;
   if (!item || !["t", "ok", "rm"].includes(action ?? "")) return reply("That button isn't valid.");
   const roles = i.member?.roles ?? [];
