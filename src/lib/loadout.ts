@@ -31,5 +31,5 @@ export const GROUP_LABELS: Record<LoadoutGroup, string> = { loadout: "Loadout", 
 
 export const itemByKey = (key: string) => LOADOUT_ITEMS.find((i) => i.key === key);
 
-/** Image path for dark backgrounds (the white variants). */
-export const itemImage = (i: LoadoutItem) => encodeURI(`/images/items/${i.group}/white/${i.name}.webp`);
+/** Image path (the original, non-white artwork). */
+export const itemImage = (i: LoadoutItem) => encodeURI(`/images/items/${i.group}/${i.name}.webp`);
