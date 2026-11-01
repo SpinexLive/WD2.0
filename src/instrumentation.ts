@@ -10,5 +10,7 @@ export async function register() {
     startWdlRoleScheduler();
     const { startMonitor } = await import("./server/services/monitor");
     startMonitor();
+    const { startServerNameScheduler } = await import("./server/services/serverName");
+    startServerNameScheduler();
   }
 }
