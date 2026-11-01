@@ -1,4 +1,5 @@
 import type { RosterResponse, Squad } from "@/lib/rosterTypes";
+import { tokenByKey } from "@/lib/rosterTokens";
 
 export interface DiscordEmbed {
   title?: string;
@@ -50,7 +51,8 @@ type Field = { name: string; value: string; inline: false; ids: string[] };
 
 function playerLine(p: NonNullable<Squad["slots"][number]>, responses: Record<string, RosterResponse>): string {
   const who = escapeMd(p.displayName);
-  const label = p.isLeader ? `**${who}** ★` : who;
+  const icons = (p.tokens ?? []).flatMap((k) => tokenByKey(k)?.emoji ?? []).join("");
+  const label = (p.isLeader ? `**${who}** ★` : who) + (icons ? ` ${icons}` : "");
   return p.discordId ? `${STATUS_ICON[responses[p.discordId] ?? "pending"]} ${label}` : `☠️ ${label}`;
 }
 

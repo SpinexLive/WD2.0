@@ -3,7 +3,8 @@
 import { DndContext, DragOverlay, KeyboardSensor, PointerSensor, pointerWithin, rectIntersection, useDraggable, useDroppable, useSensor, useSensors, type CollisionDetection, type DragEndEvent, type DragStartEvent } from "@dnd-kit/core";
 import { useEffect, useMemo, useState } from "react";
 import { useApi, type ApiError } from "@/lib/client";
-import { movePlayer, playerKey, newSquad, resizeSquad, setLeader, type PlayerRef } from "@/lib/rosterOps";
+import { movePlayer, playerKey, newSquad, resizeSquad, setLeader, toggleToken, type PlayerRef } from "@/lib/rosterOps";
+import { ROSTER_TOKENS, tokenByKey, type RosterToken } from "@/lib/rosterTokens";
 import { COMPETITIVE_PLAYER_CAP } from "@/lib/rosterTypes";
 import { validateRoster } from "@/lib/rosterValidation";
 import type { Roster, SignupInfo, Squad } from "@/lib/rosterTypes";
@@ -52,9 +53,23 @@ function SquadCard({ squadId, children }: { squadId: string; children: React.Rea
   return <section ref={setNodeRef} className={`card p-2 transition-shadow ${isOver ? "ring-1 ring-blood-400/70" : ""}`}>{children}</section>;
 }
 
-function Slot({ squadId, index, children }: { squadId: string; index: number; children: React.ReactNode }) {
+/** While an icon is dragged, `drop` marks whether this slot's player may receive it. */
+function Slot({ squadId, index, children, drop }: { squadId: string; index: number; children: React.ReactNode; drop?: "ok" | "blocked" }) {
   const { setNodeRef, isOver } = useDroppable({ id: `slot:${squadId}:${index}` });
-  return <div ref={setNodeRef} className={`min-h-[28px] rounded border border-dashed p-px transition-colors ${isOver ? "border-blood-400 bg-blood-700/30" : "border-ink-600"}`}>{children}</div>;
+  const tone = drop === "blocked" ? "border-ink-700 opacity-40" : drop === "ok" ? (isOver ? "border-green-400 bg-green-500/20" : "border-green-500/60") : isOver ? "border-blood-400 bg-blood-700/30" : "border-ink-600";
+  return <div ref={setNodeRef} className={`min-h-[28px] rounded border border-dashed p-px transition-colors ${tone}`}>{children}</div>;
+}
+
+function TokenChip({ token, count }: { token: RosterToken; count: number }) {
+  const { attributes, listeners, setNodeRef, isDragging } = useDraggable({ id: `tok:${token.key}`, data: { token: token.key } });
+  return (
+    <div ref={setNodeRef} {...listeners} {...attributes} title={`Drag onto a player. ${count} signed-up player${count === 1 ? "" : "s"} unlocked ${token.label}.`} className={`flex cursor-grab touch-none select-none items-center gap-1.5 rounded border border-ink-600 bg-ink-800 px-2 py-1 text-xs hover:border-ink-500 active:cursor-grabbing ${isDragging ? "opacity-30" : ""}`}>
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img src={token.image} alt="" className="h-5 w-8 object-contain" draggable={false} />
+      <span className="font-semibold">{token.label}</span>
+      <span className="rounded-full bg-ink-700 px-1.5 text-[11px] tabular-nums text-stone/70">{count}</span>
+    </div>
+  );
 }
 
 function ResponseMark({ response }: { response?: "accepted" | "declined" }) {
@@ -93,6 +108,14 @@ export function RosterEditor({ roster, signups, leagueAvailable, eventTitle, onR
   const [newSize, setNewSize] = useState(2);
   const [mercSlot, setMercSlot] = useState<{ squadId: string; index: number } | null>(null);
   const [mercName, setMercName] = useState("");
+  const [eligible, setEligible] = useState<Record<string, string[]> | null>(null);
+  const [dragToken, setDragToken] = useState<RosterToken | null>(null);
+
+  useEffect(() => {
+    api<{ eligible: Record<string, string[]> }>("/api/loadout/eligibility").then((r) => setEligible(r.eligible), () => setEligible({}));
+  }, [api]);
+  // Strict: a player with no recorded unlocks, or any mercenary, can never carry an icon.
+  const canCarry = (p: { discordId: string | null } | null | undefined, token: RosterToken) => !!p?.discordId && !!eligible?.[p.discordId]?.includes(token.key);
 
   useEffect(() => {
     if (!dirty) return;
@@ -140,6 +163,8 @@ export function RosterEditor({ roster, signups, leagueAvailable, eventTitle, onR
   const flagged = useMemo(() => new Set(warnings.filter((w) => w.discordId).map((w) => w.discordId!)), [warnings]);
 
   function onDragStart(e: DragStartEvent) {
+    const tk = (e.active.data.current as { token?: string } | undefined)?.token;
+    if (tk) return setDragToken(tokenByKey(tk) ?? null);
     const player = e.active.data.current as PlayerRef | undefined;
     if (player) setActive({ player, role: signupById.get(player.discordId ?? "")?.role ?? null });
   }
@@ -152,6 +177,17 @@ export function RosterEditor({ roster, signups, leagueAvailable, eventTitle, onR
 
   function onDragEnd(e: DragEndEvent) {
     setActive(null);
+    const token = dragToken;
+    setDragToken(null);
+    if (token) {
+      if (!e.over || !String(e.over.id).startsWith("slot:")) return;
+      const [, squadId, index] = String(e.over.id).split(":");
+      const target = squads.find((s) => s.id === squadId)?.slots[Number(index)];
+      if (!target) return toast({ text: "Drop the icon onto a player.", tone: "err" });
+      if (!canCarry(target, token)) return toast({ text: `${target.displayName} hasn't confirmed the ${token.label} unlock, so they can't be given it.`, tone: "err" });
+      if (target.tokens?.includes(token.key)) return;
+      return edit(() => setSquads((s) => toggleToken(s, playerKey(target), token.key, true)));
+    }
     const player = e.active.data.current as PlayerRef | undefined;
     if (!player || !e.over) return;
     const id = String(e.over.id);
@@ -296,7 +332,12 @@ export function RosterEditor({ roster, signups, leagueAvailable, eventTitle, onR
         </form>
       </div>
 
-      <DndContext sensors={sensors} collisionDetection={collision} onDragStart={onDragStart} onDragEnd={onDragEnd} onDragCancel={() => setActive(null)}>
+      <DndContext sensors={sensors} collisionDetection={collision} onDragStart={onDragStart} onDragEnd={onDragEnd} onDragCancel={() => { setActive(null); setDragToken(null); }}>
+        <div className="card flex shrink-0 flex-wrap items-center gap-2 px-3 py-1.5">
+          <span className="text-[11px] font-bold uppercase tracking-[0.14em]">Icons</span>
+          {ROSTER_TOKENS.map((t) => <TokenChip key={t.key} token={t} count={(signups ?? []).filter((s) => !s.absent && canCarry(s, t)).length} />)}
+          <span className="text-xs text-stone/50">Drag onto a player who has unlocked it. {eligible === null ? "Loading unlocks…" : ""}</span>
+        </div>
         <div className="grid min-h-0 flex-1 gap-2 lg:grid-cols-[17rem_1fr]">
           <aside className="card flex max-h-[60vh] min-h-0 flex-col p-2 lg:max-h-none">
             <h2 className="mb-1.5 text-[11px] font-bold uppercase tracking-[0.14em]">Available ({unassigned.length})</h2>
@@ -344,10 +385,14 @@ export function RosterEditor({ roster, signups, leagueAvailable, eventTitle, onR
                   </div>
                   <div className="space-y-0.5">
                     {sq.slots.map((p, i) => (
-                      <Slot key={i} squadId={sq.id} index={i}>
+                      <Slot key={i} squadId={sq.id} index={i} drop={dragToken ? (canCarry(p, dragToken) ? "ok" : "blocked") : undefined}>
                         {p ? (
                           <Chip id={`p:${playerKey(p)}`} player={p} dim={!!p.discordId && flagged.has(p.discordId)} onDoubleClick={() => edit(() => setSquads((s) => movePlayer(s, p, { kind: "pool" })))}>
                             <span className="min-w-0 flex-1 truncate">{p.displayName}</span>
+                            {p.tokens?.map((k) => { const t = tokenByKey(k); return t && (
+                              // eslint-disable-next-line @next/next/no-img-element
+                              <button key={k} type="button" className="shrink-0" title={`${t.label} - click to remove`} onPointerDown={(ev) => ev.stopPropagation()} onClick={() => edit(() => setSquads((s) => toggleToken(s, playerKey(p), k, false)))}><img src={t.image} alt={t.label} className="h-4 w-6 object-contain" /></button>
+                            ); })}
                             {!p.discordId && <button type="button" className="text-[10px] text-warn" title="Edit mercenary name" onPointerDown={(e) => e.stopPropagation()} onClick={() => { setMercName(p.displayName); setMercSlot({ squadId: sq.id, index: i }); }}>Mercenary</button>}
                             {p.discordId && roster.messages.length > 0 && <ResponseMark response={roster.responses[p.discordId]} />}
                             {p.discordId && signupById.get(p.discordId) && <RegDot status={signupById.get(p.discordId)!.registration} />}
@@ -382,6 +427,12 @@ export function RosterEditor({ roster, signups, leagueAvailable, eventTitle, onR
           </div>
         )}
         <DragOverlay dropAnimation={{ duration: 150 }}>
+          {dragToken && (
+            <div className="flex items-center gap-1.5 rounded border border-blood-400 bg-ink-700 px-2 py-1 text-xs shadow-xl shadow-black/60">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={dragToken.image} alt="" className="h-5 w-8 object-contain" />{dragToken.label}
+            </div>
+          )}
           {active && (
             <div className="flex w-60 cursor-grabbing items-center gap-1.5 rounded border border-blood-400 bg-ink-700 px-1.5 py-1 text-[13px] shadow-xl shadow-black/60">
               <span className="mr-0.5 inline-flex"><Icon name={roleIcon(active.role)} size={18} /></span>

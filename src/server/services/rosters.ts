@@ -5,6 +5,7 @@ import { HttpError } from "@/lib/http";
 import { COMPETITIVE_PLAYER_CAP, type EventType, type PublishedMessage, type Roster, type RosterResponse, type RosterTemplate, type Squad } from "@/lib/rosterTypes";
 import { publish } from "./bus";
 import { playerKey } from "@/lib/rosterOps";
+import { ROSTER_TOKENS, TOKEN_KEYS } from "@/lib/rosterTokens";
 
 const snowflake = z.string().regex(/^\d{15,22}$/);
 
@@ -14,6 +15,7 @@ const memberSlotSchema = z
     displayName: z.string().min(1).max(64),
     avatarUrl: z.string().max(300).regex(/^https:\/\/cdn\.discordapp\.com\//).nullable(),
     isLeader: z.boolean(),
+    tokens: z.array(z.enum(TOKEN_KEYS)).max(TOKEN_KEYS.length).optional(),
   })
   .strict();
 
@@ -85,8 +87,8 @@ export async function getRoster(eventId: string): Promise<Roster | null> {
       "SELECT id, name, category, size, leader_required FROM roster_squads WHERE roster_id = $1 ORDER BY position",
       [r.id],
     ),
-    query<{ squad_id: string; slot_index: number; discord_id: string | null; mercenary_id: string | null; display_name: string; avatar_url: string | null; is_leader: boolean }>(
-      "SELECT squad_id, slot_index, discord_id, mercenary_id, display_name, avatar_url, is_leader FROM roster_assignments WHERE roster_id = $1",
+    query<{ squad_id: string; slot_index: number; discord_id: string | null; mercenary_id: string | null; display_name: string; avatar_url: string | null; is_leader: boolean; tokens: string[] }>(
+      "SELECT squad_id, slot_index, discord_id, mercenary_id, display_name, avatar_url, is_leader, tokens FROM roster_assignments WHERE roster_id = $1",
       [r.id],
     ),
     query<{ part_index: number; channel_id: string; message_id: string; published_at: Date; updated_at: Date | null }>(
@@ -103,7 +105,7 @@ export async function getRoster(eventId: string): Promise<Roster | null> {
     const slots: Squad["slots"] = Array.from({ length: s.size }, () => null);
     for (const a of assignments) {
       if (a.squad_id === s.id && a.slot_index < s.size) {
-        slots[a.slot_index] = { discordId: a.discord_id, ...(a.mercenary_id ? { mercenaryId: a.mercenary_id } : {}), displayName: a.display_name, avatarUrl: a.avatar_url, isLeader: a.is_leader };
+        slots[a.slot_index] = { discordId: a.discord_id, ...(a.mercenary_id ? { mercenaryId: a.mercenary_id } : {}), displayName: a.display_name, avatarUrl: a.avatar_url, isLeader: a.is_leader, ...(a.tokens.length ? { tokens: a.tokens } : {}) };
       }
     }
     return { id: s.id, name: s.name, category: s.category, size: s.size, leaderRequired: s.leader_required, slots };
@@ -146,8 +148,8 @@ async function insertSquads(client: PoolClient, rosterId: string, squads: Squad[
         const p = s.slots[j];
         if (!p) continue;
         await client.query(
-          `INSERT INTO roster_assignments (roster_id, squad_id, slot_index, discord_id, display_name, avatar_url, is_leader, mercenary_id) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
-          [rosterId, squadId, j, p.discordId, p.displayName, p.avatarUrl, p.isLeader, p.mercenaryId ?? null],
+          `INSERT INTO roster_assignments (roster_id, squad_id, slot_index, discord_id, display_name, avatar_url, is_leader, mercenary_id, tokens) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+          [rosterId, squadId, j, p.discordId, p.displayName, p.avatarUrl, p.isLeader, p.mercenaryId ?? null, [...new Set(p.tokens ?? [])]],
         );
       }
     }
@@ -174,6 +176,27 @@ export async function createRoster(eventId: string, templateKey: string, editorI
   return (await getRoster(eventId))!;
 }
 
+/** Rejects an icon on a player who has not confirmed the matching unlock. Icons already saved on the roster stay valid even if unlocks were later reset. */
+async function assertTokensAllowed(eventId: string, input: SaveInput): Promise<void> {
+  const wanted = input.squads.flatMap((s) => s.slots.flatMap((p) => (p?.discordId ? (p.tokens ?? []).map((t) => ({ id: p.discordId!, name: p.displayName, token: t })) : [])));
+  if (wanted.length === 0) return;
+  const [unlocks, saved] = await Promise.all([
+    query<{ discord_id: string; item_key: string }>("SELECT discord_id, item_key FROM loadout_unlocks WHERE discord_id = ANY($1::text[])", [[...new Set(wanted.map((w) => w.id))]]),
+    query<{ discord_id: string; tokens: string[] }>(
+      "SELECT a.discord_id, a.tokens FROM roster_assignments a JOIN rosters r ON r.id = a.roster_id WHERE r.raid_helper_event_id = $1 AND a.discord_id IS NOT NULL",
+      [eventId],
+    ),
+  ]);
+  const has = new Set(unlocks.map((u) => `${u.discord_id}:${u.item_key}`));
+  const already = new Set(saved.flatMap((a) => a.tokens.map((t) => `${a.discord_id}:${t}`)));
+  for (const w of wanted) {
+    const def = ROSTER_TOKENS.find((t) => t.key === w.token)!;
+    if (!has.has(`${w.id}:${def.requires}`) && !already.has(`${w.id}:${w.token}`)) {
+      throw new HttpError(400, `${w.name} hasn't confirmed the ${def.label} unlock, so that icon can't be assigned.`, "token_not_unlocked");
+    }
+  }
+}
+
 /** Replaces squads and assignments if `version` is still current; otherwise reports a conflict instead of overwriting. */
 export async function saveRoster(eventId: string, input: SaveInput, editorId: string): Promise<Roster> {
   const seen = new Set<string>();
@@ -193,6 +216,8 @@ export async function saveRoster(eventId: string, input: SaveInput, editorId: st
   if (kind.event_type === "competitive" && positions > COMPETITIVE_PLAYER_CAP) {
     throw new HttpError(400, `Competitive rosters are limited to ${COMPETITIVE_PLAYER_CAP} players (this one has ${positions} positions).`, "roster_too_large");
   }
+
+  await assertTokensAllowed(eventId, input);
 
   await tx(async (c) => {
     const upd = await c.query(

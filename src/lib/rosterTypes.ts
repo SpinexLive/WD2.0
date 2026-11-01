@@ -10,6 +10,8 @@ export interface SlotPlayer {
   displayName: string;
   avatarUrl: string | null;
   isLeader: boolean;
+  /** Dropped icons (see rosterTokens.ts); only members who have confirmed the matching unlock can carry one. */
+  tokens?: string[];
 }
 
 export interface Squad {

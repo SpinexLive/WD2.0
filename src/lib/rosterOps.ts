@@ -7,6 +7,7 @@ export interface PlayerRef {
   mercenaryId?: string;
   displayName: string;
   avatarUrl: string | null;
+  tokens?: string[];
 }
 
 export const playerKey = (p: PlayerRef) => p.discordId ?? `merc:${p.mercenaryId}`;
@@ -43,6 +44,17 @@ export function setLeader(squads: Squad[], squadId: string, discordId: string): 
   return squads.map((s) =>
     s.id !== squadId ? s : { ...s, slots: s.slots.map((p) => (p ? { ...p, isLeader: playerKey(p) === discordId ? !p.isLeader : false } : p)) },
   );
+}
+
+export function toggleToken(squads: Squad[], playerId: string, token: string, on: boolean): Squad[] {
+  return squads.map((s) => ({
+    ...s,
+    slots: s.slots.map((p) => {
+      if (!p || playerKey(p) !== playerId) return p;
+      const rest = (p.tokens ?? []).filter((t) => t !== token);
+      return { ...p, tokens: on ? [...rest, token] : rest };
+    }),
+  }));
 }
 
 export function resizeSquad(squad: Squad, size: number): Squad {
