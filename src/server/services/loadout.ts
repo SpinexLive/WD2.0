@@ -12,6 +12,11 @@ const SECONDARY = 2;
 
 const emojiText = (i: LoadoutItem) => `<:${i.key}:${i.emojiId}>`;
 
+const splitUnlock = (i: LoadoutItem) => {
+  const m = /^(.*?)\s*\(Level (\d+)\)$/.exec(i.unlock);
+  return { role: m?.[1] ?? i.unlock, level: m?.[2] ?? "-" };
+};
+
 function embedPayload(): DiscordMessagePayload {
   const rows = [];
   for (let n = 0; n < LOADOUT_ITEMS.length; n += 5) {
@@ -32,8 +37,13 @@ function embedPayload(): DiscordMessagePayload {
       {
         title: "Loadout unlock tracker",
         description:
-          "Press the button for each item you have **unlocked in game**. You'll be asked to confirm before it is saved, and you can press an item again to remove it.\n\n" +
-          LOADOUT_ITEMS.map((i) => `${emojiText(i)} ${i.name} - ${i.unlock}`).join("\n"),
+          "Press the button for each item you have **unlocked in game**. You'll be asked to confirm before it is saved, and you can press an item again to remove it.",
+        // Discord has no tables; three inline fields line up as columns because each item is one line.
+        fields: [
+          { name: "Item", value: LOADOUT_ITEMS.map((i) => `${emojiText(i)} ${i.name}`).join("\n"), inline: true },
+          { name: "Role", value: LOADOUT_ITEMS.map((i) => splitUnlock(i).role).join("\n"), inline: true },
+          { name: "Level required", value: LOADOUT_ITEMS.map((i) => splitUnlock(i).level).join("\n"), inline: true },
+        ],
         color: RED,
       },
     ],
