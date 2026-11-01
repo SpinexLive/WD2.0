@@ -9,14 +9,11 @@ interface Table {
   config: { channelId: string; messageId: string; postedAt: string } | null;
   members: { id: string; name: string; avatarUrl: string | null; items: string[] }[];
 }
-interface Channel { id: string; name: string; category: string | null }
 
 export default function LoadoutPage() {
   const api = useApi();
   const { toast, node } = useToast();
   const [data, setData] = useState<Table | null>(null);
-  const [channels, setChannels] = useState<Channel[]>([]);
-  const [channelId, setChannelId] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [busy, setBusy] = useState(false);
@@ -32,12 +29,6 @@ export default function LoadoutPage() {
   }, [api]);
   useEffect(() => void load(), [load]);
   useLive(["loadout"], () => void load());
-  useEffect(() => {
-    api<{ channels: Channel[] }>("/api/channels").then((r) => setChannels(r.channels), () => undefined);
-  }, [api]);
-  useEffect(() => {
-    if (data?.config && !channelId) setChannelId(data.config.channelId);
-  }, [data, channelId]);
 
   async function run(path: string, body: unknown, ok: string) {
     setBusy(true);
@@ -64,16 +55,9 @@ export default function LoadoutPage() {
         <h1 className="page-title">Loadout unlocks</h1>
         <button className="btn-ghost" onClick={() => void load()}>Refresh</button>
       </div>
-      <div className="card flex flex-wrap items-end gap-2 p-3">
-        <label className="text-sm">
-          <span className="mb-1 block text-xs text-stone/60">Discord channel for the tracker</span>
-          <select className="input !w-64" value={channelId} onChange={(e) => setChannelId(e.target.value)} disabled={busy}>
-            <option value="">Choose a channel…</option>
-            {channels.map((c) => <option key={c.id} value={c.id}>#{c.name}{c.category ? ` (${c.category})` : ""}</option>)}
-          </select>
-        </label>
-        <button className="btn-primary" disabled={busy || !channelId} onClick={() => void run("/api/loadout/post", { channelId }, data?.config ? "Tracker reposted" : "Tracker posted")}>{data?.config ? "Repost embed" : "Post embed"}</button>
-        <button className="btn-ghost ml-auto" disabled={busy} onClick={() => setConfirmReset(true)}>Reset all unlocks</button>
+      <div className="flex flex-wrap items-center gap-2">
+        <button className="btn-ghost" disabled={busy} onClick={() => setConfirmReset(true)}>Reset all unlocks</button>
+        <span className="text-xs text-stone/50">{data?.config ? "Embed is posted." : "Embed not posted yet."} Channel settings are under Admin → Loadout.</span>
       </div>
       <input className="input !w-64" placeholder="Search members" aria-label="Search members" value={search} onChange={(e) => setSearch(e.target.value)} />
       {error && <ErrorBanner message={error} onRetry={load} />}

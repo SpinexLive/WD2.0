@@ -8,12 +8,13 @@ import GoldPanel from "./GoldPanel";
 import StatusPanel from "./StatusPanel";
 import WdlRolePanel from "./WdlRolePanel";
 import SeedingAfkPanel from "./SeedingAfkPanel";
+import LoadoutPanel from "./LoadoutPanel";
 
 interface Overview {
   audit: { id: string; actor: string | null; action: string; targetType: string | null; targetId: string | null; details: unknown; at: string }[];
 }
 
-type Tab = "whitelist" | "gold" | "wdl-role" | "seeding-afk" | "status" | "audit";
+type Tab = "whitelist" | "gold" | "wdl-role" | "seeding-afk" | "loadout" | "status" | "audit";
 
 const fmt = (v: string | null) => (v ? new Date(v).toLocaleString("en-GB", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" }) : "-");
 
@@ -37,13 +38,13 @@ export default function AdminClient() {
   }, [api]);
   useEffect(() => void load(), [load]);
 
-  const tabs: [Tab, string][] = [["whitelist", "Whitelist links"], ["gold", "Gold price"], ["wdl-role", "WDL role"], ["seeding-afk", "Seeding AFK"], ["status", "Status"], ["audit", "Audit log"]];
+  const tabs: [Tab, string][] = [["whitelist", "Whitelist links"], ["gold", "Gold price"], ["wdl-role", "WDL role"], ["seeding-afk", "Seeding AFK"], ["loadout", "Loadout"], ["status", "Status"], ["audit", "Audit log"]];
 
   return (
     <div className="flex flex-col gap-4 md:h-full">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h1 className="page-title">Admin</h1>
-        <button className="btn-ghost" disabled={loading} onClick={load}>{loading ? "Refreshing…" : "Refresh"}</button>
+        <button className="btn-ghost" disabled={loading} onClick={load}>{loading ? "RefreshingÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â¦" : "Refresh"}</button>
       </div>
 
       {error && <ErrorBanner message={error} onRetry={load} />}
@@ -63,6 +64,8 @@ export default function AdminClient() {
           <WdlRolePanel />
         ) : tab === "seeding-afk" ? (
           <SeedingAfkPanel />
+        ) : tab === "loadout" ? (
+          <LoadoutPanel />
         ) : tab === "status" ? (
           <StatusPanel />
         ) : loading && !data ? (
