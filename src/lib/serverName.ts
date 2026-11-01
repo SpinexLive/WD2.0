@@ -17,9 +17,9 @@ export function scoreText(scores: FactionScore[]): string {
   return scores.map((s) => `${s.name.trim().charAt(0).toUpperCase()} ${Math.max(0, Math.trunc(s.score))}`).join(SCORE_SEPARATOR);
 }
 
-/** Between matches (every score 0) the plain base name is used. */
+/** The score is always shown, including 0-0; the plain base name is used only when no scores are reported. */
 export function buildServerName(base: string, scores: FactionScore[]): string {
-  const name = scores.length === 0 || scores.every((s) => s.score <= 0) ? base : `${base}${SCORE_PREFIX}${scoreText(scores)}`;
+  const name = scores.length === 0 ? base : `${base}${SCORE_PREFIX}${scoreText(scores)}`;
   if (name.length > MAX_NAME_LENGTH) throw new Error(`Server name would be ${name.length} characters (max ${MAX_NAME_LENGTH}). Shorten the base name.`);
   return name;
 }

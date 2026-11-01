@@ -50,7 +50,7 @@ export default function ServerNamePanel() {
       <h2 className="text-lg font-semibold">Live score in server name</h2>
       <p className="text-sm text-stone/60">
         When on, the game server name becomes <span className="font-mono">Base name | L 98ㆍV 45ㆍM 12</span>, updated at most every 2 minutes and only when the score changes.
-        At 0-0 (between matches) the plain base name is used. Turning it off restores the base name straight away.
+        The score is shown even at 0-0. Turning it off restores the base name straight away.
       </p>
       {error && <ErrorBanner message={error} onRetry={() => void load()} />}
       <label className="block text-sm">

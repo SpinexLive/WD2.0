@@ -5,7 +5,7 @@ const scores = [{ name: "Lonestar", score: 98 }, { name: "Valkyra", score: 45 },
 
 describe("server name", () => {
   it("appends the score", () => expect(buildServerName("My Server", scores)).toBe("My Server | L 98ㆍV 45ㆍM 12"));
-  it("uses the base name at 0-0", () => expect(buildServerName("My Server", scores.map((s) => ({ ...s, score: 0 })))).toBe("My Server"));
+  it("shows 0-0", () => expect(buildServerName("My Server", scores.map((s) => ({ ...s, score: 0 })))).toBe("My Server | L 0ㆍV 0ㆍM 0"));
   it("rejects names that are too long", () => expect(() => buildServerName("x".repeat(120), scores)).toThrow());
   it("strips a score suffix", () => {
     expect(stripScore("My Server | L 98ㆍV 45ㆍM 12")).toBe("My Server");
