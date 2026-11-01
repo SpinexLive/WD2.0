@@ -21,13 +21,14 @@ export function navigationGroups(access: NavAccess): NavGroup[] {
         { href: "/members", label: "Members", logo: "/images/icons/wardogs.png" },
         { href: "/wdl", label: "WDL", logo: "/images/WDL.webp" },
         { href: "/recruit", label: "Recruit" },
+        { href: "/loadout", label: "Loadout unlocks" },
       ] },
     );
   }
   groups.push({ id: "intelligence", label: "Match intelligence", items: [
     { href: "/observe", label: "Match Feedback" },
     ...(access.isAdmin || access.isReviewer ? [{ href: "/scouting", label: "Scouting" }] : []),
-    ...(access.isAdmin ? [{ href: "/feedback-setup", label: "Feedback setup" }, { href: "/loadout", label: "Loadout unlocks" }] : []),
+    ...(access.isAdmin ? [{ href: "/feedback-setup", label: "Feedback setup" }] : []),
   ] });
   groups.push({ id: "performance", label: "Performance", items: [ME_NAV, BOARD_NAV] });
   const management = [
