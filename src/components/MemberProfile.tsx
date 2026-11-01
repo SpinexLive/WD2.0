@@ -390,7 +390,7 @@ export default function MemberProfile({ member: memberProp, registration, onClos
 
             {chrono.length === 0 ? (
               <Panel title="Match history">
-                <Empty>{data.history.syncing || data.history.pending > 0 ? `Reading match history… ${data.history.pending} left` : s && s.matches > 0 ? `${s.matches} match${s.matches === 1 ? "" : "es"} counted in the all-time totals above, but ${s.matches === 1 ? "it" : "they"} predate${s.matches === 1 ? "s" : ""} the dashboard's detailed history. The Wardogs API only exposes the latest 100 matches, so charts will start filling in from the next game ${inline ? "you play" : "they play"}.` : "No stored matches for this player yet."}</Empty>
+                <Empty>{data.history.syncing || data.history.pending > 0 ? `Reading match history… ${data.history.pending} left` : s && s.matches > 0 ? `${s.matches} match${s.matches === 1 ? "" : "es"} counted in the all-time totals above, but no qualifying detailed matches are currently shown. Wardogs only lists its latest 100 matches, so older matches the dashboard never discovered may be missing.` : "No stored matches for this player yet."}</Empty>
               </Panel>
             ) : (
               <>
@@ -458,7 +458,7 @@ export default function MemberProfile({ member: memberProp, registration, onClos
             <p className="text-[11px] leading-relaxed text-stone/40">
               {data.history.syncing || data.history.pending > 0 ? `Reading match history… ${data.history.pending} match${data.history.pending === 1 ? "" : "es"} left. ` : ""}
               {data.history.error ? `${data.history.error}. ` : ""}
-              Detail comes from {data.history.count} stored matches ({fmtDate(data.history.oldest)} to {fmtDate(data.history.newest)}). The Wardogs API only returns the latest 100 matches, so history grows as the dashboard syncs. All-time totals come from the community stats and cover every match.
+              Detail comes from {data.history.count} stored matches ({fmtDate(data.history.oldest)} to {fmtDate(data.history.newest)}). Archived matches are kept beyond 100; Wardogs only lists its latest 100, so older matches the dashboard never discovered may be missing. All-time totals come from the community stats.
             </p>
           </div>
         ) : null}

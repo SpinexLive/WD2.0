@@ -1,81 +1,143 @@
 import { query, tx } from "@/lib/db";
+import { ProviderError } from "@/lib/http";
 import { getMatches, getMatchPlayers } from "@/server/services/wardogsRcon";
 
-const CONCURRENCY = 1;
 // The API allows 120 requests a minute per key, shared with links and stats lookups, so the sync keeps well under that.
 const GAP_MS = 750;
-const RATE_LIMIT_WAIT_MS = 20_000;
-const MAX_RATE_LIMIT_WAITS = 6;
+const MAX_MATCHES_PER_RUN = 50;
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 interface SyncState { running: Promise<void> | null; lastRunAt: number; pending: number; lastError: string | null; incomplete: boolean; failed: boolean }
 const g = globalThis as unknown as { __matchSync?: SyncState };
 const state = (): SyncState => (g.__matchSync ??= { running: null, lastRunAt: 0, pending: 0, lastError: null, incomplete: false, failed: false });
 
-async function storeMatch(id: number, m: Awaited<ReturnType<typeof getMatches>>["data"][number]) {
-  const players = await getMatchPlayers(id);
-  await tx(async (c) => {
+type MatchSummary = Awaited<ReturnType<typeof getMatches>>["data"][number];
+
+async function enqueueMatches(matches: MatchSummary[]) {
+  const completed = matches.filter((match) => match.endedAt !== null);
+  if (!completed.length) return;
+  await query(
+    `INSERT INTO match_sync_queue (id, server_name, map, started_at, ended_at, duration_s, peak_players, mvp_steam_id)
+     SELECT m.id, m."serverName", m.map, m."startedAt", m."endedAt", m."durationS", m."peakPlayers", m."mvpSteamId"
+       FROM jsonb_to_recordset($1::jsonb) AS m(
+         id bigint, "serverName" text, map text, "startedAt" timestamptz, "endedAt" timestamptz,
+         "durationS" integer, "peakPlayers" integer, "mvpSteamId" text
+       )
+      WHERE NOT EXISTS (SELECT 1 FROM matches WHERE id = m.id)
+     ON CONFLICT (id) DO UPDATE SET
+       server_name = EXCLUDED.server_name, map = EXCLUDED.map, started_at = EXCLUDED.started_at,
+       ended_at = EXCLUDED.ended_at, duration_s = EXCLUDED.duration_s,
+       peak_players = EXCLUDED.peak_players, mvp_steam_id = EXCLUDED.mvp_steam_id`,
+    [JSON.stringify(completed)],
+  );
+}
+
+interface QueuedMatch {
+  id: string;
+  server_name: string | null;
+  map: string | null;
+  started_at: Date | null;
+  ended_at: Date;
+  duration_s: number | null;
+  peak_players: number | null;
+  mvp_steam_id: string | null;
+  stored: boolean;
+}
+
+async function processQueuedMatch(): Promise<"empty" | "processed" | "failed" | "provider-unavailable"> {
+  return tx(async (c) => {
+    const result = await c.query<QueuedMatch>(
+      `SELECT q.id, q.server_name, q.map, q.started_at, q.ended_at, q.duration_s, q.peak_players, q.mvp_steam_id,
+              EXISTS (SELECT 1 FROM matches m WHERE m.id = q.id) AS stored
+         FROM match_sync_queue q
+        WHERE q.next_attempt_at <= now()
+        ORDER BY q.ended_at, q.id
+        LIMIT 1 FOR UPDATE OF q SKIP LOCKED`,
+    );
+    const match = result.rows[0];
+    if (!match) return "empty";
+    if (match.stored) {
+      await c.query("DELETE FROM match_sync_queue WHERE id = $1", [match.id]);
+      return "processed";
+    }
+
+    let players: Awaited<ReturnType<typeof getMatchPlayers>>;
+    try {
+      players = await getMatchPlayers(Number(match.id));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unknown match detail error";
+      await c.query(
+        `UPDATE match_sync_queue
+            SET attempts = attempts + 1, next_attempt_at = now() + interval '1 minute', last_error = $2
+          WHERE id = $1`,
+        [match.id, message.slice(0, 500)],
+      );
+      return error instanceof ProviderError && (error.retryable || error.status === 401 || error.status === 403)
+        ? "provider-unavailable"
+        : "failed";
+    }
+
     await c.query(
       `INSERT INTO matches (id, server_name, map, started_at, ended_at, duration_s, peak_players, mvp_steam_id)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
        ON CONFLICT (id) DO UPDATE SET server_name = EXCLUDED.server_name, map = EXCLUDED.map, started_at = EXCLUDED.started_at, ended_at = EXCLUDED.ended_at,
          duration_s = EXCLUDED.duration_s, peak_players = EXCLUDED.peak_players, mvp_steam_id = EXCLUDED.mvp_steam_id, synced_at = now()`,
-      [id, m.serverName, m.map, m.startedAt, m.endedAt, m.durationS, m.peakPlayers, m.mvpSteamId],
+      [match.id, match.server_name, match.map, match.started_at, match.ended_at, match.duration_s, match.peak_players, match.mvp_steam_id],
     );
     if (players.length) {
       await c.query(
         `INSERT INTO match_players (match_id, steam_id, name, faction, kills, deaths, cash)
          SELECT $1, * FROM unnest($2::text[], $3::text[], $4::text[], $5::int[], $6::int[], $7::bigint[])
          ON CONFLICT (match_id, steam_id) DO UPDATE SET name = EXCLUDED.name, faction = EXCLUDED.faction, kills = EXCLUDED.kills, deaths = EXCLUDED.deaths, cash = EXCLUDED.cash`,
-        [id, players.map((p) => p.steamId), players.map((p) => p.name), players.map((p) => p.faction), players.map((p) => p.kills), players.map((p) => p.deaths), players.map((p) => p.cash)],
+        [match.id, players.map((p) => p.steamId), players.map((p) => p.name), players.map((p) => p.faction), players.map((p) => p.kills), players.map((p) => p.deaths), players.map((p) => p.cash)],
       );
     }
+    await c.query("DELETE FROM match_sync_queue WHERE id = $1", [match.id]);
+    return "processed";
   });
 }
 
 async function run(force: boolean) {
   const s = state();
   try {
-    const list = (await getMatches(force)).data.filter((m) => m.endedAt);
-    const have = new Set((await query<{ id: string }>("SELECT id FROM matches WHERE id = ANY($1::bigint[])", [list.map((m) => m.id)])).map((r) => Number(r.id)));
-    // Oldest first, so an interrupted run leaves a contiguous history.
-    const todo = list.filter((m) => !have.has(m.id)).sort((a, b) => a.id - b.id);
-    s.pending = todo.length;
-    let failed = 0;
-    let next = 0;
-    let waits = 0;
-    let stop = false;
-    await Promise.all(
-      Array.from({ length: CONCURRENCY }, async () => {
-        while (next < todo.length && !stop) {
-          const m = todo[next++]!;
-          try {
-            await storeMatch(m.id, m);
-            s.pending--;
-          } catch (err) {
-            if ((err as { status?: number }).status === 429 && waits < MAX_RATE_LIMIT_WAITS) {
-              waits++;
-              next--;
-              await sleep(RATE_LIMIT_WAIT_MS);
-              continue;
-            }
-            failed++;
-            s.pending--;
-            if ((err as { status?: number }).status === 429) stop = true;
-          }
-          await sleep(GAP_MS);
-        }
-      }),
+    let listError: string | null = null;
+    let matches: MatchSummary[] | null = null;
+    try {
+      const snapshot = await getMatches(force);
+      if (snapshot.stale) listError = snapshot.error ?? "Wardogs match list is unavailable";
+      matches = snapshot.data;
+    } catch (error) {
+      listError = error instanceof Error ? error.message : "Could not read the Wardogs match list";
+    }
+    if (matches) await enqueueMatches(matches);
+
+    const [initialQueue] = await query<{ pending: number }>("SELECT count(*)::int AS pending FROM match_sync_queue");
+    if (!initialQueue) throw new Error("Could not read the match archive queue");
+    s.pending = initialQueue.pending;
+
+    for (let i = 0; i < MAX_MATCHES_PER_RUN; i++) {
+      const result = await processQueuedMatch();
+      if (result === "empty" || result === "provider-unavailable") break;
+      if (result === "processed") s.pending = Math.max(s.pending - 1, 0);
+      if (i < MAX_MATCHES_PER_RUN - 1) await sleep(GAP_MS);
+    }
+
+    const [queue] = await query<{ pending: number; last_error: string | null }>(
+      `SELECT count(*)::int AS pending,
+              (array_agg(last_error ORDER BY queued_at) FILTER (WHERE last_error IS NOT NULL))[1] AS last_error
+         FROM match_sync_queue`,
     );
-    const left = todo.length - next + failed;
-    s.pending = left;
-    s.incomplete = left > 0;
-    s.lastError = left ? `${left} match${left === 1 ? "" : "es"} still to read; syncing resumes automatically` : null;
-    s.failed = false;
+    if (!queue) throw new Error("Could not read the match archive queue");
+    s.pending = queue.pending;
+    s.incomplete = s.pending > 0 || listError !== null;
+    s.failed = listError !== null || Boolean(queue.last_error);
+    const waiting = s.pending ? `${s.pending} match${s.pending === 1 ? "" : "es"} waiting to be archived; sync will retry automatically` : null;
+    s.lastError = [listError, waiting, queue.last_error].filter(Boolean).join(". ") || null;
   } catch (err) {
     s.failed = true;
     s.incomplete = true;
     s.lastError = (err as Error).message;
+    console.error("Match history sync failed:", s.lastError);
   } finally {
     s.lastRunAt = Date.now();
     s.running = null;

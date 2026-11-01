@@ -105,15 +105,15 @@ async function checkAlerts() {
   }
 }
 
-/** Every minute: record attendance for events that just started. Every 5 minutes: keep match history syncing and run the health checks and alerts. */
+/** Every minute: record attendance and retry incomplete match syncs. Health checks run every 5 minutes. */
 export function startMonitor(): void {
   const s = state();
   if (process.env.NEXT_PHASE === "phase-production-build" || s.timer) return;
   const tick = async () => {
     s.ticks++;
+    kickMatchSync();
     await snapshotAttendance().catch((e: Error) => console.error("attendance snapshot failed:", e.message));
     if (s.ticks % 5 === 1) {
-      kickMatchSync();
       await checkAlerts().catch((e: Error) => console.error("health check failed:", e.message));
     }
   };

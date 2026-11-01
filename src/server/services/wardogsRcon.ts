@@ -129,11 +129,15 @@ export function getMatches(force = false): Promise<Snapshot<MatchSummary[]>> {
   return cached("rcon:matches", 300_000, async () => {
     const o = await get("/matches?limit=100");
     if (!Array.isArray(o.matches)) throw new ProviderError("wardogs-rcon", "Unrecognised Wardogs matches response format");
-    return o.matches.flatMap((m) => {
+    const ids = new Set<number>();
+    return o.matches.map((m) => {
       const x = obj(m);
       const id = num(x?.id);
-      if (!x || id === null) return [];
-      return [{ id, serverName: str(x.serverName), map: str(x.map), startedAt: str(x.startedAt), endedAt: str(x.endedAt), durationS: num(x.durationS), peakPlayers: num(x.peakPlayers), mvpSteamId: str(obj(x.mvp)?.steamId) }];
+      if (!x || id === null || !Number.isSafeInteger(id) || id < 0 || ids.has(id)) {
+        throw new ProviderError("wardogs-rcon", "Wardogs returned an invalid or duplicate match ID");
+      }
+      ids.add(id);
+      return { id, serverName: str(x.serverName), map: str(x.map), startedAt: str(x.startedAt), endedAt: str(x.endedAt), durationS: num(x.durationS), peakPlayers: num(x.peakPlayers), mvpSteamId: str(obj(x.mvp)?.steamId) };
     });
   }, force);
 }
