@@ -42,7 +42,8 @@ vi.mock("@/server/services/seedingRcon", () => ({ gamePlayers: mocks.players, me
 vi.mock("@/server/services/matchHistory", () => ({ matchSyncStatus: mocks.sync }));
 vi.mock("@/server/services/recruit", () => ({ buildRecruitReport: mocks.report }));
 
-import { ProviderError } from "@/lib/http";
+import { HttpError, ProviderError } from "@/lib/http";
+import { GAME_MESSAGE_LIMIT, gameMessageSize } from "@/lib/gameMessage";
 import {
   postPendingRecruitAlerts, recruitAlertPayload, recruitAlertStatus, recruitAlertsTick, recruitButton,
   recruitInvitation, RECRUIT_CHANNEL_ID, scanRecruitCandidates,
@@ -64,6 +65,46 @@ describe("recruit notification content", () => {
     expect(recruitInvitation(first, "Alpha")).toBe(
       "Hey Alpha, Spinex here leader of Remnant! Your 3 matches, 2.50 K/D and 45,000 average cash caught our eye. Your stats stack up well against our top players, and we'd love you on the team. If youre interested in comp matches come say Hi: discord.gg/rmntgg",
     );
+  });
+
+  it("keeps the original message at the exact limit and shortens the 258-character case", () => {
+    expect(gameMessageSize(recruitInvitation(first, "1234567"))).toBe(256);
+    const original = `Hey 123456789, Spinex here leader of Remnant! Your 3 matches, 2.50 K/D and 45,000 average cash caught our eye. Your stats stack up well against our top players, and we'd love you on the team. If youre interested in comp matches come say Hi: discord.gg/rmntgg`;
+    expect(gameMessageSize(original)).toBe(258);
+    const message = recruitInvitation(first, "123456789");
+    expect(gameMessageSize(message)).toBeLessThanOrEqual(GAME_MESSAGE_LIMIT);
+    for (const part of ["123456789", "Spinex", "3 matches", "2.50 K/D", "45,000", "top players", "discord.gg/rmntgg"]) expect(message).toContain(part);
+  });
+
+  it("fits long Unicode names without splitting grapheme clusters or dropping stats", () => {
+    const grapheme = "\u{1f469}\u200d\u{1f680}";
+    const message = recruitInvitation(first, grapheme.repeat(100));
+    expect(gameMessageSize(message)).toBeLessThanOrEqual(GAME_MESSAGE_LIMIT);
+    expect(message).toContain("...");
+    expect(message).toContain("3 matches, 2.50 K/D and 45,000");
+    expect(message).toContain("discord.gg/rmntgg");
+    const name = message.slice(4, message.indexOf(", Spinex")).replace(/\.\.\.$/, "");
+    expect([...new Intl.Segmenter(undefined, { granularity: "grapheme" }).segment(name)].every((part) => part.segment === grapheme)).toBe(true);
+    expect(name).not.toContain("\ufffd");
+  });
+
+  it("fits varied player names and statistics while retaining the invitation details", () => {
+    const names = [
+      ...[1, 7, 8, 9, 32, 64, 128, 300].map((length) => "x".repeat(length)),
+      "\u00e9".repeat(150),
+      "\u{1f469}\u200d\u{1f680}".repeat(70),
+    ];
+    const candidate = { ...first, matches: 9999, kd: 12345.67, avgCash: 123456789 };
+    for (const name of names) {
+      const message = recruitInvitation(candidate, name);
+      expect(gameMessageSize(message)).toBeLessThanOrEqual(GAME_MESSAGE_LIMIT);
+      expect(message).toContain("9999 matches, 12345.67 K/D and 123,456,789");
+      expect(message).toContain("discord.gg/rmntgg");
+    }
+  });
+
+  it("reports stats that cannot fit instead of producing an oversized invitation", () => {
+    expect(() => recruitInvitation({ ...first, avgCash: 1e300 }, "Alpha")).toThrow("cannot fit");
   });
 
   it("mentions only the requested roles and includes the player's details and button", () => {
@@ -169,6 +210,31 @@ describe.skipIf(!testDatabase)("recruit alerts with PostgreSQL", () => {
       .toEqual({ status: "contacted", updated_by_id: button(first.steamId).userId });
     expect((await mocks.client!.query("SELECT action, target_id FROM audit_logs")).rows[0])
       .toEqual({ action: "recruit.invited", target_id: first.steamId });
+  });
+
+  it("sends the shortened invitation through the Discord button", async () => {
+    await posted();
+    const name = "123456789";
+    mocks.players.mockResolvedValue({ count: 1, players: [{ steamId: first.steamId, name, faction: "Lonestar" }] });
+    expect(await recruitButton(button(first.steamId))).toContain("Invitation sent");
+    const sent = mocks.message.mock.calls[0]![1] as string;
+    expect(sent).toBe(recruitInvitation(first, name));
+    expect(gameMessageSize(sent)).toBeLessThanOrEqual(GAME_MESSAGE_LIMIT);
+  });
+
+  it("does not reserve or send an invitation when its real stats cannot fit", async () => {
+    await posted();
+    mocks.report.mockResolvedValue({ candidates: [{ ...first, avgCash: 1e300 }] });
+    expect(await recruitButton(button(first.steamId))).toContain("cannot fit");
+    expect((await mocks.client!.query("SELECT invite_status FROM recruit_alerts")).rows[0].invite_status).toBe("ready");
+    expect(mocks.message).not.toHaveBeenCalled();
+  });
+
+  it("treats a local game-message validation error as not sent", async () => {
+    await posted();
+    mocks.message.mockRejectedValue(new HttpError(400, "Message too long", "game_message_too_long"));
+    expect(await recruitButton(button(first.steamId))).toContain("invitation was not sent");
+    expect((await mocks.client!.query("SELECT invite_status FROM recruit_alerts")).rows[0].invite_status).toBe("ready");
   });
 
   it("dismisses a recruit, records the actor, refreshes the dashboard and updates the embed without re-pinging", async () => {

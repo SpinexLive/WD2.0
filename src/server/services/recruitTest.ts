@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { z } from "zod";
 import { query, tx } from "@/lib/db";
 import { HttpError, ProviderError } from "@/lib/http";
+import { isInvalidGameMessage } from "@/lib/gameMessage";
 import type { Session } from "@/lib/session";
 import { matchSyncStatus } from "./matchHistory";
 import { buildRecruitReport, recruitPlayerStats, type RecruitCandidate } from "./recruit";
@@ -79,9 +80,15 @@ export async function recruitTestPlayers(): Promise<{ players: TestPlayer[] }> {
       const values = actual && actual.avgCash !== null && Number.isFinite(actual.kd) && Number.isFinite(actual.avgCash)
         ? { matches: actual.matches, kd: Math.round(actual.kd * 100) / 100, avgCash: Math.round(actual.avgCash) }
         : null;
-      const message = values && player.name.trim()
-        ? recruitInvitation({ steamId: player.steamId, name: player.name, ...values }, player.name.trim())
-        : null;
+      let message: string | null = null;
+      if (values && player.name.trim()) {
+        try {
+          message = recruitInvitation({ steamId: player.steamId, name: player.name, ...values }, player.name.trim());
+        } catch (error) {
+          if (!isInvalidGameMessage(error)) throw error;
+          unavailable = unavailable ?? error.message;
+        }
+      }
       return {
         steamId: player.steamId, name: player.name, faction: player.faction, stats: values, message,
         previewDigest: message ? digest(player.steamId, message, willCount) : null,
@@ -133,7 +140,8 @@ export async function sendRecruitTest(input: RecruitTestInput, actor: Pick<Sessi
     await messageGamePlayer(input.steamId, player.message);
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown game-server error";
-    const rejected = error instanceof ProviderError && error.status !== undefined && error.status >= 400 && error.status < 500;
+    const invalidMessage = isInvalidGameMessage(error);
+    const rejected = invalidMessage || (error instanceof ProviderError && error.status !== undefined && error.status >= 400 && error.status < 500);
     try {
       await tx(async (c) => {
         await c.query("UPDATE recruit_test_attempts SET status = $2, error = $3, completed_at = now() WHERE request_id = $1", [input.requestId, rejected ? "failed" : "unknown", message.slice(0, 500)]);
@@ -147,7 +155,7 @@ export async function sendRecruitTest(input: RecruitTestInput, actor: Pick<Sessi
       console.error("Could not record recruit test failure:", recordError instanceof Error ? recordError.message : "unknown");
       throw new HttpError(503, "Could not record the test result. Delivery may be uncertain; check before retrying.", "test_outcome_unknown");
     }
-    if (rejected) throw new HttpError(502, `The game server rejected the test message: ${message}`, "test_rejected");
+    if (rejected) throw new HttpError(invalidMessage ? 400 : 502, invalidMessage ? `The test message was not sent: ${message}` : `The game server rejected the test message: ${message}`, "test_rejected");
     if (player.willCount) {
       publish("recruit");
       try {

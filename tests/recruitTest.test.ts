@@ -37,6 +37,7 @@ vi.mock("@/server/services/recruit", () => ({ buildRecruitReport: mocks.report, 
 vi.mock("@/server/services/seedingRcon", () => ({ gamePlayers: mocks.players, messageGamePlayer: mocks.message }));
 
 import { HttpError, ProviderError } from "@/lib/http";
+import { GAME_MESSAGE_LIMIT, gameMessageSize } from "@/lib/gameMessage";
 import { recruitButton } from "@/server/services/recruitAlerts";
 import { recruitTestPlayers, sendRecruitTest } from "@/server/services/recruitTest";
 
@@ -108,6 +109,45 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)("admin recruit tests with Postgr
       .toEqual({ action: "recruit.test_invited", target_id: player.steamId });
     await send(secondRequest);
     expect(mocks.message).toHaveBeenCalledTimes(2);
+  });
+
+  it("previews and sends the shortened message when the original would be too long", async () => {
+    const name = "123456789";
+    mocks.players.mockResolvedValue({ count: 1, players: [{ ...player, name }] });
+    const p = await preview();
+    expect(p.message).toContain(name);
+    expect(gameMessageSize(p.message!)).toBeLessThanOrEqual(GAME_MESSAGE_LIMIT);
+    await sendRecruitTest({ steamId: p.steamId, requestId: firstRequest, previewDigest: p.previewDigest! }, actor);
+    expect(mocks.message).toHaveBeenCalledWith(player.steamId, p.message);
+  });
+
+  it("allows a new test after the server previously rejected an overlong message", async () => {
+    await mocks.client!.query(
+      `INSERT INTO recruit_test_attempts (request_id, steam_id, actor_id, tracked_recruit, status, error)
+       VALUES ($1, $2, $3, false, 'failed', 'message is 258 characters; the limit is 256')`,
+      [firstRequest, player.steamId, actor.discordId],
+    );
+    const name = "123456789";
+    mocks.players.mockResolvedValue({ count: 1, players: [{ ...player, name }] });
+    const p = await preview();
+    expect(await sendRecruitTest({ steamId: p.steamId, requestId: secondRequest, previewDigest: p.previewDigest! }, actor))
+      .toMatchObject({ ok: true });
+    expect(mocks.message).toHaveBeenCalledWith(player.steamId, p.message);
+    expect(gameMessageSize(p.message!)).toBeLessThanOrEqual(GAME_MESSAGE_LIMIT);
+  });
+
+  it("marks only the player with unfit statistics unavailable", async () => {
+    const other = { steamId: "76561198000000002", name: "Bravo", faction: "Lonestar" };
+    mocks.players.mockResolvedValue({ count: 2, players: [player, other] });
+    mocks.stats.mockResolvedValue(new Map([
+      [player.steamId, { ...candidate, avgCash: 1e300 }],
+      [other.steamId, { ...candidate, steamId: other.steamId }],
+    ]));
+    const result = await recruitTestPlayers();
+    expect(result.players.find((p) => p.steamId === player.steamId)).toMatchObject({
+      message: null, previewDigest: null, unavailable: expect.stringContaining("cannot fit"),
+    });
+    expect(result.players.find((p) => p.steamId === other.steamId)).toMatchObject({ unavailable: null, message: expect.any(String) });
   });
 
   it("blocks players without real stored stats and never fabricates message values", async () => {
@@ -208,6 +248,14 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)("admin recruit tests with Postgr
     expect((await mocks.client!.query("SELECT count(*)::int AS n FROM recruit_alerts")).rows[0].n).toBe(0);
     expect(await send(secondRequest)).toMatchObject({ countedAsInvitation: true });
     expect(mocks.message).toHaveBeenCalledTimes(2);
+  });
+
+  it("treats a local message-length validation error as a known rejection", async () => {
+    mocks.report.mockResolvedValue({ candidates: [candidate] });
+    mocks.message.mockRejectedValue(new HttpError(400, "Message too long", "game_message_too_long"));
+    await expect(send()).rejects.toMatchObject({ code: "test_rejected" });
+    expect((await mocks.client!.query("SELECT status FROM recruit_test_attempts")).rows[0].status).toBe("failed");
+    expect((await mocks.client!.query("SELECT count(*)::int AS n FROM recruit_alerts")).rows[0].n).toBe(0);
   });
 
   it("fails closed when match history or required candidate data is unavailable", async () => {

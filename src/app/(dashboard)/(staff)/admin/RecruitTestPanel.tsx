@@ -62,6 +62,7 @@ export default function RecruitTestPanel() {
     <div className="space-y-4 p-4">
       <h2 className="text-lg font-semibold">Recruitment message test</h2>
       <p className="text-sm text-stone/60">Send the actual recruitment invitation to a player currently on the game server. Choose a willing test recipient: the message does not say it is a test. It uses their real stored match count, K/D and average cash.</p>
+      <p className="text-sm text-stone/60">The message is shortened when needed to fit the server's 256-character limit. Very long player names may be abbreviated in the preview.</p>
       <p className="text-sm text-stone/60">If the player is a recruit, sending this counts as their one invitation and marks them contacted. Other players are not added to the Recruit page. The message may say their stats compare well even if they are not a suitable recruit.</p>
       {error && <ErrorBanner message={error} onRetry={() => void load()} />}
       <div className="flex flex-wrap items-end gap-2">

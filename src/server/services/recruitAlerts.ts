@@ -1,6 +1,7 @@
 import { query, tx } from "@/lib/db";
 import { env } from "@/lib/env";
-import { ProviderError } from "@/lib/http";
+import { HttpError, ProviderError } from "@/lib/http";
+import { GAME_MESSAGE_LIMIT, gameMessageSize, isInvalidGameMessage } from "@/lib/gameMessage";
 import { hasAuthorisedRole, postMessage } from "./discord";
 import { gamePlayers, messageGamePlayer } from "./seedingRcon";
 import { matchSyncStatus } from "./matchHistory";
@@ -15,7 +16,26 @@ export { RECRUIT_BUTTON, RECRUIT_CHANNEL_ID, RECRUIT_MENTION_ROLES, recruitAlert
 export const RECRUIT_SCAN_LOCK = 824029;
 
 export function recruitInvitation(candidate: RecruitEmbedCandidate, playerName: string): string {
-  return `Hey ${playerName}, Spinex here leader of Remnant! Your ${candidate.matches} matches, ${candidate.kd.toFixed(2)} K/D and ${candidate.avgCash.toLocaleString("en-GB")} average cash caught our eye. Your stats stack up well against our top players, and we'd love you on the team. If youre interested in comp matches come say Hi: discord.gg/rmntgg`;
+  const stats = `${candidate.matches} matches, ${candidate.kd.toFixed(2)} K/D and ${candidate.avgCash.toLocaleString("en-GB")}`;
+  const original = `Hey ${playerName}, Spinex here leader of Remnant! Your ${stats} average cash caught our eye. Your stats stack up well against our top players, and we'd love you on the team. If youre interested in comp matches come say Hi: discord.gg/rmntgg`;
+  if (gameMessageSize(original) <= GAME_MESSAGE_LIMIT) return original;
+
+  const shorter = `Hey ${playerName}, Spinex here, Remnant's leader! Your ${stats} avg cash caught our eye. You compare well with our top players! Interested in comp matches? Join us: discord.gg/rmntgg`;
+  if (gameMessageSize(shorter) <= GAME_MESSAGE_LIMIT) return shorter;
+
+  const prefix = "Hey ";
+  const suffix = `, Spinex, Remnant's leader! Your ${stats} avg cash caught our eye. You compare well with our top players! Join us for comp: discord.gg/rmntgg`;
+  const budget = GAME_MESSAGE_LIMIT - gameMessageSize(prefix + suffix);
+  if (budget <= 3) throw new HttpError(400, "The player's stats cannot fit in a 256-character invitation.", "game_message_too_long");
+  if (gameMessageSize(playerName) <= budget) return prefix + playerName + suffix;
+  let shortened = "";
+  const segments = new Intl.Segmenter(undefined, { granularity: "grapheme" }).segment(playerName);
+  for (const { segment } of segments) {
+    if (gameMessageSize(shortened + segment + "...") > budget) break;
+    shortened += segment;
+  }
+  if (!shortened) throw new HttpError(400, "The player's name cannot fit in a 256-character invitation.", "game_message_too_long");
+  return prefix + shortened + "..." + suffix;
 }
 
 /** Snapshot all current candidates on first run; only subsequent new players are queued for Discord. */
@@ -137,6 +157,13 @@ export async function recruitButton(input: RecruitButton): Promise<string> {
   const name = online.name.trim();
   if (!name) return "The game server did not provide the player's name. No invitation was sent.";
   const checked = recruitCandidateSchema.parse(candidate);
+  let invitation: string;
+  try {
+    invitation = recruitInvitation(checked, name);
+  } catch (error) {
+    if (isInvalidGameMessage(error)) return `${error.message} No invitation was sent.`;
+    throw error;
+  }
   const claimed = await tx(async (c) => {
     const alert = await c.query<{ invite_status: string }>(
       `SELECT invite_status FROM recruit_alerts WHERE steam_id = $1 AND discord_message_id = $2 AND post_status = 'posted' FOR UPDATE`,
@@ -153,13 +180,14 @@ export async function recruitButton(input: RecruitButton): Promise<string> {
   });
   if (!claimed) return "An invitation was already sent, is being processed, or the recruit is no longer new.";
   try {
-    await messageGamePlayer(steamId, recruitInvitation(checked, name));
+    await messageGamePlayer(steamId, invitation);
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown game-server error";
-    const rejected = error instanceof ProviderError && error.status !== undefined && error.status >= 400 && error.status < 500;
+    const invalidMessage = isInvalidGameMessage(error);
+    const rejected = invalidMessage || (error instanceof ProviderError && error.status !== undefined && error.status >= 400 && error.status < 500);
     await query("UPDATE recruit_alerts SET invite_status = $2, invite_error = $3, embed_revision = embed_revision + 1, embed_retry_at = now() WHERE steam_id = $1 AND invite_status = 'sending'",
       [steamId, rejected ? "ready" : "unknown", message.slice(0, 500)]);
-    if (rejected) return `The game server rejected the invitation: ${message}. Nothing was sent.`;
+    if (rejected) return invalidMessage ? `The invitation was not sent: ${message}` : `The game server rejected the invitation: ${message}. Nothing was sent.`;
     publish("recruit");
     try {
       await syncRecruitEmbed(steamId);

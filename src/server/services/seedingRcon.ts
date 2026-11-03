@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { env } from "@/lib/env";
 import { requestJson } from "@/lib/http";
+import { assertGameMessage } from "@/lib/gameMessage";
 
 async function game(path: string, options: { method?: "PATCH" | "POST"; body?: unknown } = {}) {
   const e = env();
@@ -40,12 +41,11 @@ export async function moveSeedingPlayer(steamId: string, faction: string) {
 export const SEEDING_AFK_REMINDER = "You are registered as Seeding AFK. When you return, click 'I'm back' on the Discord seeding message to disable AFK seeding.";
 
 export async function remindSeedingPlayer(steamId: string) {
-  if (!/^\d{17}$/.test(steamId)) throw new Error("Invalid Steam ID");
-  await game(`/v1/players/${steamId}/message`, { method: "POST", body: { message: SEEDING_AFK_REMINDER } });
+  await messageGamePlayer(steamId, SEEDING_AFK_REMINDER);
 }
 
 export async function messageGamePlayer(steamId: string, message: string) {
   if (!/^\d{17}$/.test(steamId)) throw new Error("Invalid Steam ID");
-  if (!message.trim()) throw new Error("In-game message cannot be empty");
+  assertGameMessage(message);
   await game(`/v1/players/${steamId}/message`, { method: "POST", body: { message } });
 }

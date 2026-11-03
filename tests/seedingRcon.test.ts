@@ -2,7 +2,7 @@ import { beforeEach, expect, it, vi } from "vitest";
 
 const request = vi.hoisted(() => vi.fn());
 vi.mock("@/lib/env", () => ({ env: () => ({ GAME_RCON_URL: "http://game.test:7779/", GAME_RCON_PASSWORD: "test-password" }) }));
-vi.mock("@/lib/http", () => ({ requestJson: request }));
+vi.mock("@/lib/http", async (original) => ({ ...await original<typeof import("@/lib/http")>(), requestJson: request }));
 import { messageGamePlayer, remindSeedingPlayer, SEEDING_AFK_REMINDER, seedingSnapshot } from "@/server/services/seedingRcon";
 
 beforeEach(() => { vi.clearAllMocks(); request.mockResolvedValue({ data: { message: "OK" } }); });
@@ -26,6 +26,14 @@ it("sends a recruitment message to the selected Steam ID without automatically r
   }));
   await expect(messageGamePlayer("invalid", "Hello")).rejects.toThrow("Invalid Steam ID");
   await expect(messageGamePlayer("76561198000000001", " ")).rejects.toThrow("cannot be empty");
+});
+it("enforces the 256-character game limit before sending, including Unicode", async () => {
+  await messageGamePlayer("76561198000000001", "A".repeat(256));
+  await messageGamePlayer("76561198000000001", "\u00e9".repeat(128));
+  expect(request).toHaveBeenCalledTimes(2);
+  await expect(messageGamePlayer("76561198000000001", "A".repeat(257))).rejects.toMatchObject({ code: "game_message_too_long" });
+  await expect(messageGamePlayer("76561198000000001", "\u00e9".repeat(129))).rejects.toMatchObject({ code: "game_message_too_long" });
+  expect(request).toHaveBeenCalledTimes(2);
 });
 it("reads the live roster without requiring team balance configuration", async () => {
   request.mockResolvedValueOnce({ data: { uptimeSeconds: 100 } })
