@@ -10,7 +10,7 @@ import { buildRecruitReport } from "./recruit";
 export const RECRUIT_BUTTON = "wdrecruit";
 export const RECRUIT_CHANNEL_ID = "1560238091543912558";
 export const RECRUIT_MENTION_ROLES = ["1546188874986950758", "1547229723141345351"];
-const SCAN_LOCK = 824029;
+export const RECRUIT_SCAN_LOCK = 824029;
 
 const candidateSchema = z.object({
   steamId: z.string().regex(/^\d{17}$/),
@@ -50,7 +50,7 @@ export async function scanRecruitCandidates(): Promise<void> {
   const sync = matchSyncStatus();
   if (!sync.lastRunAt || sync.syncing || sync.pending > 0 || sync.failed) return;
   await tx(async (c) => {
-    const lock = await c.query<{ acquired: boolean }>("SELECT pg_try_advisory_xact_lock($1) AS acquired", [SCAN_LOCK]);
+    const lock = await c.query<{ acquired: boolean }>("SELECT pg_try_advisory_xact_lock($1) AS acquired", [RECRUIT_SCAN_LOCK]);
     if (!lock.rows[0]?.acquired) return;
     const state = await c.query<{ initialized_at: Date | null }>("SELECT initialized_at FROM recruit_alert_state WHERE id = 1 FOR UPDATE");
     if (!state.rows[0]) throw new Error("Recruit alerts migration has not been applied.");

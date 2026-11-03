@@ -48,22 +48,53 @@ interface Agg {
 
 const round = (n: number, d = 2) => Math.round(n * 10 ** d) / 10 ** d;
 
+async function recruitAggregates(minMatches: number, steamIds: string[] | null): Promise<Agg[]> {
+  return query<Agg>(
+    `SELECT mp.steam_id,
+            (array_agg(mp.name ORDER BY m.ended_at DESC NULLS LAST))[1] AS name,
+            count(*) AS matches, sum(mp.kills) AS kills, sum(mp.deaths) AS deaths,
+            avg(mp.cash) AS avg_cash,
+            count(*) FILTER (WHERE m.mvp_steam_id = mp.steam_id) AS mvps,
+            max(m.ended_at) AS last_played
+       FROM match_players mp JOIN matches m ON m.id = mp.match_id
+      WHERE lower(COALESCE(mp.faction, '')) <> 'white' AND (mp.kills > 0 OR mp.deaths > 0) AND COALESCE(m.peak_players, 0) >= 80
+        AND ($2::text[] IS NULL OR mp.steam_id = ANY($2::text[]))
+      GROUP BY mp.steam_id
+     HAVING count(*) >= $1`,
+    [minMatches, steamIds],
+  );
+}
+
+function aggregateStats(r: Agg) {
+  const kills = Number(r.kills);
+  const deaths = Number(r.deaths);
+  return {
+    steamId: r.steam_id,
+    name: r.name,
+    matches: Number(r.matches),
+    kills,
+    deaths,
+    kd: deaths === 0 ? kills : kills / deaths,
+    avgCash: r.avg_cash === null ? null : Number(r.avg_cash),
+    mvps: Number(r.mvps),
+    lastPlayed: r.last_played?.toISOString() ?? null,
+  };
+}
+
+/** Actual stored stats using the same match criteria as the recruit report, including players with fewer than three matches. */
+export async function recruitPlayerStats(steamIds: string[]) {
+  if (!steamIds.length) return new Map<string, ReturnType<typeof aggregateStats>>();
+  const rows = await recruitAggregates(1, steamIds);
+  return new Map(rows.map((row) => {
+    const stats = aggregateStats(row);
+    return [stats.steamId, stats];
+  }));
+}
+
 /** Players seen on the game server with enough stored matches whose K/D and cash are close to our top 10 clan members. Already-in-clan players are excluded by Discord link. */
 export async function buildRecruitReport(options: { strictSources?: boolean } = {}): Promise<RecruitReport> {
   const [rows, clanSnapshot, allClanSnapshot, links, statusRows] = await Promise.all([
-    query<Agg>(
-      `SELECT mp.steam_id,
-              (array_agg(mp.name ORDER BY m.ended_at DESC NULLS LAST))[1] AS name,
-              count(*) AS matches, sum(mp.kills) AS kills, sum(mp.deaths) AS deaths,
-              avg(mp.cash) AS avg_cash,
-              count(*) FILTER (WHERE m.mvp_steam_id = mp.steam_id) AS mvps,
-              max(m.ended_at) AS last_played
-         FROM match_players mp JOIN matches m ON m.id = mp.match_id
-        WHERE lower(COALESCE(mp.faction, '')) <> 'white' AND (mp.kills > 0 OR mp.deaths > 0) AND COALESCE(m.peak_players, 0) >= 80
-        GROUP BY mp.steam_id
-       HAVING count(*) >= $1`,
-      [MIN_MATCHES],
-    ),
+    recruitAggregates(MIN_MATCHES, null),
     getClanMembers(),
     getAllClanMembers(),
     resolveLinks(options.strictSources),
@@ -77,21 +108,7 @@ export async function buildRecruitReport(options: { strictSources?: boolean } = 
   const clanSteam = new Set<string>();
   for (const [discordId, steamId] of links.steamIds) if (clanDiscord.has(discordId)) clanSteam.add(steamId);
 
-  const stats = rows.map((r) => {
-    const kills = Number(r.kills);
-    const deaths = Number(r.deaths);
-    return {
-      steamId: r.steam_id,
-      name: r.name,
-      matches: Number(r.matches),
-      kills,
-      deaths,
-      kd: deaths === 0 ? kills : kills / deaths,
-      avgCash: r.avg_cash === null ? null : Number(r.avg_cash),
-      mvps: Number(r.mvps),
-      lastPlayed: r.last_played?.toISOString() ?? null,
-    };
-  });
+  const stats = rows.map(aggregateStats);
 
   // Rank clan members by K/D and cash relative to the average of everyone, so neither stat drowns out the other.
   const withCash = stats.filter((s) => s.avgCash !== null);
