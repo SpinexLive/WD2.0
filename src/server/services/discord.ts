@@ -232,7 +232,7 @@ export interface DiscordMessagePayload {
   content?: string;
   embeds: unknown[];
   components?: unknown[];
-  allowed_mentions: { parse: never[]; users?: string[] };
+  allowed_mentions: { parse: never[]; users?: string[]; roles?: string[] };
   message_reference?: { message_id: string; fail_if_not_exists: boolean };
 }
 

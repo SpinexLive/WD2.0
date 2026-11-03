@@ -12,5 +12,7 @@ export async function register() {
     startMonitor();
     const { startServerNameScheduler } = await import("./server/services/serverName");
     startServerNameScheduler();
+    const { startRecruitAlertsScheduler } = await import("./server/services/recruitAlerts");
+    startRecruitAlertsScheduler();
   }
 }

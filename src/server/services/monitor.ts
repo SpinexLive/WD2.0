@@ -7,6 +7,7 @@ import { getLeagueMembers } from "./wardogsLeague";
 import { kickMatchSync, matchSyncStatus } from "./matchHistory";
 import { gatewayReady } from "./rosterGateway";
 import { snapshotAttendance } from "./attendance";
+import { recruitAlertStatus } from "./recruitAlerts";
 
 const ALERT_AFTER_MS = 60 * 60_000;
 const HEALTH_TTL_MS = 60_000;
@@ -56,6 +57,16 @@ export async function getHealth(force = false): Promise<Component[]> {
       async () => {
         const m = matchSyncStatus();
         return m.failed ? { ok: false, detail: m.error } : { ok: true, detail: m.error };
+      },
+    ],
+    [
+      "recruit-alerts",
+      "Recruit notifications",
+      async () => {
+        const status = await recruitAlertStatus();
+        if (status.lastError) return { ok: false, detail: status.lastError };
+        if (status.uncertainPosts || status.uncertainInvites) return { ok: false, detail: "Recruit notification or invitation delivery is uncertain; check the Recruit page." };
+        return { ok: true, detail: status.initialized ? null : "Waiting for initial match sync" };
       },
     ],
     [

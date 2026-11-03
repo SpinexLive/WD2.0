@@ -49,8 +49,8 @@ interface Agg {
 const round = (n: number, d = 2) => Math.round(n * 10 ** d) / 10 ** d;
 
 /** Players seen on the game server with enough stored matches whose K/D and cash are close to our top 10 clan members. Already-in-clan players are excluded by Discord link. */
-export async function buildRecruitReport(): Promise<RecruitReport> {
-  const [rows, clan, allClan, links, statusRows] = await Promise.all([
+export async function buildRecruitReport(options: { strictSources?: boolean } = {}): Promise<RecruitReport> {
+  const [rows, clanSnapshot, allClanSnapshot, links, statusRows] = await Promise.all([
     query<Agg>(
       `SELECT mp.steam_id,
               (array_agg(mp.name ORDER BY m.ended_at DESC NULLS LAST))[1] AS name,
@@ -64,13 +64,16 @@ export async function buildRecruitReport(): Promise<RecruitReport> {
        HAVING count(*) >= $1`,
       [MIN_MATCHES],
     ),
-    getClanMembers().then((s) => s.data),
-    getAllClanMembers().then((s) => s.data),
-    resolveLinks(),
+    getClanMembers(),
+    getAllClanMembers(),
+    resolveLinks(options.strictSources),
     query<{ steam_id: string; status: "contacted" | "dismissed"; note: string | null; updated_by_name: string; updated_at: Date }>("SELECT steam_id, status, note, updated_by_name, updated_at FROM recruit_status"),
   ]);
 
-  const clanDiscord = new Set([...clan, ...allClan].map((m) => m.id));
+  if (options.strictSources && (clanSnapshot.stale || allClanSnapshot.stale || !links.source.available || links.source.stale)) {
+    throw new Error("Recruit scan requires current Discord members and Wardogs account links.");
+  }
+  const clanDiscord = new Set([...clanSnapshot.data, ...allClanSnapshot.data].map((m) => m.id));
   const clanSteam = new Set<string>();
   for (const [discordId, steamId] of links.steamIds) if (clanDiscord.has(discordId)) clanSteam.add(steamId);
 

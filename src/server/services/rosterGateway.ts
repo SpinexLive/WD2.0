@@ -6,6 +6,7 @@ import { handleRosterButton } from "./rosterResponses";
 import { FEEDBACK_BUTTON, FEEDBACK_MODAL, onFeedbackButton, onFeedbackModal } from "./scoutingDiscord";
 import { LOADOUT_BUTTON, handleLoadoutRaw } from "./loadout";
 import { SEEDING_BUTTON, seedingButton } from "./seedingAfk";
+import { RECRUIT_BUTTON, recruitButton } from "./recruitAlerts";
 
 const g = globalThis as unknown as { __rosterGateway?: Client };
 
@@ -54,7 +55,21 @@ export function startRosterGateway(): void {
   client.on("voiceStateUpdate", (_old, next) => refreshVoice(next.guild));
   client.on("interactionCreate", (i) => {
     if (i.isButton()) {
-      if (i.customId.startsWith(`${SEEDING_BUTTON}:`)) {
+      if (i.customId.startsWith(`${RECRUIT_BUTTON}:`)) {
+        void (async () => {
+          await i.deferReply({ flags: MessageFlags.Ephemeral });
+          try {
+            const roles = Array.isArray(i.member?.roles) ? i.member.roles : [...(i.member?.roles.cache.keys() ?? [])];
+            const content = await recruitButton({ guildId: i.guildId, channelId: i.channelId, messageId: i.message.id,
+              userId: i.user.id, actorName: i.member && "displayName" in i.member ? i.member.displayName : i.user.username, roles, customId: i.customId });
+            await i.editReply({ content, allowedMentions: { parse: [] } });
+          } catch (error) {
+            console.error("Recruit invitation interaction failed:", error instanceof Error ? error.message : "unknown");
+            await i.editReply("Could not confirm the invitation's status. Check the Recruit page before trying again.");
+          }
+        })().catch((error: Error) => console.error("Recruit interaction reply failed:", error.message));
+      }
+      else if (i.customId.startsWith(`${SEEDING_BUTTON}:`)) {
         void (async () => {
           await i.deferReply({ flags: MessageFlags.Ephemeral });
           try {

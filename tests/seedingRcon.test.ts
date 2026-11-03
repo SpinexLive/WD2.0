@@ -3,7 +3,7 @@ import { beforeEach, expect, it, vi } from "vitest";
 const request = vi.hoisted(() => vi.fn());
 vi.mock("@/lib/env", () => ({ env: () => ({ GAME_RCON_URL: "http://game.test:7779/", GAME_RCON_PASSWORD: "test-password" }) }));
 vi.mock("@/lib/http", () => ({ requestJson: request }));
-import { remindSeedingPlayer, SEEDING_AFK_REMINDER, seedingSnapshot } from "@/server/services/seedingRcon";
+import { messageGamePlayer, remindSeedingPlayer, SEEDING_AFK_REMINDER, seedingSnapshot } from "@/server/services/seedingRcon";
 
 beforeEach(() => { vi.clearAllMocks(); request.mockResolvedValue({ data: { message: "OK" } }); });
 it("sends a private message through the configured game RCON without automatic retries", async () => {
@@ -17,6 +17,15 @@ it("sends a private message through the configured game RCON without automatic r
 it("rejects an invalid player ID before contacting RCON", async () => {
   await expect(remindSeedingPlayer("invalid/id")).rejects.toThrow("Invalid Steam ID");
   expect(request).not.toHaveBeenCalled();
+});
+it("sends a recruitment message to the selected Steam ID without automatically retrying", async () => {
+  await messageGamePlayer("76561198000000001", "Hello from REMNANT!");
+  expect(request).toHaveBeenCalledWith(expect.objectContaining({
+    url: "http://game.test:7779/v1/players/76561198000000001/message", method: "POST",
+    body: { message: "Hello from REMNANT!" }, retries: 0,
+  }));
+  await expect(messageGamePlayer("invalid", "Hello")).rejects.toThrow("Invalid Steam ID");
+  await expect(messageGamePlayer("76561198000000001", " ")).rejects.toThrow("cannot be empty");
 });
 it("reads the live roster without requiring team balance configuration", async () => {
   request.mockResolvedValueOnce({ data: { uptimeSeconds: 100 } })

@@ -4,6 +4,9 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useApi } from "@/lib/client";
 import { ErrorBanner, Skeleton, useToast } from "@/components/ui";
 import type { RecruitReport } from "@/server/services/recruit";
+import type { RecruitAlertStatus } from "@/server/services/recruitAlerts";
+
+type RecruitData = RecruitReport & { alerts: RecruitAlertStatus };
 
 type Tab = "new" | "contacted" | "dismissed";
 const TABS: { key: Tab; label: string }[] = [
@@ -15,7 +18,7 @@ const TABS: { key: Tab; label: string }[] = [
 export default function RecruitPage() {
   const api = useApi();
   const { toast, node } = useToast();
-  const [data, setData] = useState<RecruitReport | null>(null);
+  const [data, setData] = useState<RecruitData | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [tab, setTab] = useState<Tab>("new");
   const [search, setSearch] = useState("");
@@ -25,7 +28,7 @@ export default function RecruitPage() {
   const load = useCallback(async () => {
     setError(null);
     try {
-      setData(await api<RecruitReport>("/api/recruit"));
+      setData(await api<RecruitData>("/api/recruit"));
     } catch (e) {
       setError((e as Error).message);
     }
@@ -89,6 +92,19 @@ export default function RecruitPage() {
         Players on the game server with at least {data?.minMatches ?? 3} stored matches whose K/D and average cash are within 10% of our top 10 clan members. Anyone already linked to a clan member is excluded. Stats cover the Wardogs game server only.
       </p>
       {error && <ErrorBanner message={error} onRetry={load} />}
+      {data && (
+        <div className="text-xs text-stone/60">
+          {!data.alerts.initialized ? "Recruit alerts are waiting for the initial match sync and candidate baseline." : `Recruit alerts active${data.alerts.lastScanAt ? ` · last checked ${new Date(data.alerts.lastScanAt).toLocaleString()}` : ""}.`}
+          {data.alerts.pending > 0 && ` ${data.alerts.pending} Discord notification${data.alerts.pending === 1 ? "" : "s"} pending.`}
+          {data.alerts.lastError && <p className="mt-1 text-red-400">Recruit alerts: {data.alerts.lastError}</p>}
+          {(data.alerts.uncertainPosts > 0 || data.alerts.uncertainInvites > 0) && (
+            <div className="mt-1 text-red-400">
+              <p>Delivery could not be confirmed for {data.alerts.uncertainPosts} Discord notification(s) and {data.alerts.uncertainInvites} in-game invitation(s). They are locked to prevent duplicates; contact an administrator after checking the destination.</p>
+              <p>{data.alerts.uncertain.map((entry) => `${entry.steamId} (${entry.post ? "Discord" : "in-game"})`).join(", ")}</p>
+            </div>
+          )}
+        </div>
+      )}
 
       {data && (
         <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
