@@ -6,7 +6,9 @@ import type { Session } from "@/lib/session";
 import { matchSyncStatus } from "./matchHistory";
 import { buildRecruitReport, recruitPlayerStats, type RecruitCandidate } from "./recruit";
 import { recruitInvitation, RECRUIT_SCAN_LOCK } from "./recruitAlerts";
+import { syncRecruitEmbed } from "./recruitDiscord";
 import { gamePlayers, messageGamePlayer } from "./seedingRcon";
+import { publish } from "./bus";
 
 export const recruitTestSchema = z.object({
   steamId: z.string().regex(/^\d{17}$/),
@@ -138,7 +140,7 @@ export async function sendRecruitTest(input: RecruitTestInput, actor: Pick<Sessi
         if (player.willCount && rejected && createdAlert) {
           await c.query("DELETE FROM recruit_alerts WHERE steam_id = $1 AND invite_status = 'sending' AND post_status = 'baseline'", [input.steamId]);
         } else if (player.willCount) {
-          await c.query("UPDATE recruit_alerts SET invite_status = $2, invite_error = $3 WHERE steam_id = $1 AND invite_status = 'sending'", [input.steamId, rejected ? "ready" : "unknown", message.slice(0, 500)]);
+          await c.query("UPDATE recruit_alerts SET invite_status = $2, invite_error = $3, embed_revision = embed_revision + 1, embed_retry_at = now() WHERE steam_id = $1 AND invite_status = 'sending'", [input.steamId, rejected ? "ready" : "unknown", message.slice(0, 500)]);
         }
       });
     } catch (recordError) {
@@ -146,6 +148,14 @@ export async function sendRecruitTest(input: RecruitTestInput, actor: Pick<Sessi
       throw new HttpError(503, "Could not record the test result. Delivery may be uncertain; check before retrying.", "test_outcome_unknown");
     }
     if (rejected) throw new HttpError(502, `The game server rejected the test message: ${message}`, "test_rejected");
+    if (player.willCount) {
+      publish("recruit");
+      try {
+        await syncRecruitEmbed(input.steamId);
+      } catch (syncError) {
+        console.error("Uncertain recruit test embed update failed:", syncError instanceof Error ? syncError.message : "unknown");
+      }
+    }
     throw new HttpError(503, "Could not confirm whether the test message was delivered. It is locked to prevent a duplicate.", "test_outcome_unknown");
   }
 
@@ -155,6 +165,7 @@ export async function sendRecruitTest(input: RecruitTestInput, actor: Pick<Sessi
       if (player.willCount) {
         await c.query(
           `UPDATE recruit_alerts SET invite_status = 'sent', invited_at = now(),
+             embed_revision = embed_revision + 1, embed_retry_at = now(),
              post_status = CASE WHEN post_status = 'pending' THEN 'baseline' ELSE post_status END
            WHERE steam_id = $1 AND invite_status = 'sending'`,
           [input.steamId],
@@ -176,5 +187,14 @@ export async function sendRecruitTest(input: RecruitTestInput, actor: Pick<Sessi
     console.error("Recruit test was sent but could not be recorded:", error instanceof Error ? error.message : "unknown");
     throw new HttpError(503, "The test message was sent, but recording it failed. It remains locked; do not retry.", "test_recording_failed");
   }
-  return { ok: true, playerName: player.name, countedAsInvitation: player.willCount };
+  if (player.willCount) {
+    publish("recruit");
+    try {
+      await syncRecruitEmbed(input.steamId);
+    } catch (error) {
+      console.error("Recruit test embed update failed:", error instanceof Error ? error.message : "unknown");
+      return { ok: true, playerName: player.name, countedAsInvitation: true, discordSyncError: "Test sent, but the Discord message could not be updated. The dashboard will retry." };
+    }
+  }
+  return { ok: true, playerName: player.name, countedAsInvitation: player.willCount, discordSyncError: null };
 }

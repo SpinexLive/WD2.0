@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useApi } from "@/lib/client";
+import { useApi, useLive } from "@/lib/client";
 import { ErrorBanner, Skeleton, useToast } from "@/components/ui";
 import type { RecruitReport } from "@/server/services/recruit";
 import type { RecruitAlertStatus } from "@/server/services/recruitAlerts";
@@ -34,6 +34,7 @@ export default function RecruitPage() {
     }
   }, [api]);
   useEffect(() => void load(), [load]);
+  useLive(["recruit"], () => void load());
 
   async function rescan() {
     setRescanning(true);
@@ -60,8 +61,9 @@ export default function RecruitPage() {
   async function mark(steamId: string, status: Tab, note?: string) {
     setBusy(steamId);
     try {
-      await api(`/api/recruit/${steamId}`, { method: "PUT", body: { status, ...(note ? { note } : {}) } });
+      const result = await api<{ discordSyncError: string | null }>(`/api/recruit/${steamId}`, { method: "PUT", body: { status, ...(note ? { note } : {}) } });
       await load();
+      if (result.discordSyncError) toast({ text: result.discordSyncError, tone: "err" });
     } catch (e) {
       toast({ text: (e as Error).message, tone: "err" });
     } finally {
@@ -97,6 +99,7 @@ export default function RecruitPage() {
           {!data.alerts.initialized ? "Recruit alerts are waiting for the initial match sync and candidate baseline." : `Recruit alerts active${data.alerts.lastScanAt ? ` · last checked ${new Date(data.alerts.lastScanAt).toLocaleString()}` : ""}.`}
           {data.alerts.pending > 0 && ` ${data.alerts.pending} Discord notification${data.alerts.pending === 1 ? "" : "s"} pending.`}
           {data.alerts.lastError && <p className="mt-1 text-red-400">Recruit alerts: {data.alerts.lastError}</p>}
+          {data.alerts.embedFailures > 0 && <p className="mt-1 text-red-400">{data.alerts.embedFailures} Discord recruit message(s) could not be updated. The dashboard will retry; check bot channel permissions and whether the messages still exist.</p>}
           {(data.alerts.uncertainPosts > 0 || data.alerts.uncertainInvites > 0) && (
             <div className="mt-1 text-red-400">
               <p>Delivery could not be confirmed for {data.alerts.uncertainPosts} Discord notification(s) and {data.alerts.uncertainInvites} in-game invitation(s). They are locked to prevent duplicates; contact an administrator after checking the destination.</p>

@@ -1,10 +1,12 @@
 import { z } from "zod";
-import { query } from "@/lib/db";
+import { query, tx } from "@/lib/db";
 import { HttpError } from "@/lib/http";
 import { audit } from "@/lib/audit";
 import type { Session } from "@/lib/session";
 import { getAllClanMembers, getClanMembers } from "./discord";
 import { resolveLinks } from "./links";
+import { publish } from "./bus";
+import { syncRecruitEmbed } from "./recruitDiscord";
 
 export const MIN_MATCHES = 3;
 /** A candidate must reach this share of the top-10 average on both K/D and cash. */
@@ -148,15 +150,30 @@ export const recruitUpdateSchema = z.object({ status: z.enum(["new", "contacted"
 
 export async function setRecruitStatus(actor: Session, steamId: string, input: z.infer<typeof recruitUpdateSchema>) {
   if (!/^\d{17}$/.test(steamId)) throw new HttpError(400, "Invalid Steam ID", "invalid_input");
-  if (input.status === "new") {
-    await query("DELETE FROM recruit_status WHERE steam_id = $1", [steamId]);
-  } else {
-    await query(
-      `INSERT INTO recruit_status (steam_id, status, note, updated_by_id, updated_by_name) VALUES ($1,$2,$3,$4,$5)
-       ON CONFLICT (steam_id) DO UPDATE SET status = EXCLUDED.status, note = COALESCE(EXCLUDED.note, recruit_status.note), updated_by_id = EXCLUDED.updated_by_id, updated_by_name = EXCLUDED.updated_by_name, updated_at = now()`,
-      [steamId, input.status, input.note || null, actor.discordId, actor.displayName],
-    );
-  }
+  const hasAlert = await tx(async (c) => {
+    const alert = await c.query<{ invite_status: string }>("SELECT invite_status FROM recruit_alerts WHERE steam_id = $1 FOR UPDATE", [steamId]);
+    if (alert.rows[0]?.invite_status === "sending") throw new HttpError(409, "An invitation is being sent. Wait for it to finish before changing this recruit.", "invite_in_progress");
+    if (input.status === "new") {
+      await c.query("DELETE FROM recruit_status WHERE steam_id = $1", [steamId]);
+    } else {
+      await c.query(
+        `INSERT INTO recruit_status (steam_id, status, note, updated_by_id, updated_by_name) VALUES ($1,$2,$3,$4,$5)
+         ON CONFLICT (steam_id) DO UPDATE SET status = EXCLUDED.status, note = COALESCE(EXCLUDED.note, recruit_status.note), updated_by_id = EXCLUDED.updated_by_id, updated_by_name = EXCLUDED.updated_by_name, updated_at = now()`,
+        [steamId, input.status, input.note || null, actor.discordId, actor.displayName],
+      );
+    }
+    if (alert.rows.length) await c.query("UPDATE recruit_alerts SET embed_revision = embed_revision + 1, embed_retry_at = now() WHERE steam_id = $1", [steamId]);
+    return alert.rows.length > 0;
+  });
   await audit(actor, `recruit.${input.status}`, "steam", steamId, input.note ? { note: input.note } : {});
-  return { ok: true };
+  publish("recruit");
+  if (hasAlert) {
+    try {
+      await syncRecruitEmbed(steamId);
+    } catch (error) {
+      console.error("Recruit status embed update failed:", error instanceof Error ? error.message : "unknown");
+      return { ok: true, discordSyncError: "Status saved, but the Discord message could not be updated. The dashboard will retry." };
+    }
+  }
+  return { ok: true, discordSyncError: null };
 }

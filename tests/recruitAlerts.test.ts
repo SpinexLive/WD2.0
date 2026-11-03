@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   report: vi.fn(),
   sync: vi.fn(),
   post: vi.fn(),
+  edit: vi.fn(),
   players: vi.fn(),
   message: vi.fn(),
 }));
@@ -34,6 +35,7 @@ vi.mock("@/lib/db", () => ({
 vi.mock("@/lib/env", () => ({ env: () => ({ DISCORD_GUILD_ID: "guild" }) }));
 vi.mock("@/server/services/discord", () => ({
   postMessage: mocks.post,
+  editMessage: mocks.edit,
   hasAuthorisedRole: (roles: string[]) => roles.includes("staff"),
 }));
 vi.mock("@/server/services/seedingRcon", () => ({ gamePlayers: mocks.players, messageGamePlayer: mocks.message }));
@@ -42,9 +44,11 @@ vi.mock("@/server/services/recruit", () => ({ buildRecruitReport: mocks.report }
 
 import { ProviderError } from "@/lib/http";
 import {
-  postPendingRecruitAlerts, recruitAlertPayload, recruitAlertStatus, recruitButton,
+  postPendingRecruitAlerts, recruitAlertPayload, recruitAlertStatus, recruitAlertsTick, recruitButton,
   recruitInvitation, RECRUIT_CHANNEL_ID, scanRecruitCandidates,
 } from "@/server/services/recruitAlerts";
+import { syncPendingRecruitEmbeds } from "@/server/services/recruitDiscord";
+import { subscribe } from "@/server/services/bus";
 
 const first = { steamId: "76561198000000001", name: "Alpha", matches: 3, kd: 2.5, avgCash: 45000, status: "new" };
 const second = { steamId: "76561198000000002", name: "Bravo", matches: 5, kd: 3.2, avgCash: 57000, status: "new" };
@@ -71,7 +75,10 @@ describe("recruit notification content", () => {
         { name: "K/D", value: "2.50", inline: true },
         { name: "Steam ID", value: first.steamId, inline: false },
       ]) }],
-      components: [{ components: [{ custom_id: `wdrecruit:invite:${first.steamId}` }] }],
+      components: [{ components: expect.arrayContaining([
+        expect.objectContaining({ custom_id: `wdrecruit:invite:${first.steamId}` }),
+        expect.objectContaining({ custom_id: `wdrecruit:dismiss:${first.steamId}`, label: "Dismiss" }),
+      ]) }],
     });
   });
 });
@@ -85,6 +92,7 @@ describe.skipIf(!testDatabase)("recruit alerts with PostgreSQL", () => {
     await mocks.client.connect();
     const migration = await readFile(resolve(process.cwd(), "migrations", "029_recruit_alerts.sql"), "utf8");
     await mocks.client.query(migration.replace(/CREATE TABLE/g, "CREATE TEMP TABLE"));
+    await mocks.client.query(await readFile(resolve(process.cwd(), "migrations", "031_recruit_embed_sync.sql"), "utf8"));
     await mocks.client.query(`
       CREATE TEMP TABLE recruit_status (
         steam_id text PRIMARY KEY, status text NOT NULL, note text, updated_by_id text NOT NULL,
@@ -98,6 +106,7 @@ describe.skipIf(!testDatabase)("recruit alerts with PostgreSQL", () => {
     mocks.sync.mockReturnValue({ lastRunAt: Date.now(), syncing: false, pending: 0, failed: false });
     mocks.report.mockResolvedValue({ candidates: [first] });
     mocks.post.mockResolvedValue(messageId);
+    mocks.edit.mockResolvedValue(undefined);
     mocks.players.mockResolvedValue({ count: 1, players: [{ steamId: first.steamId, name: "Alpha", faction: "Lonestar" }] });
     mocks.message.mockResolvedValue(undefined);
   });
@@ -160,6 +169,140 @@ describe.skipIf(!testDatabase)("recruit alerts with PostgreSQL", () => {
       .toEqual({ status: "contacted", updated_by_id: button(first.steamId).userId });
     expect((await mocks.client!.query("SELECT action, target_id FROM audit_logs")).rows[0])
       .toEqual({ action: "recruit.invited", target_id: first.steamId });
+  });
+
+  it("dismisses a recruit, records the actor, refreshes the dashboard and updates the embed without re-pinging", async () => {
+    await posted();
+    const events: string[] = [];
+    const unsubscribe = subscribe((event) => events.push(event.topic));
+    try {
+      const dismiss = { ...button(first.steamId), customId: `wdrecruit:dismiss:${first.steamId}` };
+      expect(await recruitButton(dismiss)).toContain("moved to Dismissed");
+      expect((await mocks.client!.query("SELECT status, updated_by_id, updated_by_name FROM recruit_status")).rows[0])
+        .toEqual({ status: "dismissed", updated_by_id: dismiss.userId, updated_by_name: "Staff member" });
+      expect((await mocks.client!.query("SELECT action, target_id FROM audit_logs")).rows[0])
+        .toEqual({ action: "recruit.dismissed", target_id: first.steamId });
+      expect(events).toContain("recruit");
+      expect(mocks.message).not.toHaveBeenCalled();
+      expect(mocks.edit).toHaveBeenCalledWith(RECRUIT_CHANNEL_ID, messageId, expect.objectContaining({
+        allowed_mentions: { parse: [] },
+        embeds: [expect.objectContaining({ footer: { text: "Dismissed on the Recruit dashboard." } })],
+        components: [expect.objectContaining({ components: expect.arrayContaining([
+          expect.objectContaining({ custom_id: `wdrecruit:invite:${first.steamId}`, disabled: true }),
+          expect.objectContaining({ custom_id: `wdrecruit:dismiss:${first.steamId}`, label: "Dismissed", disabled: true }),
+        ]) })],
+      }));
+      expect(await recruitButton(dismiss)).toContain("already dismissed");
+      expect((await mocks.client!.query("SELECT count(*)::int AS n FROM audit_logs")).rows[0].n).toBe(1);
+    } finally {
+      unsubscribe();
+    }
+  });
+
+  it("rejects unauthorized and forged dismissals", async () => {
+    await posted();
+    const dismiss = { ...button(first.steamId), customId: `wdrecruit:dismiss:${first.steamId}` };
+    expect(await recruitButton({ ...dismiss, roles: ["other"] })).toContain("Only authorised");
+    expect(await recruitButton({ ...dismiss, messageId: "222222222222222222" })).toContain("no longer active");
+    expect((await mocks.client!.query("SELECT count(*)::int AS n FROM recruit_status")).rows[0].n).toBe(0);
+    expect(mocks.edit).not.toHaveBeenCalled();
+  });
+
+  it.each([["staff"], ["1546188874986950758"], ["1547229723141345351"]])(
+    "allows authorised recruitment role %s to dismiss",
+    async (role) => {
+      await posted();
+      expect(await recruitButton({ ...button(first.steamId, [role]), customId: `wdrecruit:dismiss:${first.steamId}` })).toContain("moved to Dismissed");
+    },
+  );
+
+  it("can dismiss a player who has already been contacted without sending another message", async () => {
+    await posted();
+    expect(await recruitButton(button(first.steamId))).toContain("Invitation sent");
+    expect(await recruitButton({ ...button(first.steamId), customId: `wdrecruit:dismiss:${first.steamId}` })).toContain("moved to Dismissed");
+    expect((await mocks.client!.query("SELECT status FROM recruit_status")).rows[0].status).toBe("dismissed");
+    expect(mocks.message).toHaveBeenCalledOnce();
+  });
+
+  it("does not dismiss a recruit while their invitation is being sent", async () => {
+    await posted();
+    await mocks.client!.query("UPDATE recruit_alerts SET invite_status = 'sending' WHERE steam_id = $1", [first.steamId]);
+    expect(await recruitButton({ ...button(first.steamId), customId: `wdrecruit:dismiss:${first.steamId}` })).toContain("being sent");
+    expect((await mocks.client!.query("SELECT count(*)::int AS n FROM recruit_status")).rows[0].n).toBe(0);
+  });
+
+  it("updates already-posted embeds and retries failed edits without losing the dismissal", async () => {
+    await posted();
+    await syncPendingRecruitEmbeds();
+    expect(mocks.edit).toHaveBeenCalledWith(RECRUIT_CHANNEL_ID, messageId, expect.objectContaining({
+      allowed_mentions: { parse: [] },
+      components: [expect.objectContaining({ components: expect.arrayContaining([
+        expect.objectContaining({ label: "Dismiss", custom_id: `wdrecruit:dismiss:${first.steamId}` }),
+      ]) })],
+    }));
+
+    mocks.edit.mockRejectedValueOnce(new Error("Discord unavailable"));
+    const dismiss = { ...button(first.steamId), customId: `wdrecruit:dismiss:${first.steamId}` };
+    const log = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    try {
+      expect(await recruitButton(dismiss)).toContain("dismissed on the dashboard");
+      expect((await mocks.client!.query("SELECT status FROM recruit_status")).rows[0].status).toBe("dismissed");
+      expect((await recruitAlertStatus()).embedFailures).toBe(1);
+      await mocks.client!.query("UPDATE recruit_alerts SET embed_retry_at = now()");
+      await syncPendingRecruitEmbeds();
+      expect((await recruitAlertStatus()).embedFailures).toBe(0);
+      expect(mocks.edit).toHaveBeenLastCalledWith(RECRUIT_CHANNEL_ID, messageId, expect.objectContaining({
+        embeds: [expect.objectContaining({ footer: { text: "Dismissed on the Recruit dashboard." } })],
+      }));
+    } finally {
+      log.mockRestore();
+    }
+  });
+
+  it("does not let one failed old embed prevent other existing embeds from updating", async () => {
+    await posted();
+    await mocks.client!.query(
+      "INSERT INTO recruit_alerts (steam_id, candidate, post_status, discord_message_id) VALUES ($1, $2, 'posted', $3)",
+      [second.steamId, JSON.stringify(second), "222222222222222222"],
+    );
+    mocks.edit.mockRejectedValueOnce(new Error("Message unavailable")).mockResolvedValue(undefined);
+    const log = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    try {
+      await expect(syncPendingRecruitEmbeds()).rejects.toThrow("Could not update 1 recruit embed");
+      expect(mocks.edit).toHaveBeenCalledTimes(2);
+      expect((await mocks.client!.query("SELECT embed_revision, embed_synced_revision FROM recruit_alerts WHERE steam_id = $1", [second.steamId])).rows[0])
+        .toMatchObject({ embed_revision: 1, embed_synced_revision: 1 });
+      await syncPendingRecruitEmbeds();
+      expect(mocks.edit).toHaveBeenCalledTimes(2);
+      await mocks.client!.query("UPDATE recruit_alerts SET embed_retry_at = now() WHERE steam_id = $1", [first.steamId]);
+      await syncPendingRecruitEmbeds();
+      expect(mocks.edit).toHaveBeenCalledTimes(3);
+    } finally {
+      log.mockRestore();
+    }
+  });
+
+  it("still upgrades existing embeds if the candidate scan fails", async () => {
+    await posted();
+    mocks.report.mockRejectedValue(new Error("Account links are unavailable"));
+    const log = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    try {
+      await recruitAlertsTick();
+      expect(mocks.edit).toHaveBeenCalledOnce();
+      expect((await recruitAlertStatus()).lastError).toContain("Account links are unavailable");
+      expect((await mocks.client!.query("SELECT embed_revision, embed_synced_revision FROM recruit_alerts")).rows[0])
+        .toEqual({ embed_revision: 1, embed_synced_revision: 1 });
+    } finally {
+      log.mockRestore();
+    }
+  });
+
+  it("rolls back a dismissal if its audit record cannot be saved", async () => {
+    await posted();
+    await mocks.client!.query("ALTER TABLE audit_logs ADD CONSTRAINT test_audit_failure CHECK (false)");
+    await expect(recruitButton({ ...button(first.steamId), customId: `wdrecruit:dismiss:${first.steamId}` })).rejects.toThrow();
+    expect((await mocks.client!.query("SELECT count(*)::int AS n FROM recruit_status")).rows[0].n).toBe(0);
+    expect(mocks.edit).not.toHaveBeenCalled();
   });
 
   it("rejects unauthorized and wrong-message clicks before contacting the game", async () => {

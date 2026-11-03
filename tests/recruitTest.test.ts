@@ -31,7 +31,7 @@ vi.mock("@/lib/db", () => ({
   },
 }));
 vi.mock("@/lib/env", () => ({ env: () => ({ DISCORD_GUILD_ID: "guild" }) }));
-vi.mock("@/server/services/discord", () => ({ postMessage: vi.fn(), hasAuthorisedRole: () => true }));
+vi.mock("@/server/services/discord", () => ({ postMessage: vi.fn(), editMessage: vi.fn(), hasAuthorisedRole: () => true }));
 vi.mock("@/server/services/matchHistory", () => ({ matchSyncStatus: mocks.sync }));
 vi.mock("@/server/services/recruit", () => ({ buildRecruitReport: mocks.report, recruitPlayerStats: mocks.stats }));
 vi.mock("@/server/services/seedingRcon", () => ({ gamePlayers: mocks.players, messageGamePlayer: mocks.message }));
@@ -56,6 +56,7 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)("admin recruit tests with Postgr
       const migration = await readFile(resolve(process.cwd(), "migrations", file), "utf8");
       await mocks.client.query(migration.replace(/CREATE TABLE/g, "CREATE TEMP TABLE"));
     }
+    await mocks.client.query(await readFile(resolve(process.cwd(), "migrations", "031_recruit_embed_sync.sql"), "utf8"));
     await mocks.client.query(`
       CREATE TEMP TABLE recruit_status (
         steam_id text PRIMARY KEY, status text NOT NULL, note text, updated_by_id text NOT NULL,

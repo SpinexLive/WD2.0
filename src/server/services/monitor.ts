@@ -65,6 +65,7 @@ export async function getHealth(force = false): Promise<Component[]> {
       async () => {
         const status = await recruitAlertStatus();
         if (status.lastError) return { ok: false, detail: status.lastError };
+        if (status.embedFailures) return { ok: false, detail: "Recruit Discord messages could not be updated; the dashboard will retry." };
         if (status.uncertainPosts || status.uncertainInvites) return { ok: false, detail: "Recruit notification or invitation delivery is uncertain; check the Recruit page." };
         return { ok: true, detail: status.initialized ? null : "Waiting for initial match sync" };
       },

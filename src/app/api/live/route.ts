@@ -4,7 +4,7 @@ import { subscribe } from "@/server/services/bus";
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
-/** Server-sent events: tells open pages that voice or roster data changed so they can refetch. Carries no sensitive payload. */
+/** Server-sent events tell open pages when data changes so they can refetch. */
 export async function GET(req: Request) {
   const session = await getSession();
   if (!session) return new Response("Unauthorized", { status: 401 });

@@ -30,7 +30,9 @@ export async function POST(req: NextRequest) {
     const applicationId = body.application_id;
     const token = body.token;
     after(async () => {
-      let content = "Could not confirm the invitation's status. Check the Recruit page before trying again.";
+      let content = customId.startsWith(`${RECRUIT_BUTTON}:dismiss:`)
+        ? "Could not confirm the dismissal. Check the Recruit page before trying again."
+        : "Could not confirm the invitation's status. Check the Recruit page before trying again.";
       try {
         const member = body.member as { user?: { id?: string; username?: string }; nick?: string | null; roles?: unknown } | undefined;
         const roles = Array.isArray(member?.roles) ? member.roles.filter((role): role is string => typeof role === "string") : [];
@@ -39,7 +41,7 @@ export async function POST(req: NextRequest) {
           messageId: (body.message as { id?: string } | undefined)?.id, userId: member?.user?.id,
           actorName: member?.nick || member?.user?.username, roles, customId });
       } catch (error) {
-        console.error("Recruit invitation interaction failed:", error instanceof Error ? error.message : "unknown");
+        console.error("Recruit interaction failed:", error instanceof Error ? error.message : "unknown");
       }
       await requestJson({ provider: "discord", method: "PATCH", url: `https://discord.com/api/v10/webhooks/${applicationId}/${token}/messages/@original`,
         body: { content, allowed_mentions: { parse: [] } }, retries: 0 }).catch(() => console.error("Recruit interaction reply failed"));

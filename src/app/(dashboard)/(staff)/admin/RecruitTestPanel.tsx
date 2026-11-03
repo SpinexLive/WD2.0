@@ -38,12 +38,12 @@ export default function RecruitTestPanel() {
     if (!selected?.previewDigest) return;
     setSending(true);
     try {
-      const result = await api<{ playerName: string; countedAsInvitation: boolean }>("/api/admin/recruit-test", {
+      const result = await api<{ playerName: string; countedAsInvitation: boolean; discordSyncError: string | null }>("/api/admin/recruit-test", {
         method: "POST",
         body: { steamId: selected.steamId, previewDigest: selected.previewDigest, requestId: crypto.randomUUID() },
       });
       setConfirm(false);
-      toast({ text: `Test sent to ${result.playerName}.${result.countedAsInvitation ? " They are marked contacted." : ""}`, tone: "ok" });
+      toast({ text: result.discordSyncError ?? `Test sent to ${result.playerName}.${result.countedAsInvitation ? " They are marked contacted." : ""}`, tone: result.discordSyncError ? "err" : "ok" });
       await load();
     } catch (e) {
       const apiError = e as ApiError;

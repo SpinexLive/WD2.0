@@ -64,8 +64,10 @@ export function startRosterGateway(): void {
               userId: i.user.id, actorName: i.member && "displayName" in i.member ? i.member.displayName : i.user.username, roles, customId: i.customId });
             await i.editReply({ content, allowedMentions: { parse: [] } });
           } catch (error) {
-            console.error("Recruit invitation interaction failed:", error instanceof Error ? error.message : "unknown");
-            await i.editReply("Could not confirm the invitation's status. Check the Recruit page before trying again.");
+            console.error("Recruit interaction failed:", error instanceof Error ? error.message : "unknown");
+            await i.editReply(i.customId.startsWith(`${RECRUIT_BUTTON}:dismiss:`)
+              ? "Could not confirm the dismissal. Check the Recruit page before trying again."
+              : "Could not confirm the invitation's status. Check the Recruit page before trying again.");
           }
         })().catch((error: Error) => console.error("Recruit interaction reply failed:", error.message));
       }
