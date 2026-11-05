@@ -71,6 +71,15 @@ export async function getHealth(force = false): Promise<Component[]> {
       },
     ],
     [
+      "wdl-fixtures",
+      "WDL fixture integration",
+      async () => {
+        const [row] = await query<{ enabled: boolean; last_error: string | null }>("SELECT enabled, last_error FROM wdl_raid_settings WHERE id = 1");
+        if (!row) throw new Error("WDL fixture migration has not been applied.");
+        return row.last_error ? { ok: false, detail: row.last_error } : { ok: true, detail: row.enabled ? null : "Automatic event creation is off" };
+      },
+    ],
+    [
       "gold",
       "Gold price channel",
       async () => {

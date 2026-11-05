@@ -7,12 +7,12 @@ import type { TeamDetail, TeamRow } from "@/server/services/scouting";
 
 const fmt = (iso: string) => new Date(iso).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
 
-export default function ScoutingClient({ isStaff = false }: { isStaff?: boolean }) {
+export default function ScoutingClient({ isStaff = false, initialSearch = "" }: { isStaff?: boolean; initialSearch?: string }) {
   const api = useApi();
   const { toast, node } = useToast();
   const [teams, setTeams] = useState<TeamRow[] | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [search, setSearch] = useState("");
+  const [search, setSearch] = useState(initialSearch);
   const [selected, setSelected] = useState<string | null>(null);
   const [detail, setDetail] = useState<TeamDetail | null>(null);
   const [busy, setBusy] = useState(false);

@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { useApi } from "@/lib/client";
 import { Avatar, ConfirmDialog, ErrorBanner, Icon, Skeleton, WarnBanner, useToast } from "@/components/ui";
+import FixturesPanel from "./FixturesPanel";
 
 interface Source { fetchedAt: string | null; stale: boolean; error: string | null; available?: boolean }
 interface Application { id: string; discordId: string | null; name: string | null; displayName: string | null; avatarUrl: string | null }
@@ -67,6 +68,8 @@ export default function WardogsLeaguePage() {
 
       {error && <ErrorBanner message={error} onRetry={() => load()} />}
       {unavailable && <WarnBanner>Wardogs League data is unavailable or outdated, so the lists below may be missing rather than empty.</WarnBanner>}
+
+      <FixturesPanel />
 
       <div className="grid min-h-0 flex-1 gap-4 lg:grid-cols-2">
         <section className="card flex max-h-[70vh] min-h-64 flex-col md:max-h-none">

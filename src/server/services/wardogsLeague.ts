@@ -1,6 +1,7 @@
 import { env } from "@/lib/env";
 import { requestJson, ProviderError } from "@/lib/http";
 import { cached, invalidate, type Snapshot } from "@/lib/cache";
+import { wdlFixturesSchema, type WdlFixtures } from "@/lib/wdlFixtures";
 
 const BASE = "https://wardogsleague.net/api/v1/team";
 const auth = () => ({ Authorization: `Bearer ${env().TOURNAMENT_API_KEY}` });
@@ -77,6 +78,15 @@ export function getLeagueMembers(force = false): Promise<Snapshot<LeagueMember[]
 
 export function getLeagueApplications(force = false): Promise<Snapshot<LeagueApplication[]>> {
   return cached("league:applications", 60_000, async () => parseApplications((await requestJson({ provider: "wardogs-league", url: `${BASE}/applications`, headers: auth() })).data), force);
+}
+
+export function getLeagueFixtures(force = false): Promise<Snapshot<WdlFixtures>> {
+  return cached("league:fixtures", 2 * 60_000, async () => {
+    const { data } = await requestJson({ provider: "wardogs-league", url: `${BASE}/fixtures?limit=1000`, headers: auth() });
+    const parsed = wdlFixturesSchema.safeParse(data);
+    if (!parsed.success) throw new ProviderError("wardogs-league", "Unrecognised Wardogs League fixtures response format");
+    return parsed.data;
+  }, force);
 }
 
 export async function respondToApplication(id: string, accept: boolean): Promise<void> {

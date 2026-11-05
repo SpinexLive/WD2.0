@@ -105,21 +105,34 @@ export function parseSignups(raw: unknown): RaidHelperSignup[] {
 export function getEvents(force = false): Promise<Snapshot<RaidHelperEvent[]>> {
   return cached("rh:events", 60_000, async () => {
     const events: RaidHelperEvent[] = [];
+    const seen = new Set<string>();
     let pages = 1;
-    for (let page = 1; page <= Math.min(pages, 5); page++) {
+    for (let page = 1; page <= pages; page++) {
+      if (page > 100) throw new ProviderError("raid-helper", "Raid Helper returned too many event pages to load safely");
       const { data } = await requestJson({
         provider: "raid-helper",
-        url: `${url(env().RAID_HELPER_EVENTS_PATH, { guildId: env().DISCORD_GUILD_ID })}?page=${page}`,
-        headers: headers(),
+        url: url(env().RAID_HELPER_EVENTS_PATH, { guildId: env().DISCORD_GUILD_ID }),
+        headers: { ...headers(), Page: String(page) },
       });
       const o = asObj(data);
       const list = Array.isArray(data) ? data : (o && [o.postedEvents, o.events, o.data].find(Array.isArray)) ;
       if (!Array.isArray(list)) throw new ProviderError("raid-helper", "Unrecognised Raid Helper events response format");
+      if (o && o.currentPage !== undefined && o.currentPage !== page &&
+          !(page === 1 && o.pages === 0 && o.currentPage === 0 && list.length === 0)) {
+        throw new ProviderError("raid-helper", "Raid Helper returned an unexpected event page");
+      }
       for (const item of list) {
         const e = parseEvent(item);
-        if (e) events.push(e);
+        if (e) {
+          if (seen.has(e.id)) throw new ProviderError("raid-helper", "Raid Helper returned duplicate events across pages");
+          seen.add(e.id);
+          events.push(e);
+        }
       }
-      if (o && typeof o.pages === "number") pages = o.pages;
+      if (o && o.pages !== undefined) {
+        if (typeof o.pages !== "number" || !Number.isInteger(o.pages) || o.pages < 0) throw new ProviderError("raid-helper", "Raid Helper returned invalid event pagination");
+        pages = o.pages;
+      }
     }
     return events.sort((a, b) => (b.startTime ?? 0) - (a.startTime ?? 0));
   }, force);

@@ -5,6 +5,10 @@ import { BRIEFING_VOICE_CHANNEL_ID } from "./briefing";
 import { getPlayerMatches, getStoredTotals, type ProfileMatch } from "./matchHistory";
 import { getClanPlayers } from "./compare";
 import { mergeBoards } from "@/lib/leaderboardMerge";
+import { getLeagueFixtures } from "./wardogsLeague";
+import type { WdlFixture } from "@/lib/wdlFixtures";
+import { query } from "@/lib/db";
+import { env } from "@/lib/env";
 
 const LOOKBACK_S = 2 * 3600;
 
@@ -23,11 +27,29 @@ export interface TodayData {
   latestMatch: ProfileMatch | null;
   rank: { rank: number; of: number; kills: number } | null;
   linked: boolean;
+  league: { fixture: WdlFixture | null; stale: boolean; error: string | null; eventUrl: string | null };
 }
 
 /** Everything the Today page shows for one signed-in user. */
 export async function buildToday(discordId: string): Promise<TodayData> {
-  const [events, players] = await Promise.all([getEvents().catch(() => null), getClanPlayers().catch(() => [])]);
+  const [events, players, league] = await Promise.all([
+    getEvents().catch(() => null),
+    getClanPlayers().catch(() => []),
+    getLeagueFixtures().then((snapshot) => ({
+      fixture: snapshot.data.upcoming
+        .filter((fixture): fixture is WdlFixture & { scheduledAt: string } =>
+          fixture.status.toUpperCase() === "SCHEDULED" && fixture.scheduledAt !== null && Date.parse(fixture.scheduledAt) >= Date.now())
+        .sort((a, b) => Date.parse(a.scheduledAt) - Date.parse(b.scheduledAt))[0] ?? null,
+      stale: snapshot.stale,
+      error: snapshot.stale ? snapshot.error ?? "Using older fixture data." : null,
+    }), (error: unknown) => ({ fixture: null, stale: false, error: error instanceof Error ? error.message : "Could not load WDL fixtures." })),
+  ]);
+  const [linkedEvent] = league.fixture ? await query<{ event_id: string | null; event_channel_id: string | null }>(
+    "SELECT event_id, event_channel_id FROM wdl_fixture_events WHERE fixture_id = $1 AND state = 'posted'", [league.fixture.id],
+  ) : [];
+  const eventUrl = linkedEvent?.event_id && linkedEvent.event_channel_id
+    ? `https://discord.com/channels/${env().DISCORD_GUILD_ID}/${encodeURIComponent(linkedEvent.event_channel_id)}/${encodeURIComponent(linkedEvent.event_id)}`
+    : null;
   const cutoff = Math.floor(Date.now() / 1000) - LOOKBACK_S;
   const upcoming = (events?.data ?? []).filter((e) => e.startTime !== null && e.startTime >= cutoff).sort((a, b) => a.startTime! - b.startTime!);
 
@@ -66,5 +88,5 @@ export async function buildToday(discordId: string): Promise<TodayData> {
     const row = board.find((r) => r.steamId === me.steamId);
     if (row) rank = { rank: row.rank, of: board.length, kills: row.kills };
   }
-  return { next, voice, latestMatch, rank, linked: !!me };
+  return { next, voice, latestMatch, rank, linked: !!me, league: { ...league, eventUrl } };
 }
