@@ -111,7 +111,7 @@ export default function WdlFixturesPanel() {
         </>
       )}
       {confirm && confirmBody && (
-        <ConfirmDialog title={confirm === "test" ? "Create a real test event?" : confirm === "approve" ? "Enable WDL automation?" : confirm === "disable" ? "Disable WDL automation?" : typeof confirm === "object" && "remove" in confirm ? "Delete the Raid Helper event?" : "Link this event?"}
+        <ConfirmDialog title={confirm === "test" ? "Create a real test event?" : confirm === "approve" ? "Enable WDL automation?" : confirm === "disable" ? "Disable WDL automation?" : confirm === "recover-test" ? "Recover the test event?" : confirm === "clear-test" ? "Clear the uncertain test?" : typeof confirm === "object" && "remove" in confirm ? "Delete the Raid Helper event?" : typeof confirm === "object" && "retry" in confirm ? "Retry event creation?" : "Link this event?"}
           confirmLabel={confirm === "test" ? "Create test" : confirm === "approve" ? "Enable automation" : confirm === "disable" ? "Disable" : confirm === "recover-test" ? "Recover test" : confirm === "clear-test" ? "Clear test" : typeof confirm === "object" && "remove" in confirm ? "Delete event" : typeof confirm === "object" && "retry" in confirm ? "Retry creation" : "Link event"}
           danger={typeof confirm === "object" && "remove" in confirm} busy={busy} onCancel={() => setConfirm(null)} onConfirm={() => void run(confirmBody)}>
           {confirm === "test" ? "This schedules a real, clearly labelled test in the test channel and mentions the real Wardogs member role. Members who can see that channel may receive a notification."
