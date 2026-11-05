@@ -2,7 +2,7 @@ import { z } from "zod";
 import { protectedRoute } from "@/lib/apiGuard";
 import { audit } from "@/lib/audit";
 import { getEventDetail } from "@/server/services/raidHelper";
-import { enrichSignups } from "@/server/services/rosterPublish";
+import { enrichSignups, rosterStatsFor } from "@/server/services/rosterPublish";
 import { createRoster, deleteRoster, eventIdSchema, getRoster, listTemplates, saveRoster, saveSchema } from "@/server/services/rosters";
 
 export const dynamic = "force-dynamic";
@@ -18,7 +18,14 @@ export const GET = protectedRoute<P>(async ({ req, params }) => {
     getRoster(eventId),
     listTemplates(),
   ]);
-  const enriched = event.snap ? await enrichSignups(event.snap.data.signups, force, true) : null;
+  const signedUp = new Set(event.snap?.data.signups.map((signup) => signup.discordId) ?? []);
+  const assignedNotSignedUp = roster?.squads.flatMap((squad) => squad.slots.flatMap((player) =>
+    player?.discordId && !signedUp.has(player.discordId) ? [player.discordId] : [],
+  )) ?? [];
+  const [enriched, assignedStats] = await Promise.all([
+    event.snap ? enrichSignups(event.snap.data.signups, force, true) : Promise.resolve(null),
+    rosterStatsFor(assignedNotSignedUp, force),
+  ]);
 
   return {
     event: event.snap ? { ...event.snap.data, signups: undefined } : null,
@@ -26,6 +33,7 @@ export const GET = protectedRoute<P>(async ({ req, params }) => {
     eventSource: event.snap ? { fetchedAt: event.snap.fetchedAt, stale: event.snap.stale, error: event.snap.error ?? null } : null,
     // null (not []) when Raid Helper is unreachable, so the UI never reports "no sign-ups" falsely.
     signups: enriched?.signups ?? null,
+    assignedKd: Object.fromEntries([...assignedStats].map(([id, stats]) => [id, stats.kd])),
     leagueAvailable: enriched?.leagueAvailable ?? false,
     roster,
     templates,

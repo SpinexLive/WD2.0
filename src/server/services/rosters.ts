@@ -36,6 +36,7 @@ export const squadSchema = z
     category: z.string().trim().min(1).max(32),
     size: z.number().int().min(1).max(50),
     leaderRequired: z.boolean(),
+    compareKd: z.boolean().optional(),
     slots: z.array(slotSchema.nullable()).max(50),
   })
   .strict();
@@ -74,6 +75,7 @@ interface RosterRow {
   version: number;
   last_editor_id: string;
   updated_at: Date;
+  content_updated_at: Date;
 }
 
 export async function getRoster(eventId: string): Promise<Roster | null> {
@@ -83,8 +85,8 @@ export async function getRoster(eventId: string): Promise<Roster | null> {
   );
   if (!r) return null;
   const [squads, assignments, messages, responseRows] = await Promise.all([
-    query<{ id: string; name: string; category: string; size: number; leader_required: boolean }>(
-      "SELECT id, name, category, size, leader_required FROM roster_squads WHERE roster_id = $1 ORDER BY position",
+    query<{ id: string; name: string; category: string; size: number; leader_required: boolean; compare_kd: boolean }>(
+      "SELECT id, name, category, size, leader_required, compare_kd FROM roster_squads WHERE roster_id = $1 ORDER BY position",
       [r.id],
     ),
     query<{ squad_id: string; slot_index: number; discord_id: string | null; mercenary_id: string | null; display_name: string; avatar_url: string | null; is_leader: boolean; tokens: string[] }>(
@@ -108,7 +110,7 @@ export async function getRoster(eventId: string): Promise<Roster | null> {
         slots[a.slot_index] = { discordId: a.discord_id, ...(a.mercenary_id ? { mercenaryId: a.mercenary_id } : {}), displayName: a.display_name, avatarUrl: a.avatar_url, isLeader: a.is_leader, ...(a.tokens.length ? { tokens: a.tokens } : {}) };
       }
     }
-    return { id: s.id, name: s.name, category: s.category, size: s.size, leaderRequired: s.leader_required, slots };
+    return { id: s.id, name: s.name, category: s.category, size: s.size, leaderRequired: s.leader_required, compareKd: s.compare_kd ?? false, slots };
   });
 
   const pub: PublishedMessage[] = messages.map((m) => ({
@@ -129,6 +131,7 @@ export async function getRoster(eventId: string): Promise<Roster | null> {
     version: r.version,
     lastEditorId: r.last_editor_id,
     updatedAt: r.updated_at.toISOString(),
+    contentUpdatedAt: r.content_updated_at?.toISOString() ?? r.updated_at.toISOString(),
     squads: built,
     messages: pub,
     responses,
@@ -139,8 +142,8 @@ async function insertSquads(client: PoolClient, rosterId: string, squads: Squad[
   for (let i = 0; i < squads.length; i++) {
     const s = squads[i]!;
     const res = await client.query(
-      `INSERT INTO roster_squads (roster_id, position, name, category, size, leader_required) VALUES ($1,$2,$3,$4,$5,$6) RETURNING id`,
-      [rosterId, i, s.name, s.category, s.size, s.leaderRequired],
+      `INSERT INTO roster_squads (roster_id, position, name, category, size, leader_required, compare_kd) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id`,
+      [rosterId, i, s.name, s.category, s.size, s.leaderRequired, "slots" in s ? s.compareKd ?? false : false],
     );
     const squadId = res.rows[0]!.id;
     if ("slots" in s) {
@@ -197,6 +200,26 @@ async function assertTokensAllowed(eventId: string, input: SaveInput): Promise<v
   }
 }
 
+function sameRosterContent(previous: Roster, input: SaveInput): boolean {
+  const normalize = (squads: Squad[]) => squads.map((squad) => ({
+    id: squad.id,
+    name: squad.name,
+    category: squad.category,
+    size: squad.size,
+    leaderRequired: squad.leaderRequired,
+    slots: squad.slots.map((player) => player ? {
+      discordId: player.discordId,
+      mercenaryId: player.mercenaryId ?? null,
+      displayName: player.displayName,
+      avatarUrl: player.avatarUrl,
+      isLeader: player.isLeader,
+      tokens: [...new Set(player.tokens ?? [])],
+    } : null),
+  }));
+  return previous.settings.warnUnregistered === input.settings.warnUnregistered
+    && JSON.stringify(normalize(previous.squads)) === JSON.stringify(normalize(input.squads));
+}
+
 /** Replaces squads and assignments if `version` is still current; otherwise reports a conflict instead of overwriting. */
 export async function saveRoster(eventId: string, input: SaveInput, editorId: string): Promise<Roster> {
   const seen = new Set<string>();
@@ -218,12 +241,15 @@ export async function saveRoster(eventId: string, input: SaveInput, editorId: st
   }
 
   await assertTokensAllowed(eventId, input);
+  const previous = await getRoster(eventId);
+  const comparisonOnly = previous !== null && previous.version === input.version && sameRosterContent(previous, input);
 
   await tx(async (c) => {
     const upd = await c.query(
-      `UPDATE rosters SET settings = $3, version = version + 1, last_editor_id = $4, updated_at = now()
+      `UPDATE rosters SET settings = $3, version = version + 1, last_editor_id = $4, updated_at = now(),
+         content_updated_at = CASE WHEN $5 THEN content_updated_at ELSE now() END
         WHERE raid_helper_event_id = $1 AND version = $2 RETURNING id`,
-      [eventId, input.version, JSON.stringify(input.settings), editorId],
+      [eventId, input.version, JSON.stringify(input.settings), editorId, comparisonOnly],
     );
     if (upd.rowCount === 0) {
       const cur = await c.query("SELECT version, last_editor_id, updated_at FROM rosters WHERE raid_helper_event_id = $1", [eventId]);
@@ -238,8 +264,13 @@ export async function saveRoster(eventId: string, input: SaveInput, editorId: st
       "SELECT a.discord_id, s.name FROM roster_assignments a JOIN roster_squads s ON s.id = a.squad_id WHERE a.roster_id = $1",
       [rosterId],
     );
+    const previousSquads = await c.query<{ id: string; compare_kd: boolean }>(
+      "SELECT id, compare_kd FROM roster_squads WHERE roster_id = $1",
+      [rosterId],
+    );
+    const previousComparison = new Map(previousSquads.rows.map((s) => [s.id, s.compare_kd]));
     await c.query("DELETE FROM roster_squads WHERE roster_id = $1", [rosterId]);
-    await insertSquads(c, rosterId, input.squads);
+    await insertSquads(c, rosterId, input.squads.map((s) => ({ ...s, compareKd: s.compareKd ?? previousComparison.get(s.id) ?? false })));
     // A player who was removed or moved to a different squad has to confirm again.
     const now = new Map(input.squads.flatMap((s) => s.slots.flatMap((p) => (p?.discordId ? [[p.discordId, s.name] as const] : []))));
     const stale = before.rows.filter((b) => now.get(b.discord_id) !== b.name).map((b) => b.discord_id);
@@ -271,7 +302,7 @@ export async function resetRoster(eventId: string, version: number, editorId: st
 
   await tx(async (c) => {
     const upd = await c.query(
-      `UPDATE rosters SET version = version + 1, last_editor_id = $3, updated_at = now() WHERE raid_helper_event_id = $1 AND version = $2 RETURNING id`,
+      `UPDATE rosters SET version = version + 1, last_editor_id = $3, updated_at = now(), content_updated_at = now() WHERE raid_helper_event_id = $1 AND version = $2 RETURNING id`,
       [eventId, version, editorId],
     );
     if (upd.rowCount === 0) throw new HttpError(409, "This roster was changed by someone else. Reload to see their changes.", "conflict");

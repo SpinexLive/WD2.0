@@ -12,6 +12,7 @@ interface Data {
   eventError: string | null;
   eventSource: { fetchedAt: string | null; stale: boolean; error: string | null } | null;
   signups: SignupInfo[] | null;
+  assignedKd: Record<string, number | null>;
   leagueAvailable: boolean;
   roster: Roster | null;
   templates: RosterTemplate[];
@@ -98,7 +99,7 @@ export default function RosterPage({ params }: { params: Promise<{ eventId: stri
         </div>
       )}
       {data.roster ? (
-        <RosterEditor key={`${data.roster.id}:${data.roster.version}`} roster={data.roster} signups={data.signups} leagueAvailable={data.leagueAvailable} eventTitle={title} onReload={() => load(true)} />
+        <RosterEditor key={`${data.roster.id}:${data.roster.version}`} roster={data.roster} signups={data.signups} assignedKd={data.assignedKd} leagueAvailable={data.leagueAvailable} eventTitle={title} onReload={() => load(true)} />
       ) : (
         <div className="card max-w-lg space-y-4 p-5">
           <h1 className="page-title">{title}</h1>

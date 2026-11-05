@@ -20,6 +20,8 @@ export interface Squad {
   category: string;
   size: number;
   leaderRequired: boolean;
+  /** Whether this squad is included in the editor's saved K/D comparison. */
+  compareKd?: boolean;
   slots: (SlotPlayer | null)[];
 }
 
@@ -47,6 +49,8 @@ export interface Roster {
   version: number;
   lastEditorId: string;
   updatedAt: string;
+  /** Last change that can affect the published roster, excluding editor-only comparison settings. */
+  contentUpdatedAt?: string;
   squads: Squad[];
   messages: PublishedMessage[];
   /** Discord ID -> response; players absent from the map have not responded yet. */

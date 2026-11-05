@@ -6,6 +6,7 @@ import { useApi, type ApiError } from "@/lib/client";
 import { movePlayer, playerKey, newSquad, resizeSquad, setLeader, toggleToken, type PlayerRef } from "@/lib/rosterOps";
 import { ROSTER_TOKENS, tokenByKey, type RosterToken } from "@/lib/rosterTokens";
 import { COMPETITIVE_PLAYER_CAP } from "@/lib/rosterTypes";
+import { selectedSquadComparisons } from "@/lib/rosterComparison";
 import { validateRoster } from "@/lib/rosterValidation";
 import type { Roster, SignupInfo, Squad } from "@/lib/rosterTypes";
 import { Avatar, Badge, ConfirmDialog, ErrorBanner, Icon, type IconName, RegDot, WarnBanner, categoryIcon, useToast } from "./ui";
@@ -18,6 +19,7 @@ const kdTone = (kd: number | null) => (kd === null ? "text-stone/35" : kd >= 1.5
 interface Props {
   roster: Roster;
   signups: SignupInfo[] | null;
+  assignedKd: Record<string, number | null>;
   leagueAvailable: boolean;
   eventTitle: string;
   onReload: () => Promise<void>;
@@ -82,7 +84,7 @@ function Pool({ children }: { children: React.ReactNode }) {
   return <div ref={setNodeRef} className={`min-h-0 flex-1 space-y-1 overflow-y-auto rounded p-0.5 ${isOver ? "bg-blood-700/20" : ""}`}>{children}</div>;
 }
 
-export function RosterEditor({ roster, signups, leagueAvailable, eventTitle, onReload }: Props) {
+export function RosterEditor({ roster, signups, assignedKd, leagueAvailable, eventTitle, onReload }: Props) {
   const api = useApi();
   const { toast, node } = useToast();
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 4 } }), useSensor(KeyboardSensor));
@@ -138,6 +140,12 @@ export function RosterEditor({ roster, signups, leagueAvailable, eventTitle, onR
   };
 
   const signupById = useMemo(() => new Map((signups ?? []).map((s) => [s.discordId, s])), [signups]);
+  const kdByDiscordId = useMemo(() => {
+    const stats = new Map<string, number | null>(Object.entries(assignedKd));
+    for (const signup of signups ?? []) stats.set(signup.discordId, signup.kd);
+    return stats;
+  }, [assignedKd, signups]);
+  const comparedSquads = useMemo(() => selectedSquadComparisons(squads, kdByDiscordId), [squads, kdByDiscordId]);
   const assigned = useMemo(() => new Set(squads.flatMap((s) => s.slots.flatMap((p) => (p?.discordId ? [p.discordId] : [])))), [squads]);
   const roleCounts = useMemo(() => {
     const m = new Map<string, number>();
@@ -259,7 +267,7 @@ export function RosterEditor({ roster, signups, leagueAvailable, eventTitle, onR
 
   const patchSquad = (id: string, p: Partial<Squad>) => edit(() => setSquads((s) => s.map((x) => (x.id === id ? { ...x, ...p } : x))));
   const lastSync = roster.messages.reduce((m, x) => Math.max(m, Date.parse(x.updatedAt ?? x.publishedAt)), 0);
-  const unpublishedChanges = roster.status === "published" && Date.parse(roster.updatedAt) > lastSync + 1000;
+  const unpublishedChanges = roster.status === "published" && Date.parse(roster.contentUpdatedAt ?? roster.updatedAt) > lastSync + 1000;
   const total = squads.reduce((n, s) => n + s.size, 0);
   const counts = useMemo(() => {
     const c = { accepted: 0, declined: 0, pending: 0 };
@@ -333,6 +341,17 @@ export function RosterEditor({ roster, signups, leagueAvailable, eventTitle, onR
       </div>
 
       <DndContext sensors={sensors} collisionDetection={collision} onDragStart={onDragStart} onDragEnd={onDragEnd} onDragCancel={() => { setActive(null); setDragToken(null); }}>
+        {comparedSquads.length > 0 && (
+          <div className="card shrink-0 space-y-1 px-3 py-2" aria-label="Squad K/D comparison">
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs">
+              <span className="font-bold uppercase tracking-[0.14em]">Squad K/D</span>
+              {comparedSquads.map((squad) => (
+                <span key={squad.id}>{squad.name}: <strong className={kdTone(squad.kd)}>{fmtKd(squad.kd)}</strong></span>
+              ))}
+            </div>
+            {comparedSquads.some((squad) => squad.missing) && <p className="text-xs text-stone/60">Placed players without an available K/D are excluded from their squad average.</p>}
+          </div>
+        )}
         <div className="card flex shrink-0 flex-wrap items-center gap-2 px-3 py-1.5">
           <span className="text-[11px] font-bold uppercase tracking-[0.14em]">Icons</span>
           {ROSTER_TOKENS.map((t) => <TokenChip key={t.key} token={t} count={(signups ?? []).filter((s) => !s.absent && canCarry(s, t)).length} />)}
@@ -381,7 +400,13 @@ export function RosterEditor({ roster, signups, leagueAvailable, eventTitle, onR
                         <div className="text-[11px] leading-tight text-stone/55">{sq.slots.filter(Boolean).length}/{sq.size}</div>
                       </div>
                     </div>
-                    <button className="px-1 text-sm text-stone/50 hover:text-stone" title="Squad settings" aria-label={`Settings for ${sq.name}`} onClick={() => setEditingId(sq.id)}>⚙</button>
+                    <div className="flex shrink-0 items-center gap-2">
+                      <label className="flex items-center gap-1 text-xs text-stone/70" title={`Include ${sq.name} in the K/D comparison`}>
+                        <input type="checkbox" checked={!!sq.compareKd} onChange={(e) => patchSquad(sq.id, { compareKd: e.target.checked })} aria-label={`Compare ${sq.name}`} />
+                        Compare
+                      </label>
+                      <button className="px-1 text-sm text-stone/50 hover:text-stone" title="Squad settings" aria-label={`Settings for ${sq.name}`} onClick={() => setEditingId(sq.id)}>⚙</button>
+                    </div>
                   </div>
                   <div className="space-y-0.5">
                     {sq.slots.map((p, i) => (

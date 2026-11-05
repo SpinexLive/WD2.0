@@ -63,24 +63,33 @@ export async function renderRosterMessages(roster: Roster, event: RaidHelperEven
 }
 
 /** K/D comes from the official Discord↔Steam link and the Wardogs player record; lookups still running after 6s fill the cache for the next load. */
-async function statsFor(discordIds: string[], force: boolean): Promise<Map<string, { kd: number | null; deaths: number }>> {
+export async function rosterStatsFor(discordIds: string[], force: boolean): Promise<Map<string, { kd: number | null; deaths: number }>> {
   const out = new Map<string, { kd: number | null; deaths: number }>();
-  const links = await resolveLinks().catch(() => null);
+  if (!discordIds.length) return out;
+  const links = await resolveLinks(true).catch((error: unknown) => {
+    console.error("Roster K/D account links failed:", error instanceof Error ? error.message : "unknown");
+    return null;
+  });
   if (!links) return out;
+  if (!links.source.available || links.source.stale) {
+    console.warn("Roster K/D account links are unavailable or stale.");
+  }
+  const linkedSteam = links.source.available && !links.source.stale ? links.steamIds : links.manual;
   const lookups = Promise.all(
-    discordIds.map(async (id) => {
-      const steam = links.steamIds.get(id);
+    [...new Set(discordIds)].map(async (id) => {
+      const steam = linkedSteam.get(id);
       if (!steam) return;
       try {
         const s = await getPlayerStats(steam, force);
-        if (!s.stale && s.data) out.set(id, { kd: s.data.kd, deaths: s.data.deaths });
-      } catch {
-        // K/D is optional here; the player stays listed without it.
+        if (s.stale) console.warn("Roster K/D player stats are stale.");
+        else if (s.data) out.set(id, { kd: s.data.kd, deaths: s.data.deaths });
+      } catch (error) {
+        console.error("Roster K/D lookup failed:", error instanceof Error ? error.message : "unknown");
       }
     }),
   );
   await Promise.race([lookups, new Promise((r) => setTimeout(r, 6000))]);
-  return out;
+  return new Map(out);
 }
 
 export async function enrichSignups(raw: RaidHelperSignup[], force = false, withStats = false): Promise<{ signups: SignupInfo[]; leagueAvailable: boolean }> {
@@ -88,7 +97,7 @@ export async function enrichSignups(raw: RaidHelperSignup[], force = false, with
     getLeagueMembers(force).then((s) => s, () => null),
     getLeagueApplications(force).then((s) => s, () => null),
     getClanMembers().then((s) => s, () => null),
-    withStats ? statsFor(raw.map((s) => s.discordId), force) : Promise.resolve(new Map<string, { kd: number | null; deaths: number }>()),
+    withStats ? rosterStatsFor(raw.map((s) => s.discordId), force) : Promise.resolve(new Map<string, { kd: number | null; deaths: number }>()),
   ]);
   // Stale tournament data is never treated as confirmed.
   const m = members && !members.stale ? members.data : null;
