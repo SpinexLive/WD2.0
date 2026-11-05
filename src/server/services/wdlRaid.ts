@@ -26,6 +26,28 @@ export async function wdlRaidStatus() {
 }
 export type WdlRaidStatus = Awaited<ReturnType<typeof wdlRaidStatus>>;
 
+export async function wdlCreatedEventLog(before: string | null) {
+  const rows = await query<{
+    id: string; fixture_id: string; channel_id: string | null; scheduled_id: string | null;
+    event_id: string | null; event_verified: boolean; origin: "automatic" | "legacy"; created_at: Date;
+  }>(
+    `SELECT entry.id::text AS id, entry.fixture_id, entry.channel_id, entry.scheduled_id,
+            entry.event_id, entry.event_verified, entry.origin, entry.created_at
+       FROM wdl_created_events AS entry
+      WHERE ($1::bigint IS NULL OR entry.id < $1::bigint) ORDER BY entry.id DESC LIMIT 51`,
+    [before],
+  );
+  const page = rows.slice(0, 50);
+  return {
+    events: page.map((row) => ({
+      id: row.id, fixtureId: row.fixture_id, channelId: row.channel_id, scheduledId: row.scheduled_id,
+      eventId: row.event_id, eventVerified: row.event_verified, origin: row.origin, createdAt: row.created_at.toISOString(),
+    })),
+    nextCursor: rows.length > 50 ? page[page.length - 1]!.id : null,
+  };
+}
+export type WdlCreatedEventLog = Awaited<ReturnType<typeof wdlCreatedEventLog>>;
+
 async function activateWdlRaidAutomation(fixtures: WdlFixtures, pendingOnly: boolean) {
   return tx(async (client) => {
     const settings = await client.query<{ enabled: boolean; activation_pending: boolean; baseline_at: Date | null }>(
@@ -211,32 +233,89 @@ function possibleWdlEvent(fixture: WdlFixture, briefing: number, event: { channe
   return (tokens.has("RMNT") || tokens.has("REMNANT")) && opponents.every((code) => tokens.has(code.toUpperCase()));
 }
 
+async function recoverRecordedWdlEventIds() {
+  await query(
+    `WITH candidates AS (
+       SELECT fixture.fixture_id, min(recorded.id) AS recorded_id
+         FROM wdl_fixture_events AS fixture
+         JOIN wdl_created_events AS recorded ON recorded.fixture_id = fixture.fixture_id
+          AND recorded.origin = 'automatic' AND recorded.created_at >= fixture.updated_at
+        WHERE fixture.state = 'creating' AND fixture.updated_at < now() - interval '1 minute'
+          AND fixture.scheduled_id IS NULL AND fixture.event_id IS NULL
+        GROUP BY fixture.fixture_id HAVING count(*) = 1
+     )
+     UPDATE wdl_fixture_events AS fixture
+        SET scheduled_id = recorded.scheduled_id, event_id = recorded.event_id,
+            event_channel_id = COALESCE(fixture.event_channel_id, recorded.channel_id),
+            state = 'uncertain', error = 'Creation was interrupted after Raid Helper returned an ID. Review the event before proceeding.',
+            updated_at = now()
+       FROM candidates JOIN wdl_created_events AS recorded ON recorded.id = candidates.recorded_id
+      WHERE fixture.fixture_id = candidates.fixture_id AND fixture.state = 'creating'
+        AND fixture.scheduled_id IS NULL AND fixture.event_id IS NULL`,
+  );
+  await query(
+    `UPDATE wdl_fixture_events SET state = 'uncertain',
+        error = 'Creation was interrupted after Raid Helper returned an ID. Review the event before proceeding.',
+        updated_at = now()
+      WHERE state = 'creating' AND updated_at < now() - interval '1 minute'
+        AND (scheduled_id IS NOT NULL OR event_id IS NOT NULL)`,
+  );
+}
+
 async function reconcileScheduledWdlEvents() {
-  const rows = await query<{ fixture_id: string; scheduled_id: string; start_time: string; post_at: string; event_channel_id: string | null; member_role_name: string | null; voice_channel_name: string | null }>(
-    "SELECT fixture_id, scheduled_id, start_time, post_at, event_channel_id, member_role_name, voice_channel_name FROM wdl_fixture_events WHERE state = 'scheduled' AND scheduled_id IS NOT NULL",
+  const rows = await query<{ fixture_id: string; state: string; scheduled_id: string; start_time: string; post_at: string; event_channel_id: string | null; member_role_name: string | null; voice_channel_name: string | null }>(
+    `SELECT fixture_id, state, scheduled_id, start_time, post_at, event_channel_id, member_role_name, voice_channel_name
+       FROM wdl_fixture_events
+      WHERE state IN ('scheduled', 'review', 'uncertain') AND scheduled_id IS NOT NULL AND event_id IS NULL`,
   );
   if (!rows.length) return;
-  const [posted, scheduled, names] = await Promise.all([getPostedWdlEvents(), getScheduledWdlEvents(), wdlEventNames()]);
+  const [posted, scheduled, namesResult] = await Promise.all([
+    getPostedWdlEvents(),
+    getScheduledWdlEvents(),
+    wdlEventNames().then(
+      (names) => ({ ok: true as const, names }),
+      (error: unknown) => ({ ok: false as const, error }),
+    ),
+  ]);
+  const names = namesResult.ok ? namesResult.names : null;
   for (const row of rows) {
     const channelId = row.event_channel_id ?? WDL_EVENT_CHANNEL;
     const matches = posted.filter((event) => event.scheduledId === row.scheduled_id && event.channelId === channelId);
-    if ((row.member_role_name && row.member_role_name !== names.role) || (row.voice_channel_name && row.voice_channel_name !== names.voice)) {
+    if (names && row.state === "scheduled" && ((row.member_role_name && row.member_role_name !== names.role) || (row.voice_channel_name && row.voice_channel_name !== names.voice))) {
       await query("UPDATE wdl_fixture_events SET state = 'review', error = $2, updated_at = now() WHERE fixture_id = $1 AND state = 'scheduled'",
         [row.fixture_id, "The member role or briefing channel was renamed. Raid Helper may still post with the old names; review the scheduled event now."]);
-    } else if (matches.length > 1) {
+    }
+    if (matches.length > 1 && row.state === "scheduled") {
       await query("UPDATE wdl_fixture_events SET state = 'review', error = $2, updated_at = now() WHERE fixture_id = $1 AND state = 'scheduled'",
         [row.fixture_id, "Multiple posted events match the scheduled event. Review in Raid Helper."]);
     } else if (matches.length === 1) {
       const event = await getRawWdlEvent(matches[0]!.id);
-      if (event.serverId !== "1332320879073296404" || event.channelId !== channelId || event.templateId !== "ct34" ||
+      if (event.id !== matches[0]!.id || event.serverId !== "1332320879073296404" || event.channelId !== channelId || event.templateId !== "ct34" ||
           event.scheduledId !== row.scheduled_id || event.startTime !== Number(row.start_time)) {
         await query("UPDATE wdl_fixture_events SET state = 'review', error = $2, updated_at = now() WHERE fixture_id = $1 AND state = 'scheduled'",
           [row.fixture_id, "The posted event did not match the saved schedule. Review in Raid Helper."]);
       } else {
-        await query("UPDATE wdl_fixture_events SET state = 'posted', event_id = $2, updated_at = now() WHERE fixture_id = $1 AND state = 'scheduled'",
-          [row.fixture_id, event.id]);
+        const recorded = await query(
+          `UPDATE wdl_created_events SET event_id = $3, event_verified = true, updated_at = now()
+            WHERE fixture_id = $1 AND scheduled_id = $2 AND (event_id IS NULL OR event_id = $3) RETURNING id`,
+          [row.fixture_id, row.scheduled_id, event.id],
+        );
+        const linked = await query(
+          `UPDATE wdl_fixture_events
+              SET state = CASE WHEN state = 'scheduled' AND $4 THEN 'review' WHEN state = 'scheduled' THEN 'posted' ELSE state END,
+                  error = CASE WHEN state = 'scheduled' AND $4 THEN 'The event posted, but its member role and briefing channel names could not be verified. Review it.' ELSE error END,
+                  event_id = $3, updated_at = now()
+            WHERE fixture_id = $1 AND scheduled_id = $2 AND event_id IS NULL
+              AND state IN ('scheduled', 'review', 'uncertain') RETURNING fixture_id`,
+          [row.fixture_id, row.scheduled_id, event.id, names === null],
+        );
+        if (recorded.length && linked.length) {
+          await audit({ discordId: "system:wdl", displayName: "WDL fixture worker" }, "wdl.event_posted", "wdl_fixture", row.fixture_id,
+            { scheduledId: row.scheduled_id, eventId: event.id });
+        }
+        if (!namesResult.ok) throw namesResult.error instanceof Error ? namesResult.error : new Error("Could not verify the Discord role and voice channel names.");
       }
-    } else if (Number(row.post_at) + 300 < Math.floor(Date.now() / 1000) && !scheduled.some((event) => event.id === row.scheduled_id)) {
+    } else if (matches.length === 0 && row.state === "scheduled" && Number(row.post_at) + 300 < Math.floor(Date.now() / 1000) && !scheduled.some((event) => event.id === row.scheduled_id)) {
       await query("UPDATE wdl_fixture_events SET state = 'uncertain', error = $2, updated_at = now() WHERE fixture_id = $1 AND state = 'scheduled'",
         [row.fixture_id, "The scheduled event is no longer listed and no posted event was found. Check Raid Helper before retrying."]);
     }
@@ -245,6 +324,8 @@ async function reconcileScheduledWdlEvents() {
 
 /** Polls fixtures and creates at most one event per pass. Claims are durable before POST. */
 export async function wdlFixtureTick() {
+  await recoverRecordedWdlEventIds();
+  await reconcileScheduledWdlEvents();
   const snapshot = await getLeagueFixtures(true);
   if (snapshot.stale) throw new Error(snapshot.error ?? "Wardogs League fixtures are stale.");
   await archiveWdlFixtures(snapshot.data);
@@ -294,7 +375,6 @@ export async function wdlFixtureTick() {
   });
 
   if (!observed) return;
-  await reconcileScheduledWdlEvents();
   const [candidate] = await query<{ fixture_id: string; fixture: WdlFixture }>(
     "SELECT fixture_id, fixture FROM wdl_fixture_events WHERE state = 'pending' AND upper(fixture->>'status') = 'SCHEDULED' ORDER BY updated_at LIMIT 1",
   );
@@ -385,24 +465,45 @@ export async function wdlFixtureTick() {
   try {
     const result = await createWdlRaidEvent(WDL_EVENT_CHANNEL, body);
     const scheduled = body.schedule !== undefined;
+    let receipt: { id: string }[];
+    try {
+      receipt = await independentQuery<{ id: string }>(
+        `INSERT INTO wdl_created_events (fixture_id, channel_id, scheduled_id, event_id, origin)
+         VALUES ($1, $2, $3, $4, 'automatic') RETURNING id`,
+        [candidate.fixture_id, WDL_EVENT_CHANNEL, scheduled ? result.event.id : null, scheduled ? null : result.event.id],
+      );
+    } catch (error) {
+      console.error("Raid Helper returned a WDL event ID that could not be recorded:", {
+        fixtureId: candidate.fixture_id, channelId: WDL_EVENT_CHANNEL, raidId: result.event.id, scheduled,
+      });
+      throw error;
+    }
+    const saved = await independentQuery(
+      `UPDATE wdl_fixture_events SET scheduled_id = $2, event_id = $3, updated_at = now()
+        WHERE fixture_id = $1 AND state = 'creating' RETURNING fixture_id`,
+      [candidate.fixture_id, scheduled ? result.event.id : null, scheduled ? null : result.event.id],
+    );
+    if (!saved.length) throw new Error("The fixture changed while the returned Raid Helper ID was being recorded; review it manually.");
     if (!scheduled) {
       const event = await getRawWdlEvent(result.event.id);
-      if (event.serverId !== "1332320879073296404" || event.channelId !== WDL_EVENT_CHANNEL ||
+      if (event.id !== result.event.id || event.serverId !== "1332320879073296404" || event.channelId !== WDL_EVENT_CHANNEL ||
           event.templateId !== "ct34" || event.startTime !== Number(body.date) || event.title !== body.title) {
         throw new Error("The newly posted event did not match the requested fixture; check Raid Helper.");
       }
+      await independentQuery("UPDATE wdl_created_events SET event_verified = true, updated_at = now() WHERE id = $1", [receipt[0]!.id]);
     }
-    await independentQuery(
-      `UPDATE wdl_fixture_events SET state = $2, scheduled_id = $3, event_id = $4, updated_at = now()
-        WHERE fixture_id = $1 AND state = 'creating'`,
-      [candidate.fixture_id, scheduled ? "scheduled" : "posted", scheduled ? result.event.id : null, scheduled ? null : result.event.id],
+    const completed = await independentQuery(
+      `UPDATE wdl_fixture_events SET state = $2, updated_at = now()
+        WHERE fixture_id = $1 AND state = 'creating' RETURNING fixture_id`,
+      [candidate.fixture_id, scheduled ? "scheduled" : "posted"],
     );
+    if (!completed.length) throw new Error("The fixture changed while event creation was being confirmed; review it manually.");
     await audit({ discordId: "system:wdl", displayName: "WDL fixture worker" }, "wdl.event_created", "wdl_fixture", candidate.fixture_id,
       { raidId: result.event.id, scheduled });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown Raid Helper error";
     const rejected = error instanceof ProviderError && error.status !== undefined && error.status >= 400 && error.status < 500;
-    await independentQuery("UPDATE wdl_fixture_events SET state = $2, error = $3, updated_at = now() WHERE fixture_id = $1",
+    await independentQuery("UPDATE wdl_fixture_events SET state = $2, error = $3, updated_at = now() WHERE fixture_id = $1 AND state = 'creating'",
       [candidate.fixture_id, rejected ? "review" : "uncertain", message.slice(0, 500)]);
     await audit({ discordId: "system:wdl", displayName: "WDL fixture worker" }, "wdl.event_failed", "wdl_fixture", candidate.fixture_id, { error: message });
     throw new Error(`WDL fixture event creation could not be confirmed: ${message}`);

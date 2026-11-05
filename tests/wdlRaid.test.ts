@@ -34,7 +34,7 @@ vi.mock("@/server/services/wdlRaidHelper", async (original) => {
     getPostedWdlEvents: mocks.posted, getRawWdlEvent: mocks.raw, deleteWdlRaidEvent: mocks.remove };
 });
 
-import { deleteReviewedWdlEvent, disableWdlRaidAutomation, enableWdlRaidAutomation, linkExistingWdlEvent, recoverScheduledWdlEvent, retryReviewedWdlFixture, wdlFixtureTick, wdlRaidStatus } from "@/server/services/wdlRaid";
+import { deleteReviewedWdlEvent, disableWdlRaidAutomation, enableWdlRaidAutomation, linkExistingWdlEvent, recoverScheduledWdlEvent, retryReviewedWdlFixture, wdlCreatedEventLog, wdlFixtureTick, wdlRaidStatus } from "@/server/services/wdlRaid";
 import type { WdlFixture } from "@/lib/wdlFixtures";
 
 const actor = { discordId: "839225558806167582", displayName: "Owner" };
@@ -61,6 +61,9 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)("WDL fixture automation with Pos
     await mocks.client.query(activation);
     mocks.migrationPending = (await mocks.client.query("SELECT activation_pending FROM wdl_raid_settings")).rows[0].activation_pending;
     await mocks.client.query("UPDATE wdl_raid_settings SET activation_pending = false");
+    await mocks.client.query("CREATE TEMP TABLE audit_logs (id bigserial PRIMARY KEY, target_id text, target_type text, action text, details jsonb, created_at timestamptz NOT NULL DEFAULT now())");
+    const registry = await readFile(resolve(process.cwd(), "migrations", "036_wdl_created_events.sql"), "utf8");
+    await mocks.client.query(registry.replace(/CREATE TABLE/g, "CREATE TEMP TABLE"));
     mocks.fixtures.mockResolvedValue(snapshot([]));
     mocks.archive.mockResolvedValue(undefined);
     mocks.names.mockResolvedValue(names);
@@ -159,6 +162,8 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)("WDL fixture automation with Pos
     expect(mocks.create).toHaveBeenCalledWith(productionChannel, expect.objectContaining({ title: "RMNT v WTH", schedule: expect.any(Number) }));
     expect((await mocks.client!.query("SELECT state, scheduled_id FROM wdl_fixture_events WHERE fixture_id = 'fresh'")).rows[0])
       .toEqual({ state: "scheduled", scheduled_id: "scheduled-id" });
+    expect((await mocks.client!.query("SELECT fixture_id, channel_id, scheduled_id, event_id, event_verified, origin FROM wdl_created_events")).rows[0])
+      .toEqual({ fixture_id: "fresh", channel_id: productionChannel, scheduled_id: "scheduled-id", event_id: null, event_verified: false, origin: "automatic" });
     await wdlFixtureTick();
     expect(mocks.create).toHaveBeenCalledOnce();
   });
@@ -200,6 +205,8 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)("WDL fixture automation with Pos
     await wdlFixtureTick();
     expect(mocks.create.mock.calls[0]![1]).not.toHaveProperty("schedule");
     expect((await mocks.client!.query("SELECT state, event_id FROM wdl_fixture_events")).rows[0]).toEqual({ state: "posted", event_id: "posted-id" });
+    expect((await mocks.client!.query("SELECT fixture_id, event_id, event_verified, origin FROM wdl_created_events")).rows[0])
+      .toEqual({ fixture_id: "near", event_id: "posted-id", event_verified: true, origin: "automatic" });
   });
 
   it("waits rather than scheduling an event moments before its posting time", async () => {
@@ -230,7 +237,35 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)("WDL fixture automation with Pos
     mocks.raw.mockResolvedValue({ id: "posted-id", serverId: "1332320879073296404", channelId: "wrong",
       templateId: "ct34", startTime: 0, title: "Unexpected" });
     await expect(wdlFixtureTick()).rejects.toThrow("could not be confirmed");
-    expect((await mocks.client!.query("SELECT state FROM wdl_fixture_events")).rows[0].state).toBe("uncertain");
+    expect((await mocks.client!.query("SELECT state, event_id FROM wdl_fixture_events")).rows[0])
+      .toEqual({ state: "uncertain", event_id: "posted-id" });
+    expect((await mocks.client!.query("SELECT event_id, event_verified FROM wdl_created_events")).rows[0])
+      .toEqual({ event_id: "posted-id", event_verified: false });
+  });
+
+  it("does not mark a returned event ID verified when the event details have a different ID", async () => {
+    const fixture = { ...makeFixture("near", 2), scheduledAt: new Date(Date.now() + 86400_000).toISOString() };
+    await mocks.client!.query("UPDATE wdl_raid_settings SET enabled = true, baseline_at = now()");
+    mocks.fixtures.mockResolvedValue(snapshot([fixture]));
+    mocks.create.mockResolvedValue({ status: "success", event: { id: "returned-id" } });
+    mocks.raw.mockResolvedValue({ id: "different-id", serverId: "1332320879073296404", channelId: productionChannel,
+      templateId: "ct34", startTime: Math.floor(Date.parse(fixture.scheduledAt) / 1000) - 1800, title: "RMNT v WTH" });
+    await expect(wdlFixtureTick()).rejects.toThrow("could not be confirmed");
+    expect((await mocks.client!.query("SELECT event_id, event_verified FROM wdl_created_events")).rows[0])
+      .toEqual({ event_id: "returned-id", event_verified: false });
+  });
+
+  it("paginates through more than 100 recorded event IDs without truncating them", async () => {
+    await mocks.client!.query(
+      "INSERT INTO wdl_created_events (fixture_id, event_id, origin) SELECT 'fixture-' || n, 'event-' || n, 'automatic' FROM generate_series(1, 125) AS n",
+    );
+    const first = await wdlCreatedEventLog(null);
+    const second = await wdlCreatedEventLog(first.nextCursor);
+    const third = await wdlCreatedEventLog(second.nextCursor);
+    const events = [...first.events, ...second.events, ...third.events];
+    expect([first.events.length, second.events.length, third.events.length]).toEqual([50, 50, 25]);
+    expect(third.nextCursor).toBeNull();
+    expect(new Set(events.map((event) => event.eventId)).size).toBe(125);
   });
 
   it("rechecks WDL after preflight and does not create an event using a changed fixture", async () => {
@@ -325,7 +360,78 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)("WDL fixture automation with Pos
       templateId: "ct34", startTime: Number(sent.date), scheduledId: "scheduled-id", title: sent.title });
     await wdlFixtureTick();
     expect((await mocks.client!.query("SELECT state, event_id FROM wdl_fixture_events")).rows[0]).toEqual({ state: "posted", event_id: "posted" });
+    expect((await mocks.client!.query("SELECT scheduled_id, event_id, event_verified FROM wdl_created_events")).rows[0])
+      .toEqual({ scheduled_id: "scheduled-id", event_id: "posted", event_verified: true });
     expect(mocks.create).toHaveBeenCalledOnce();
+  });
+
+  it("tracks a posted ID while automation is disabled and WDL is unavailable", async () => {
+    const fixture = makeFixture("new", 2);
+    await mocks.client!.query("UPDATE wdl_raid_settings SET enabled = true, baseline_at = now()");
+    mocks.fixtures.mockResolvedValue(snapshot([fixture]));
+    await wdlFixtureTick();
+    const sent = mocks.create.mock.calls[0]![1];
+    await disableWdlRaidAutomation(actor);
+    mocks.fixtures.mockRejectedValue(new Error("WDL unavailable"));
+    mocks.posted.mockResolvedValue([{ id: "posted", channelId: productionChannel, title: sent.title, startTime: Number(sent.date), scheduledId: "scheduled-id" }]);
+    mocks.raw.mockResolvedValue({ id: "posted", serverId: "1332320879073296404", channelId: productionChannel,
+      templateId: "ct34", startTime: Number(sent.date), scheduledId: "scheduled-id", title: sent.title });
+    await expect(wdlFixtureTick()).rejects.toThrow("WDL unavailable");
+    expect((await mocks.client!.query("SELECT scheduled_id, event_id, event_verified FROM wdl_created_events")).rows[0])
+      .toEqual({ scheduled_id: "scheduled-id", event_id: "posted", event_verified: true });
+    expect(mocks.create).toHaveBeenCalledOnce();
+  });
+
+  it("tracks a posted ID without clearing an existing fixture review", async () => {
+    const fixture = makeFixture("new", 2);
+    await mocks.client!.query("UPDATE wdl_raid_settings SET enabled = true, baseline_at = now()");
+    mocks.fixtures.mockResolvedValue(snapshot([fixture]));
+    await wdlFixtureTick();
+    const sent = mocks.create.mock.calls[0]![1];
+    await mocks.client!.query("UPDATE wdl_fixture_events SET state = 'review', error = 'Fixture changed'");
+    mocks.posted.mockResolvedValue([{ id: "posted", channelId: productionChannel, title: sent.title, startTime: Number(sent.date), scheduledId: "scheduled-id" }]);
+    mocks.raw.mockResolvedValue({ id: "posted", serverId: "1332320879073296404", channelId: productionChannel,
+      templateId: "ct34", startTime: Number(sent.date), scheduledId: "scheduled-id", title: sent.title });
+    await wdlFixtureTick();
+    expect((await mocks.client!.query("SELECT state, error, event_id FROM wdl_fixture_events")).rows[0])
+      .toEqual({ state: "review", error: "Fixture changed", event_id: "posted" });
+    expect((await mocks.client!.query("SELECT event_id, event_verified FROM wdl_created_events")).rows[0])
+      .toEqual({ event_id: "posted", event_verified: true });
+  });
+
+  it("records the posted ID even if Discord role lookup fails, and flags the event for review", async () => {
+    const fixture = makeFixture("new", 2);
+    await mocks.client!.query("UPDATE wdl_raid_settings SET enabled = true, baseline_at = now()");
+    mocks.fixtures.mockResolvedValue(snapshot([fixture]));
+    await wdlFixtureTick();
+    const sent = mocks.create.mock.calls[0]![1];
+    mocks.names.mockRejectedValue(new Error("Discord unavailable"));
+    mocks.posted.mockResolvedValue([{ id: "posted", channelId: productionChannel, title: sent.title, startTime: Number(sent.date), scheduledId: "scheduled-id" }]);
+    mocks.raw.mockResolvedValue({ id: "posted", serverId: "1332320879073296404", channelId: productionChannel,
+      templateId: "ct34", startTime: Number(sent.date), scheduledId: "scheduled-id", title: sent.title });
+    await expect(wdlFixtureTick()).rejects.toThrow("Discord unavailable");
+    expect((await mocks.client!.query("SELECT state, error, event_id FROM wdl_fixture_events")).rows[0])
+      .toMatchObject({ state: "review", error: expect.stringContaining("could not be verified"), event_id: "posted" });
+    expect((await mocks.client!.query("SELECT event_id, event_verified FROM wdl_created_events")).rows[0])
+      .toEqual({ event_id: "posted", event_verified: true });
+  });
+
+  it("recovers a recorded schedule ID after interrupted creation without retrying", async () => {
+    const fixture = makeFixture("interrupted", 2);
+    const start = Math.floor(Date.parse(fixture.scheduledAt!) / 1000) - 1800;
+    await mocks.client!.query(
+      `INSERT INTO wdl_fixture_events (fixture_id, fixture, state, start_time, post_at, updated_at)
+       VALUES ($1, $2, 'creating', $3, $4, now() - interval '2 minutes')`,
+      [fixture.id, JSON.stringify(fixture), start, start - 10 * 86400],
+    );
+    await mocks.client!.query(
+      "INSERT INTO wdl_created_events (fixture_id, channel_id, scheduled_id, origin) VALUES ($1, $2, 'recovered-schedule', 'automatic')",
+      [fixture.id, productionChannel],
+    );
+    await wdlFixtureTick();
+    expect((await mocks.client!.query("SELECT state, scheduled_id, error FROM wdl_fixture_events")).rows[0])
+      .toMatchObject({ state: "uncertain", scheduled_id: "recovered-schedule", error: expect.stringContaining("interrupted") });
+    expect(mocks.create).not.toHaveBeenCalled();
   });
 
   it("recovers an uncertain scheduled fixture without sending another create", async () => {

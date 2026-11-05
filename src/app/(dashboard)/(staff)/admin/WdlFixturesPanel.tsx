@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { useApi } from "@/lib/client";
 import { ConfirmDialog, ErrorBanner, Skeleton, useToast } from "@/components/ui";
-import type { WdlRaidStatus } from "@/server/services/wdlRaid";
+import type { WdlCreatedEventLog, WdlRaidStatus } from "@/server/services/wdlRaid";
 
 type Confirmation = "enable" | "disable" | { link: string } | { scheduled: string } | { retry: string } | { remove: string };
 
@@ -15,6 +15,10 @@ export default function WdlFixturesPanel() {
   const [busy, setBusy] = useState(false);
   const [confirm, setConfirm] = useState<Confirmation | null>(null);
   const [eventIds, setEventIds] = useState<Record<string, string>>({});
+  const [eventLog, setEventLog] = useState<WdlCreatedEventLog | null>(null);
+  const [logError, setLogError] = useState<string | null>(null);
+  const [logLoading, setLogLoading] = useState(false);
+  const [logRetryCursor, setLogRetryCursor] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -25,6 +29,20 @@ export default function WdlFixturesPanel() {
     }
   }, [api]);
   useEffect(() => { void load(); }, [load]);
+
+  async function loadEventLog(before: string | null) {
+    setLogLoading(true);
+    try {
+      const page = await api<WdlCreatedEventLog>(`/api/admin/wdl-fixtures/events${before ? `?before=${encodeURIComponent(before)}` : ""}`);
+      setEventLog((previous) => before && previous ? { events: [...previous.events, ...page.events], nextCursor: page.nextCursor } : page);
+      setLogError(null);
+    } catch (e) {
+      setLogRetryCursor(before);
+      setLogError((e as Error).message);
+    } finally {
+      setLogLoading(false);
+    }
+  }
 
   async function run(body: object) {
     setBusy(true);
@@ -53,7 +71,7 @@ export default function WdlFixturesPanel() {
   return (
     <div className="space-y-4 p-4">
       <h2 className="text-lg font-semibold">WDL fixture automation</h2>
-      <p className="text-sm text-stone/60">Newly observed WDL fixtures create a `ct34` Raid Helper event. Existing fixtures are baselined on first activation. A previously hidden older fixture may be treated as new, as agreed.</p>
+      <p className="text-sm text-stone/60">Newly observed WDL fixtures create a `ct34` Raid Helper event. Their IDs are saved for future changes. Existing fixtures are baselined on first activation; a previously hidden older fixture may be treated as new.</p>
       {error && <ErrorBanner message={error} onRetry={() => void load()} />}
       {!data && !error && <Skeleton className="h-24" />}
       {data && (
@@ -65,7 +83,7 @@ export default function WdlFixturesPanel() {
           <div className="flex flex-wrap gap-2">
             {!data.enabled && !data.activationPending && <button className="btn-primary" disabled={busy} onClick={() => setConfirm("enable")}>Enable automation</button>}
             {(data.enabled || data.activationPending) && <button className="btn-ghost" disabled={busy} onClick={() => setConfirm("disable")}>Disable automation</button>}
-            <button className="btn-ghost" disabled={busy} onClick={() => void load()}>Refresh</button>
+            <button className="btn-ghost" disabled={busy || logLoading} onClick={() => { void load(); if (eventLog) void loadEventLog(null); }}>Refresh</button>
           </div>
           {data.events.length > 0 && (
             <div className="space-y-2">
@@ -74,8 +92,9 @@ export default function WdlFixturesPanel() {
                 <div key={event.fixtureId} className="rounded border border-ink-700 p-3 text-sm">
                   <p><strong>Fixture {event.fixture.number ?? event.fixtureId}</strong> · {event.state}</p>
                   {event.error && <p className="text-red-400">{event.error}</p>}
+                  {event.eventId && <p>Raid Helper event ID: {event.eventId}</p>}
                   {event.eventId && event.eventChannelId && <p><a className="text-blood-300 hover:underline" target="_blank" rel="noopener noreferrer" href={`https://discord.com/channels/1332320879073296404/${encodeURIComponent(event.eventChannelId)}/${encodeURIComponent(event.eventId)}`}>Open Raid Helper event</a></p>}
-                  {event.scheduledId && <p>Scheduled event: {event.scheduledId}</p>}
+                  {event.scheduledId && <p>Scheduled event ID: {event.scheduledId}</p>}
                   {event.state === "review" && event.scheduledId && !event.eventId && <p className="text-xs text-stone/60">Review the scheduled event in Raid Helper; deleting scheduled events here has not been verified.</p>}
                   {["review", "uncertain", "creating"].includes(event.state) && (
                     <div className="mt-2 flex flex-wrap gap-2">
@@ -86,6 +105,32 @@ export default function WdlFixturesPanel() {
                       {event.state === "review" && event.eventId && <button className="btn-ghost" disabled={busy} onClick={() => setConfirm({ remove: event.fixtureId })}>Delete linked event</button>}
                     </div>
                   )}
+                  <details className="rounded border border-ink-700 p-3" onToggle={(event) => {
+                    if (event.currentTarget.open && !eventLog && !logLoading && !logError) void loadEventLog(null);
+                  }}>
+                    <summary className="cursor-pointer text-sm font-semibold">Created event ID log</summary>
+                    <p className="mt-2 text-xs text-stone/60">All recorded IDs are retained. Verified refers to event identity; review the fixture status before any future edits. Older records and unverified IDs need additional review.</p>
+                    {logError && <ErrorBanner message={logError} onRetry={() => void loadEventLog(logRetryCursor)} />}
+                    {logLoading && !eventLog && <Skeleton className="mt-2 h-16" />}
+                    {eventLog && (
+                      <>
+                        {eventLog.events.length === 0 && <p className="mt-2 text-sm text-stone/60">No event IDs have been recorded yet.</p>}
+                        <div className="mt-2 divide-y divide-ink-700">
+                          {eventLog.events.map((event) => (
+                            <div className="space-y-1 py-2 text-sm" key={event.id}>
+                              <p><strong>Fixture {event.fixtureId}</strong> · {event.origin === "automatic" ? "Created by automation" : "Older record: origin unverified"}</p>
+                              {event.scheduledId && <p>Scheduled event ID: {event.scheduledId}</p>}
+                              {event.eventId && <p>Posted event ID: {event.eventId} · {event.eventVerified ? "verified" : "unverified"}</p>}
+                              {event.eventId && event.channelId && /^\d{15,22}$/.test(event.eventId) && /^\d{15,22}$/.test(event.channelId) &&
+                                <a className="text-xs text-blood-300 hover:underline" target="_blank" rel="noopener noreferrer" href={`https://discord.com/channels/1332320879073296404/${event.channelId}/${event.eventId}`}>Open event in Discord</a>}
+                              <p className="text-xs text-stone/50">Recorded {new Date(event.createdAt).toLocaleString("en-GB")}</p>
+                            </div>
+                          ))}
+                        </div>
+                        {eventLog.nextCursor && <button className="btn-ghost mt-2" disabled={logLoading} onClick={() => void loadEventLog(eventLog.nextCursor)}>Load older IDs</button>}
+                      </>
+                    )}
+                  </details>
                 </div>
               ))}
             </div>

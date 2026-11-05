@@ -1,17 +1,18 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
 
-const mocks = vi.hoisted(() => ({ session: vi.fn(), rate: vi.fn(), status: vi.fn(), enable: vi.fn(), disable: vi.fn(), link: vi.fn(), scheduled: vi.fn(), retry: vi.fn(), remove: vi.fn() }));
+const mocks = vi.hoisted(() => ({ session: vi.fn(), rate: vi.fn(), status: vi.fn(), log: vi.fn(), enable: vi.fn(), disable: vi.fn(), link: vi.fn(), scheduled: vi.fn(), retry: vi.fn(), remove: vi.fn() }));
 vi.mock("@/lib/session", () => ({ getSession: mocks.session }));
 vi.mock("@/lib/ratelimit", () => ({ rateLimit: mocks.rate }));
 vi.mock("@/lib/env", () => ({ env: () => ({ OWNER_DISCORD_ID: "owner", APP_URL: "https://dashboard.test" }) }));
 vi.mock("@/server/services/wdlRaid", () => ({
-  wdlRaidStatus: mocks.status, enableWdlRaidAutomation: mocks.enable, disableWdlRaidAutomation: mocks.disable, linkExistingWdlEvent: mocks.link,
+  wdlRaidStatus: mocks.status, wdlCreatedEventLog: mocks.log, enableWdlRaidAutomation: mocks.enable, disableWdlRaidAutomation: mocks.disable, linkExistingWdlEvent: mocks.link,
   recoverScheduledWdlEvent: mocks.scheduled, deleteReviewedWdlEvent: mocks.remove,
   retryReviewedWdlFixture: mocks.retry,
 }));
 
 import { GET, POST } from "@/app/api/admin/wdl-fixtures/route";
+import { GET as GET_LOG } from "@/app/api/admin/wdl-fixtures/events/route";
 const owner = { discordId: "owner", isAdmin: true, csrfToken: "csrf", displayName: "Owner" };
 const context = { params: Promise.resolve({}) };
 const get = () => new NextRequest("https://dashboard.test/api/admin/wdl-fixtures");
@@ -24,6 +25,7 @@ beforeEach(() => {
   mocks.session.mockResolvedValue(owner);
   mocks.rate.mockResolvedValue(0);
   mocks.status.mockResolvedValue({ enabled: false });
+  mocks.log.mockResolvedValue({ events: [], nextCursor: null });
   mocks.enable.mockResolvedValue({ enabled: true });
 });
 
@@ -46,5 +48,19 @@ describe("WDL Admin automation route", () => {
     expect(mocks.enable).not.toHaveBeenCalled();
     expect((await POST(post({ action: "enable" }), context)).status).toBe(200);
     expect(mocks.enable).toHaveBeenCalledWith(owner);
+  });
+
+  it("restricts the event ID log to the owner and validates pagination", async () => {
+    const logRequest = (suffix = "") => new NextRequest(`https://dashboard.test/api/admin/wdl-fixtures/events${suffix}`);
+    mocks.session.mockResolvedValue({ ...owner, discordId: "other" });
+    expect((await GET_LOG(logRequest(), context)).status).toBe(404);
+    mocks.session.mockResolvedValue(owner);
+    expect((await GET_LOG(logRequest("?before=abc"), context)).status).toBe(400);
+    expect((await GET_LOG(logRequest("?before=9223372036854775808"), context)).status).toBe(400);
+    expect((await GET_LOG(logRequest("?before=0"), context)).status).toBe(400);
+    expect((await GET_LOG(logRequest("?before=51"), context)).status).toBe(200);
+    expect(mocks.log).toHaveBeenCalledWith("51");
+    expect((await GET_LOG(logRequest(), context)).status).toBe(200);
+    expect(mocks.log).toHaveBeenCalledWith(null);
   });
 });
