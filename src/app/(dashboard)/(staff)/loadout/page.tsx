@@ -1,14 +1,17 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useApi, useLive } from "@/lib/client";
+import { useApi, useLive, type ApiError } from "@/lib/client";
 import { Avatar, ConfirmDialog, EmptyState, ErrorBanner, Skeleton, useToast } from "@/components/ui";
 import { GROUP_LABELS, LOADOUT_ITEMS, itemImage, type LoadoutGroup } from "@/lib/loadout";
 
 interface Table {
   config: { channelId: string; messageId: string; postedAt: string } | null;
   members: { id: string; name: string; avatarUrl: string | null; items: string[] }[];
+  canSendReminder: boolean;
 }
+
+interface ReminderPreview { count: number; previewDigest: string; trackerUrl: string | null }
 
 export default function LoadoutPage() {
   const api = useApi();
@@ -18,6 +21,8 @@ export default function LoadoutPage() {
   const [search, setSearch] = useState("");
   const [busy, setBusy] = useState(false);
   const [confirmReset, setConfirmReset] = useState(false);
+  const [reminderPreview, setReminderPreview] = useState<ReminderPreview | null>(null);
+  const [reminderError, setReminderError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -44,6 +49,39 @@ export default function LoadoutPage() {
     }
   }
 
+  async function prepareReminder() {
+    setBusy(true);
+    setReminderError(null);
+    try {
+      const preview = await api<ReminderPreview>("/api/loadout/remind");
+      if (preview.count === 0) toast({ text: "No members need a reminder.", tone: "ok" });
+      else setReminderPreview(preview);
+    } catch (e) {
+      setReminderError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function sendReminder() {
+    if (!reminderPreview || !reminderPreview.count) return;
+    setBusy(true);
+    setReminderError(null);
+    try {
+      const result = await api<{ reminded: number }>("/api/loadout/remind", {
+        method: "POST",
+        body: { previewDigest: reminderPreview.previewDigest, requestId: crypto.randomUUID() },
+      });
+      toast({ text: `Reminder sent to ${result.reminded} member${result.reminded === 1 ? "" : "s"}.`, tone: "ok" });
+    } catch (e) {
+      const error = e as ApiError;
+      setReminderError(error.status === 0 ? "Could not confirm whether the reminder was sent. Check the Discord channel before retrying." : error.message);
+    } finally {
+      setBusy(false);
+      setReminderPreview(null);
+    }
+  }
+
   const q = search.trim().toLowerCase();
   const rows = useMemo(() => (data?.members ?? []).filter((m) => !q || m.name.toLowerCase().includes(q)).sort((a, b) => b.items.length - a.items.length || a.name.localeCompare(b.name)), [data, q]);
   const counts = useMemo(() => new Map(LOADOUT_ITEMS.map((i) => [i.key, (data?.members ?? []).filter((m) => m.items.includes(i.key)).length])), [data]);
@@ -57,10 +95,12 @@ export default function LoadoutPage() {
       </div>
       <div className="flex flex-wrap items-center gap-2">
         <button className="btn-ghost" disabled={busy} onClick={() => setConfirmReset(true)}>Reset all unlocks</button>
+        {data?.canSendReminder && <button className="btn-ghost" disabled={busy} onClick={() => void prepareReminder()}>Remind members</button>}
         <span className="text-xs text-stone/50">{data?.config ? "Embed is posted." : "Embed not posted yet."} Channel settings are under Admin → Loadout.</span>
       </div>
       <input className="input !w-64" placeholder="Search members" aria-label="Search members" value={search} onChange={(e) => setSearch(e.target.value)} />
       {error && <ErrorBanner message={error} onRetry={load} />}
+      {reminderError && <ErrorBanner message={reminderError} />}
       {!data && !error && <Skeleton className="h-64" />}
       {data && rows.length === 0 && <EmptyState title="No members found" />}
       {data && rows.length > 0 && (
@@ -99,6 +139,15 @@ export default function LoadoutPage() {
       {confirmReset && (
         <ConfirmDialog title="Reset all unlocks?" confirmLabel="Reset everything" danger busy={busy} onCancel={() => setConfirmReset(false)} onConfirm={() => void run("/api/loadout/reset", {}, "All unlocks cleared")}>
           This removes every confirmed unlock for every member. It can't be undone.
+        </ConfirmDialog>
+      )}
+      {reminderPreview && (
+        <ConfirmDialog title="Send unlock reminder?" confirmLabel={`Remind ${reminderPreview.count} member${reminderPreview.count === 1 ? "" : "s"}`} busy={busy} onCancel={() => setReminderPreview(null)} onConfirm={() => void sendReminder()}>
+          <p>
+            This will ping {reminderPreview.count} member{reminderPreview.count === 1 ? "" : "s"} with no recorded unlocks in Discord channel 1566382614519218286.
+            Only members with the Wardogs member role are included. Recipients are checked again before sending.
+          </p>
+          {!reminderPreview.trackerUrl && <p className="mt-2">No tracker embed is configured, so the reminder will not contain a direct tracker link.</p>}
         </ConfirmDialog>
       )}
       {node}
