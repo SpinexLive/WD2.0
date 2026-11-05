@@ -4,7 +4,6 @@ import { HttpError, requestJson } from "@/lib/http";
 import { fixtureOpponents, type WdlFixture } from "@/lib/wdlFixtures";
 
 export const WDL_EVENT_CHANNEL = "1546479425644793877";
-export const WDL_TEST_CHANNEL = "1546184970706616412";
 export const WDL_MEMBER_ROLE = "1546184733174669424";
 export const WDL_VOICE_CHANNEL = "1546197103498363031";
 const WDL_LEADER = "839225558806167582";
@@ -46,7 +45,6 @@ export function wdlEventBody(
   fixture: WdlFixture,
   names: Awaited<ReturnType<typeof wdlEventNames>>,
   nowSeconds: number,
-  options: { test?: boolean; postAt?: number } = {},
 ) {
   const opponents = fixtureOpponents(fixture);
   if (!opponents || !fixture.scheduledAt || fixture.status.toUpperCase() !== "SCHEDULED") {
@@ -58,9 +56,9 @@ export function wdlEventBody(
   const matchTime = Math.floor(Date.parse(fixture.scheduledAt) / 1000);
   const briefing = matchTime - 30 * 60;
   if (briefing <= nowSeconds) throw new HttpError(409, "Briefing has already started; review this fixture manually.", "wdl_fixture_late");
-  const title = `${options.test ? "[TEST] " : ""}RMNT v ${opponents.join(" v ")}`;
+  const title = `RMNT v ${opponents.join(" v ")}`;
   let temporaryRole = title;
-  if (options.test || names.roleNames.includes(title.toLowerCase())) {
+  if (names.roleNames.includes(title.toLowerCase())) {
     if (fixture.number === null || !Number.isSafeInteger(fixture.number)) throw new HttpError(409, "A unique fixture number is required for the temporary role.", "wdl_role_collision");
     temporaryRole = `${title} #${fixture.number}`;
   }
@@ -76,7 +74,7 @@ export function wdlEventBody(
     `**Map:** ${clean(fixture.map)}`,
     `**Factions:** ${fixture.participants.map((p) => `${clean(p.team.code)}: ${clean(p.faction)}`).join(" | ")}`,
   ].join("\n");
-  const postAt = options.postAt ?? briefing - TEN_DAYS;
+  const postAt = briefing - TEN_DAYS;
   return {
     leaderId: WDL_LEADER,
     coLeaders: [WDL_COLEADER],
@@ -106,7 +104,7 @@ export function wdlEventBody(
       create_discordevent: false,
       create_thread: false,
       show_countdown: false,
-      reminder: options.test ? false : 60,
+      reminder: 60,
       color: "#9E303C",
       image: EVENT_IMAGE,
       header_image: "default",
@@ -120,7 +118,7 @@ function raidUrl(path: string): string {
 const raidHeaders = () => ({ Authorization: env().RAID_HELPER_API_TOKEN });
 
 export async function createWdlRaidEvent(channelId: string, body: ReturnType<typeof wdlEventBody>) {
-  if (![WDL_EVENT_CHANNEL, WDL_TEST_CHANNEL].includes(channelId)) throw new HttpError(400, "Invalid Raid Helper event channel.", "invalid_channel");
+  if (channelId !== WDL_EVENT_CHANNEL) throw new HttpError(400, "Invalid Raid Helper event channel.", "invalid_channel");
   const { data } = await requestJson({
     provider: "raid-helper", method: "POST",
     url: raidUrl(`/api/v4/servers/${env().DISCORD_GUILD_ID}/channels/${channelId}/event`),

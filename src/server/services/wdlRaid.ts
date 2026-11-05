@@ -1,170 +1,68 @@
-import { randomUUID } from "node:crypto";
 import { independentQuery, query, tx } from "@/lib/db";
 import { audit } from "@/lib/audit";
 import { HttpError, ProviderError } from "@/lib/http";
 import type { Session } from "@/lib/session";
-import { fixtureOpponents, type WdlFixture } from "@/lib/wdlFixtures";
+import { fixtureOpponents, type WdlFixture, type WdlFixtures } from "@/lib/wdlFixtures";
 import { getLeagueFixtures } from "./wardogsLeague";
 import { archiveWdlFixtures } from "./wdlFixtures";
-import { createWdlRaidEvent, deleteWdlRaidEvent, getPostedWdlEvents, getRawWdlEvent, getScheduledWdlEvents, wdlEventBody, wdlEventNames, WDL_EVENT_CHANNEL, WDL_TEST_CHANNEL } from "./wdlRaidHelper";
+import { createWdlRaidEvent, deleteWdlRaidEvent, getPostedWdlEvents, getRawWdlEvent, getScheduledWdlEvents, wdlEventBody, wdlEventNames, WDL_EVENT_CHANNEL } from "./wdlRaidHelper";
 
 type Actor = Pick<Session, "discordId" | "displayName">;
-interface TestRow {
-  id: string; title: string; state: string; scheduled_id: string | null; event_id: string | null;
-  start_time: string | null; post_at: string | null; error: string | null; created_at: Date;
-}
 
 export async function wdlRaidStatus() {
-  const [settings] = await query<{ enabled: boolean; baseline_at: Date | null; test_passed_at: Date | null; last_error: string | null }>(
-    "SELECT enabled, baseline_at, test_passed_at, last_error FROM wdl_raid_settings WHERE id = 1",
+  const [settings] = await query<{ enabled: boolean; activation_pending: boolean; baseline_at: Date | null; last_error: string | null }>(
+    "SELECT enabled, activation_pending, baseline_at, last_error FROM wdl_raid_settings WHERE id = 1",
   );
   if (!settings) throw new Error("WDL fixture migration has not been applied.");
-  const [test] = await query<TestRow>("SELECT id, title, state, scheduled_id, event_id, start_time, post_at, error, created_at FROM wdl_raid_tests ORDER BY created_at DESC LIMIT 1");
   const events = await query<{ fixture_id: string; fixture: WdlFixture; state: string; scheduled_id: string | null; event_id: string | null; event_channel_id: string | null; error: string | null }>(
     "SELECT fixture_id, fixture, state, scheduled_id, event_id, event_channel_id, error FROM wdl_fixture_events WHERE NOT baseline ORDER BY updated_at DESC LIMIT 100",
   );
   return {
-    enabled: settings.enabled, baselineAt: settings.baseline_at?.toISOString() ?? null,
-    testPassedAt: settings.test_passed_at?.toISOString() ?? null, lastError: settings.last_error,
-    test: test ? { id: test.id, title: test.title, state: test.state, scheduledId: test.scheduled_id,
-      eventId: test.event_id, error: test.error, createdAt: test.created_at.toISOString() } : null,
+    enabled: settings.enabled, activationPending: settings.activation_pending,
+    baselineAt: settings.baseline_at?.toISOString() ?? null, lastError: settings.last_error,
     events: events.map((row) => ({ fixtureId: row.fixture_id, fixture: row.fixture, state: row.state,
       scheduledId: row.scheduled_id, eventId: row.event_id, eventChannelId: row.event_channel_id, error: row.error })),
   };
 }
 export type WdlRaidStatus = Awaited<ReturnType<typeof wdlRaidStatus>>;
 
-/** Creates exactly one explicitly approved, real test event; ambiguous writes stay locked. */
-export async function createWdlRaidTest(actor: Actor) {
-  const names = await wdlEventNames();
-  const now = Math.floor(Date.now() / 1000);
-  const postAt = now + 180;
-  const briefing = postAt + 30 * 60;
-  const number = now;
-  const fixture: WdlFixture = {
-    id: `test-${randomUUID()}`, number, status: "SCHEDULED", scheduledAt: new Date((briefing + 1800) * 1000).toISOString(),
-    map: "TEST", gameMode: null, competition: null,
-    participants: [
-      { team: { code: "RMNT", name: "REMNANT" }, faction: null, finishingPosition: null, points: null, noShow: null },
-      { team: { code: "TEST-A", name: "Test A" }, faction: null, finishingPosition: null, points: null, noShow: null },
-      { team: { code: "TEST-B", name: "Test B" }, faction: null, finishingPosition: null, points: null, noShow: null },
-    ],
-  };
-  const body = wdlEventBody(fixture, names, now, { test: true, postAt });
-  const id = randomUUID();
-  const inserted = await query(
-    `INSERT INTO wdl_raid_tests (id, title, state, created_by, post_at, start_time)
-     VALUES ($1, $2, 'creating', $3, $4, $5) ON CONFLICT DO NOTHING RETURNING id`,
-    [id, body.title, actor.discordId, postAt, briefing],
-  );
-  if (!inserted.length) throw new HttpError(409, "A test is already pending or has an uncertain outcome. Check the test channel before retrying.", "wdl_test_pending");
-  try {
-    const result = await createWdlRaidEvent(WDL_TEST_CHANNEL, body);
-    await query("UPDATE wdl_raid_tests SET state = 'scheduled', scheduled_id = $2, updated_at = now() WHERE id = $1", [id, result.event.id]);
-  } catch (error) {
-    const message = error instanceof Error ? error.message : "Unknown Raid Helper error";
-    const rejected = error instanceof ProviderError && error.status !== undefined && error.status >= 400 && error.status < 500;
-    await query("UPDATE wdl_raid_tests SET state = $2, error = $3, updated_at = now() WHERE id = $1",
-      [id, rejected ? "failed" : "uncertain", message.slice(0, 500)])
-      .catch((recordError: Error) => console.error("Could not record WDL test failure:", recordError.message));
-    await audit(actor, "wdl.test_failed", "wdl_test", id, { error: message });
-    throw new HttpError(502, rejected ? `Raid Helper rejected the test: ${message}` : "Could not confirm whether Raid Helper created the test. Check the test channel and scheduled events before retrying.", "wdl_test_failed");
-  }
-  await audit(actor, "wdl.test_created", "wdl_test", id, { channelId: WDL_TEST_CHANNEL, postAt });
-  return wdlRaidStatus();
-}
-
-export async function checkWdlRaidTest() {
-  const [test] = await query<TestRow>("SELECT id, title, state, scheduled_id, event_id, start_time, post_at, error, created_at FROM wdl_raid_tests ORDER BY created_at DESC LIMIT 1");
-  if (!test || test.state !== "scheduled" || !test.scheduled_id) return wdlRaidStatus();
-  const scheduled = await getScheduledWdlEvents();
-  const queued = scheduled.find((event) => event.id === test.scheduled_id);
-  if (queued && (queued.channelId !== WDL_TEST_CHANNEL || queued.title !== test.title || queued.startTime !== Number(test.start_time) ||
-      queued.postTime !== Number(test.post_at))) {
-    throw new HttpError(502, "The scheduled test returned unexpected details. Do not enable automation.", "wdl_test_mismatch");
-  }
-  const posted = (await getPostedWdlEvents()).filter((event) => event.scheduledId === test.scheduled_id && event.channelId === WDL_TEST_CHANNEL);
-  if (posted.length > 1) throw new HttpError(409, "Multiple posted events match the test schedule. Check Discord.", "wdl_test_ambiguous");
-  if (posted.length === 1) {
-    const event = await getRawWdlEvent(posted[0]!.id);
-    const rejectPostedTest = async (message: string): Promise<never> => {
-      await query("UPDATE wdl_raid_tests SET state = 'failed', event_id = $2, error = $3, updated_at = now() WHERE id = $1 AND state = 'scheduled'",
-        [test.id, event.id, message]);
-      throw new HttpError(502, message, "wdl_test_mismatch");
-    };
-    if (event.serverId !== "1332320879073296404" || event.channelId !== WDL_TEST_CHANNEL || event.templateId !== "ct34" ||
-        event.title !== test.title || event.scheduledId !== test.scheduled_id || event.startTime !== Number(test.start_time)) {
-      return rejectPostedTest("The posted test did not match the scheduled event. Do not enable automation.");
-    }
-    if (!/^\d{15,22}$/.test(event.id) || test.post_at === null ||
-        Math.abs(Number((BigInt(event.id) >> 22n) + 1420070400000n) - Number(test.post_at) * 1000) > 5 * 60_000) {
-      return rejectPostedTest("The test message was not posted near its scheduled time. Do not enable automation.");
-    }
-    const names = await wdlEventNames();
-    const settings = event.advancedSettings;
-    if (!settings || typeof settings !== "object" || Array.isArray(settings)) {
-      return rejectPostedTest("Raid Helper did not return test event settings. Do not enable automation.");
-    }
-    const s = settings as Record<string, unknown>;
-    const isOff = (value: unknown) => value === false || value === "false";
-    const isOn = (value: unknown) => value === true || value === "true";
-    if (!isOff(s.vacuum) || !isOff(s.deletion) || !isOff(s.pin_message) ||
-        !isOff(s.create_discordevent) || !isOff(s.create_thread) || !isOff(s.show_countdown) ||
-        !isOff(s.reminder) || !isOff(s.lock_at_limit) || !isOff(s.allow_duplicate) || !isOn(s.apply_unregister) ||
-        Number(s.limit_per_user) !== 1 || (s.duration !== 0 && s.duration !== "0") ||
-        (s.deadline !== 0 && s.deadline !== "0") ||
-        event.closingTime !== event.startTime ||
-        event.leaderId !== "839225558806167582" || !Array.isArray(event.coLeaders) ||
-        !event.coLeaders.some((leader: unknown) => !!leader && typeof leader === "object" && "id" in leader && leader.id === "343806666699046933") ||
-        s.allowed_roles !== names.role || s.mentions !== names.role ||
-        s.voice_channel !== names.voice || s.opt_out !== "none" || s.response !== "none" ||
-        !isOff(s.temp_voicechannel) || s.tr_include !== "signed+tentative" ||
-        typeof s.temp_role !== "string" || !s.temp_role.startsWith(test.title) ||
-        !Array.isArray(event.announcements) || event.announcements.length !== 0 ||
-        (s.dkp_amount !== 0 && s.dkp_amount !== "0") ||
-        typeof event.description !== "string" ||
-        !event.description.includes(`<t:${event.startTime}:F>`) || !event.description.includes(`<t:${event.startTime + 1800}:F>`)) {
-      return rejectPostedTest("The posted test settings differ from the approved configuration. Inspect Raid Helper before enabling automation.");
-    }
-    await query("UPDATE wdl_raid_tests SET state = 'posted', event_id = $2, updated_at = now() WHERE id = $1 AND state = 'scheduled'", [test.id, event.id]);
-  } else if (!queued && test.post_at !== null && Number(test.post_at) + 300 < Math.floor(Date.now() / 1000)) {
-    await query("UPDATE wdl_raid_tests SET state = 'uncertain', error = $2, updated_at = now() WHERE id = $1 AND state = 'scheduled'",
-      [test.id, "The test is no longer scheduled and no posted message was found. Check Raid Helper before retrying."]);
-  }
-  return wdlRaidStatus();
-}
-
-/** A human must inspect the real test before automation is allowed to start. */
-export async function approveWdlRaidTest(testId: string, actor: Actor) {
-  const [verified] = await query<{ state: string }>("SELECT state FROM wdl_raid_tests WHERE id = $1", [testId]);
-  if (verified?.state !== "posted") throw new HttpError(409, "The test must be posted and verified before enabling automation.", "wdl_test_incomplete");
-  const snapshot = await getLeagueFixtures(true);
-  if (snapshot.stale) throw new HttpError(503, "Current WDL fixtures are unavailable; cannot establish the initial baseline.", "wdl_stale");
-  await archiveWdlFixtures(snapshot.data);
-  let baselineCount = 0;
-  await tx(async (client) => {
-    const test = await client.query<{ state: string }>("SELECT state FROM wdl_raid_tests WHERE id = $1 FOR UPDATE", [testId]);
-    if (test.rows[0]?.state !== "posted") throw new HttpError(409, "The test must be posted and verified before enabling automation.", "wdl_test_incomplete");
-    const settings = await client.query<{ baseline_at: Date | null }>("SELECT baseline_at FROM wdl_raid_settings WHERE id = 1 FOR UPDATE");
-    if (!settings.rows[0]) throw new Error("WDL fixture migration has not been applied.");
-    if (settings.rows[0].baseline_at === null) {
-      for (const fixture of [...snapshot.data.upcoming, ...snapshot.data.recent]) {
+async function activateWdlRaidAutomation(fixtures: WdlFixtures, pendingOnly: boolean) {
+  return tx(async (client) => {
+    const settings = await client.query<{ enabled: boolean; activation_pending: boolean; baseline_at: Date | null }>(
+      "SELECT enabled, activation_pending, baseline_at FROM wdl_raid_settings WHERE id = 1 FOR UPDATE",
+    );
+    const current = settings.rows[0];
+    if (!current) throw new Error("WDL fixture migration has not been applied.");
+    if (pendingOnly && !current.activation_pending) return null;
+    let baselineCount = 0;
+    if (current.baseline_at === null) {
+      for (const fixture of [...fixtures.upcoming, ...fixtures.recent]) {
         await client.query(
           `INSERT INTO wdl_fixture_events (fixture_id, fixture, baseline, state) VALUES ($1, $2, true, 'baseline')
            ON CONFLICT (fixture_id) DO NOTHING`,
           [fixture.id, JSON.stringify(fixture)],
         );
       }
-      baselineCount = snapshot.data.upcoming.length + snapshot.data.recent.length;
+      baselineCount = fixtures.upcoming.length + fixtures.recent.length;
     }
-    await client.query("UPDATE wdl_raid_settings SET enabled = true, baseline_at = COALESCE(baseline_at, now()), test_passed_at = now(), last_error = NULL WHERE id = 1");
+    await client.query(
+      "UPDATE wdl_raid_settings SET enabled = true, activation_pending = false, baseline_at = COALESCE(baseline_at, now()), last_error = NULL WHERE id = 1",
+    );
+    return baselineCount;
   });
-  await audit(actor, "wdl.automation_enabled", "wdl_test", testId, { baselineCount });
+}
+
+export async function enableWdlRaidAutomation(actor: Actor) {
+  const snapshot = await getLeagueFixtures(true);
+  if (snapshot.stale) throw new HttpError(503, "Current WDL fixtures are unavailable; cannot enable automation.", "wdl_stale");
+  await archiveWdlFixtures(snapshot.data);
+  const baselineCount = await activateWdlRaidAutomation(snapshot.data, false);
+  await audit(actor, "wdl.automation_enabled", "wdl", "fixtures", { baselineCount });
   return wdlRaidStatus();
 }
 
 export async function disableWdlRaidAutomation(actor: Actor) {
-  await query("UPDATE wdl_raid_settings SET enabled = false WHERE id = 1");
+  await query("UPDATE wdl_raid_settings SET enabled = false, activation_pending = false WHERE id = 1");
   await audit(actor, "wdl.automation_disabled", "wdl", "fixtures");
   return wdlRaidStatus();
 }
@@ -236,44 +134,6 @@ export async function recoverScheduledWdlEvent(fixtureId: string, scheduledId: s
   }
   if (!updated.length) throw new HttpError(409, "The fixture changed while it was being reviewed.", "wdl_not_review");
   await audit(actor, "wdl.schedule_linked", "wdl_fixture", fixtureId, { scheduledId });
-  return wdlRaidStatus();
-}
-
-export async function recoverWdlRaidTest(testId: string, scheduledId: string, actor: Actor) {
-  const [test] = await query<TestRow>(
-    "SELECT id, title, state, scheduled_id, event_id, start_time, post_at, error, created_at FROM wdl_raid_tests WHERE id = $1", [testId],
-  );
-  if (!test || !["creating", "uncertain"].includes(test.state)) throw new HttpError(409, "This test is not awaiting recovery.", "wdl_test_pending");
-  if (test.state === "creating" && Date.now() - test.created_at.getTime() < 60_000) throw new HttpError(409, "Test creation may still be in progress. Wait before recovering it.", "wdl_creation_in_progress");
-  const scheduled = (await getScheduledWdlEvents()).find((event) => event.id === scheduledId);
-  const posted = (await getPostedWdlEvents()).filter((event) => event.scheduledId === scheduledId && event.channelId === WDL_TEST_CHANNEL);
-  if ((!scheduled || scheduled.channelId !== WDL_TEST_CHANNEL || scheduled.title !== test.title || scheduled.startTime !== Number(test.start_time)) &&
-      (posted.length !== 1 || posted[0]!.title !== test.title || posted[0]!.startTime !== Number(test.start_time))) {
-    throw new HttpError(400, "The scheduled event does not match the test. Check its ID and channel.", "wdl_test_mismatch");
-  }
-  const updated = await query("UPDATE wdl_raid_tests SET state = 'scheduled', scheduled_id = $2, error = NULL, updated_at = now() WHERE id = $1 AND state = ANY($3::text[]) RETURNING id",
-    [testId, scheduledId, ["creating", "uncertain"]]);
-  if (!updated.length) throw new HttpError(409, "The test changed while it was being reviewed.", "wdl_test_pending");
-  await audit(actor, "wdl.test_recovered", "wdl_test", testId, { scheduledId });
-  return checkWdlRaidTest();
-}
-
-export async function clearUncertainWdlTest(testId: string, actor: Actor) {
-  const [test] = await query<TestRow>(
-    "SELECT id, title, state, scheduled_id, event_id, start_time, post_at, error, created_at FROM wdl_raid_tests WHERE id = $1", [testId],
-  );
-  if (!test || !["creating", "uncertain"].includes(test.state)) throw new HttpError(409, "This test is not awaiting recovery.", "wdl_test_pending");
-  if (test.state === "creating" && Date.now() - test.created_at.getTime() < 60_000) throw new HttpError(409, "Test creation may still be in progress. Wait before clearing it.", "wdl_creation_in_progress");
-  const [scheduled, posted] = await Promise.all([getScheduledWdlEvents(), getPostedWdlEvents()]);
-  if ([...scheduled, ...posted].some((event) => event.channelId === WDL_TEST_CHANNEL && event.title === test.title && event.startTime === Number(test.start_time))) {
-    throw new HttpError(409, "A matching test event exists in Raid Helper. Recover it instead of creating another.", "wdl_test_found");
-  }
-  const cleared = await query(
-    "UPDATE wdl_raid_tests SET state = 'failed', error = $2, updated_at = now() WHERE id = $1 AND state = ANY($3::text[]) RETURNING id",
-    [testId, "Cleared by the owner after checking Raid Helper; no matching event was listed.", ["creating", "uncertain"]],
-  );
-  if (!cleared.length) throw new HttpError(409, "The test changed while it was being reviewed.", "wdl_test_pending");
-  await audit(actor, "wdl.test_cleared", "wdl_test", testId);
   return wdlRaidStatus();
 }
 
@@ -388,8 +248,18 @@ export async function wdlFixtureTick() {
   const snapshot = await getLeagueFixtures(true);
   if (snapshot.stale) throw new Error(snapshot.error ?? "Wardogs League fixtures are stale.");
   await archiveWdlFixtures(snapshot.data);
-  const [settings] = await query<{ enabled: boolean; baseline_at: Date | null }>("SELECT enabled, baseline_at FROM wdl_raid_settings WHERE id = 1");
+  const [settings] = await query<{ enabled: boolean; activation_pending: boolean; baseline_at: Date | null }>(
+    "SELECT enabled, activation_pending, baseline_at FROM wdl_raid_settings WHERE id = 1",
+  );
   if (!settings) throw new Error("WDL fixture migration has not been applied.");
+  if (settings.activation_pending) {
+    const baselineCount = await activateWdlRaidAutomation(snapshot.data, true);
+    if (baselineCount !== null) {
+      await audit({ discordId: "system:wdl", displayName: "WDL fixture worker" }, "wdl.automation_enabled", "wdl", "fixtures",
+        { baselineCount, source: "deployment" });
+    }
+    return;
+  }
   if (!settings.enabled) return;
   if (!settings.baseline_at) throw new Error("WDL fixture automation has no initial baseline.");
 

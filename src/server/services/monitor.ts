@@ -74,9 +74,9 @@ export async function getHealth(force = false): Promise<Component[]> {
       "wdl-fixtures",
       "WDL fixture integration",
       async () => {
-        const [row] = await query<{ enabled: boolean; last_error: string | null }>("SELECT enabled, last_error FROM wdl_raid_settings WHERE id = 1");
+        const [row] = await query<{ enabled: boolean; activation_pending: boolean; last_error: string | null }>("SELECT enabled, activation_pending, last_error FROM wdl_raid_settings WHERE id = 1");
         if (!row) throw new Error("WDL fixture migration has not been applied.");
-        return row.last_error ? { ok: false, detail: row.last_error } : { ok: true, detail: row.enabled ? null : "Automatic event creation is off" };
+        return row.last_error ? { ok: false, detail: row.last_error } : { ok: true, detail: row.enabled ? null : row.activation_pending ? "Waiting for a fresh WDL baseline" : "Automatic event creation is off" };
       },
     ],
     [

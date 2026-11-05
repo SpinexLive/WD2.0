@@ -4,7 +4,7 @@ import pg from "pg";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
-  client: null as import("pg").Client | null,
+  client: null as import("pg").Client | null, migrationPending: false,
   fixtures: vi.fn(), archive: vi.fn(), names: vi.fn(), create: vi.fn(), scheduled: vi.fn(),
   posted: vi.fn(), raw: vi.fn(), remove: vi.fn(), audit: vi.fn(),
 }));
@@ -34,14 +34,11 @@ vi.mock("@/server/services/wdlRaidHelper", async (original) => {
     getPostedWdlEvents: mocks.posted, getRawWdlEvent: mocks.raw, deleteWdlRaidEvent: mocks.remove };
 });
 
-import { ProviderError } from "@/lib/http";
-import { approveWdlRaidTest, checkWdlRaidTest, clearUncertainWdlTest, createWdlRaidTest, deleteReviewedWdlEvent, linkExistingWdlEvent, recoverScheduledWdlEvent, recoverWdlRaidTest, retryReviewedWdlFixture, wdlFixtureTick, wdlRaidStatus } from "@/server/services/wdlRaid";
+import { deleteReviewedWdlEvent, disableWdlRaidAutomation, enableWdlRaidAutomation, linkExistingWdlEvent, recoverScheduledWdlEvent, retryReviewedWdlFixture, wdlFixtureTick, wdlRaidStatus } from "@/server/services/wdlRaid";
 import type { WdlFixture } from "@/lib/wdlFixtures";
 
 const actor = { discordId: "839225558806167582", displayName: "Owner" };
-const testChannel = "1546184970706616412";
 const productionChannel = "1546479425644793877";
-const messageAt = (seconds: number) => String((BigInt(seconds) * 1000n - 1420070400000n) << 22n);
 const names = { role: "Wardogs Member", voice: "Briefing", roleNames: [] };
 const makeFixture = (id: string, number: number): WdlFixture => ({
   id, number, status: "SCHEDULED", scheduledAt: new Date(Date.now() + 20 * 86400_000).toISOString(),
@@ -60,6 +57,10 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)("WDL fixture automation with Pos
     await mocks.client.connect();
     const migration = await readFile(resolve(process.cwd(), "migrations", "034_wdl_fixtures.sql"), "utf8");
     await mocks.client.query(migration.replace(/CREATE TABLE/g, "CREATE TEMP TABLE"));
+    const activation = await readFile(resolve(process.cwd(), "migrations", "035_enable_wdl_automation.sql"), "utf8");
+    await mocks.client.query(activation);
+    mocks.migrationPending = (await mocks.client.query("SELECT activation_pending FROM wdl_raid_settings")).rows[0].activation_pending;
+    await mocks.client.query("UPDATE wdl_raid_settings SET activation_pending = false");
     mocks.fixtures.mockResolvedValue(snapshot([]));
     mocks.archive.mockResolvedValue(undefined);
     mocks.names.mockResolvedValue(names);
@@ -78,143 +79,73 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)("WDL fixture automation with Pos
     expect((await wdlRaidStatus()).enabled).toBe(false);
   });
 
-  it("schedules an explicit test and refuses a second pending test", async () => {
-    const status = await createWdlRaidTest(actor);
-    expect(status.test).toMatchObject({ state: "scheduled", scheduledId: "scheduled-id" });
-    expect(mocks.create).toHaveBeenCalledWith(testChannel, expect.objectContaining({
-      title: expect.stringContaining("[TEST]"),
-      schedule: expect.any(Number),
-      advancedSettings: expect.objectContaining({ reminder: false, mentions: names.role, vacuum: false }),
-    }));
-    const body = mocks.create.mock.calls[0]![1];
-    expect(Number(body.date) - body.schedule).toBe(1800);
-    await expect(createWdlRaidTest(actor)).rejects.toMatchObject({ code: "wdl_test_pending" });
-    expect(mocks.create).toHaveBeenCalledOnce();
+  it("requests activation when the deployment migration is applied", () => {
+    expect(mocks.migrationPending).toBe(true);
   });
 
-  it("does not create a test when Discord role verification fails", async () => {
-    mocks.names.mockRejectedValue(new ProviderError("discord", "Forbidden", 403));
-    await expect(createWdlRaidTest(actor)).rejects.toThrow("Forbidden");
-    expect(mocks.create).not.toHaveBeenCalled();
-    expect((await wdlRaidStatus()).test).toBeNull();
-  });
-
-  it("requires a matching posted test before enabling and baselines existing fixtures", async () => {
-    const test = await createWdlRaidTest(actor);
-    await expect(approveWdlRaidTest(test.test!.id, actor)).rejects.toMatchObject({ code: "wdl_test_incomplete" });
-    const sent = mocks.create.mock.calls[0]![1];
-    const postedId = messageAt(sent.schedule);
-    mocks.posted.mockResolvedValue([{ id: postedId, channelId: testChannel, scheduledId: "scheduled-id" }]);
-    mocks.raw.mockResolvedValue({
-      id: postedId, serverId: "1332320879073296404", channelId: testChannel, templateId: "ct34",
-      title: sent.title, scheduledId: "scheduled-id", startTime: Number(sent.date), closingTime: Number(sent.date),
-      leaderId: "839225558806167582", coLeaders: [{ id: "343806666699046933" }],
-      description: sent.description, announcements: [],
-      advancedSettings: { ...sent.advancedSettings, duration: 0, dkp_amount: 0 },
-    });
-    expect((await checkWdlRaidTest()).test).toMatchObject({ state: "posted", eventId: postedId });
+  it("activates without a test after baselining a fresh snapshot", async () => {
     const old = makeFixture("old", 1);
     const recent = { ...makeFixture("recent", 2), status: "COMPLETED" };
     mocks.fixtures.mockResolvedValue({ ...snapshot([old]), data: { upcoming: [old], recent: [recent] } });
-    expect((await approveWdlRaidTest(test.test!.id, actor)).enabled).toBe(true);
+    await mocks.client!.query("UPDATE wdl_raid_settings SET activation_pending = true");
+    await wdlFixtureTick();
+    expect(await wdlRaidStatus()).toMatchObject({ enabled: true, activationPending: false, baselineAt: expect.any(String) });
+    expect(mocks.create).not.toHaveBeenCalled();
     const rows = (await mocks.client!.query("SELECT fixture_id, state, baseline FROM wdl_fixture_events ORDER BY fixture_id")).rows;
     expect(rows).toEqual([
       { fixture_id: "old", state: "baseline", baseline: true },
       { fixture_id: "recent", state: "baseline", baseline: true },
     ]);
+    mocks.fixtures.mockResolvedValue(snapshot([old, makeFixture("new", 3)]));
+    await wdlFixtureTick();
+    expect(mocks.create).toHaveBeenCalledOnce();
   });
 
   it("does not re-baseline new fixtures when re-enabling after a pause", async () => {
-    const test = await createWdlRaidTest(actor);
-    const sent = mocks.create.mock.calls[0]![1];
-    const postedId = messageAt(sent.schedule);
-    mocks.posted.mockResolvedValue([{ id: postedId, channelId: testChannel, scheduledId: "scheduled-id" }]);
-    mocks.raw.mockResolvedValue({
-      id: postedId, serverId: "1332320879073296404", channelId: testChannel, templateId: "ct34",
-      title: sent.title, scheduledId: "scheduled-id", startTime: Number(sent.date), closingTime: Number(sent.date),
-      leaderId: "839225558806167582", coLeaders: [{ id: "343806666699046933" }],
-      description: sent.description, announcements: [],
-      advancedSettings: { ...sent.advancedSettings, duration: 0, dkp_amount: 0 },
-    });
-    await checkWdlRaidTest();
     mocks.fixtures.mockResolvedValue(snapshot([makeFixture("old", 1)]));
-    await approveWdlRaidTest(test.test!.id, actor);
-    await mocks.client!.query("UPDATE wdl_raid_settings SET enabled = false");
+    await enableWdlRaidAutomation(actor);
+    await disableWdlRaidAutomation(actor);
     mocks.fixtures.mockResolvedValue(snapshot([makeFixture("old", 1), makeFixture("new", 2)]));
-    await approveWdlRaidTest(test.test!.id, actor);
+    await enableWdlRaidAutomation(actor);
     expect((await mocks.client!.query("SELECT fixture_id FROM wdl_fixture_events ORDER BY fixture_id")).rows).toEqual([{ fixture_id: "old" }]);
-  });
-
-  it("refuses to pass a posted test with unsafe effective settings", async () => {
-    await createWdlRaidTest(actor);
-    const sent = mocks.create.mock.calls[0]![1];
-    const postedId = messageAt(sent.schedule);
-    mocks.posted.mockResolvedValue([{ id: postedId, channelId: testChannel, scheduledId: "scheduled-id" }]);
-    mocks.raw.mockResolvedValue({
-      id: postedId, serverId: "1332320879073296404", channelId: testChannel, templateId: "ct34",
-      title: sent.title, scheduledId: "scheduled-id", startTime: Number(sent.date), closingTime: Number(sent.date),
-      leaderId: "839225558806167582", coLeaders: [{ id: "343806666699046933" }],
-      description: sent.description, announcements: [],
-      advancedSettings: { ...sent.advancedSettings, duration: 0, dkp_amount: 0, vacuum: true },
-    });
-    await expect(checkWdlRaidTest()).rejects.toMatchObject({ code: "wdl_test_mismatch" });
-    expect((await wdlRaidStatus()).enabled).toBe(false);
-    expect((await wdlRaidStatus()).test).toMatchObject({ state: "failed", eventId: postedId });
-  });
-
-  it("refuses to pass a test whose scheduled posting time differs", async () => {
-    await createWdlRaidTest(actor);
-    const sent = mocks.create.mock.calls[0]![1];
-    mocks.scheduled.mockResolvedValue([{ id: "scheduled-id", channelId: testChannel, title: sent.title,
-      startTime: Number(sent.date), postTime: sent.schedule + 60 }]);
-    await expect(checkWdlRaidTest()).rejects.toMatchObject({ code: "wdl_test_mismatch" });
-    expect((await wdlRaidStatus()).enabled).toBe(false);
-  });
-
-  it("refuses to pass a test posted substantially away from its scheduled time", async () => {
-    await createWdlRaidTest(actor);
-    const sent = mocks.create.mock.calls[0]![1];
-    const postedId = messageAt(sent.schedule + 600);
-    mocks.posted.mockResolvedValue([{ id: postedId, channelId: testChannel, scheduledId: "scheduled-id" }]);
-    mocks.raw.mockResolvedValue({ id: postedId, serverId: "1332320879073296404", channelId: testChannel, templateId: "ct34",
-      title: sent.title, scheduledId: "scheduled-id", startTime: Number(sent.date) });
-    await expect(checkWdlRaidTest()).rejects.toMatchObject({ code: "wdl_test_mismatch", message: expect.stringContaining("scheduled time") });
-  });
-
-  it("keeps a test with an uncertain creation result locked against retries", async () => {
-    mocks.create.mockRejectedValue(new Error("network timeout"));
-    await expect(createWdlRaidTest(actor)).rejects.toMatchObject({ code: "wdl_test_failed" });
-    expect((await wdlRaidStatus()).test?.state).toBe("uncertain");
-    await expect(createWdlRaidTest(actor)).rejects.toMatchObject({ code: "wdl_test_pending" });
+    await wdlFixtureTick();
     expect(mocks.create).toHaveBeenCalledOnce();
   });
 
-  it("flags a test if the scheduled event disappears without a matching posted message", async () => {
-    await createWdlRaidTest(actor);
-    await mocks.client!.query("UPDATE wdl_raid_tests SET post_at = 1");
-    expect((await checkWdlRaidTest()).test).toMatchObject({ state: "uncertain", error: expect.stringContaining("no posted message") });
-    expect((await wdlRaidStatus()).enabled).toBe(false);
+  it("waits for fresh WDL data before activating and retries on recovery", async () => {
+    await mocks.client!.query("UPDATE wdl_raid_settings SET activation_pending = true");
+    mocks.fixtures.mockResolvedValueOnce({ ...snapshot([makeFixture("old", 1)]), stale: true, error: "WDL unavailable" })
+      .mockResolvedValue(snapshot([makeFixture("old", 1)]));
+    await expect(wdlFixtureTick()).rejects.toThrow("WDL unavailable");
+    expect(await wdlRaidStatus()).toMatchObject({ enabled: false, activationPending: true, baselineAt: null });
+    await wdlFixtureTick();
+    expect(await wdlRaidStatus()).toMatchObject({ enabled: true, activationPending: false });
+    expect(mocks.create).not.toHaveBeenCalled();
   });
 
-  it("recovers an uncertain test only after verifying the scheduled event", async () => {
-    mocks.create.mockRejectedValue(new Error("network timeout"));
-    await expect(createWdlRaidTest(actor)).rejects.toMatchObject({ code: "wdl_test_failed" });
-    const test = (await wdlRaidStatus()).test!;
-    const sent = mocks.create.mock.calls[0]![1];
-    mocks.scheduled.mockResolvedValue([{ id: "recovered", channelId: testChannel, title: sent.title, startTime: Number(sent.date), postTime: sent.schedule }]);
-    expect((await recoverWdlRaidTest(test.id, "recovered", actor)).test).toMatchObject({ state: "scheduled", scheduledId: "recovered" });
-    expect(mocks.create).toHaveBeenCalledOnce();
+  it("lets the owner cancel pending activation before a worker can enable it", async () => {
+    await mocks.client!.query("UPDATE wdl_raid_settings SET activation_pending = true");
+    await disableWdlRaidAutomation(actor);
+    mocks.fixtures.mockResolvedValue(snapshot([makeFixture("old", 1)]));
+    await wdlFixtureTick();
+    expect(await wdlRaidStatus()).toMatchObject({ enabled: false, activationPending: false, baselineAt: null });
+    expect(mocks.create).not.toHaveBeenCalled();
   });
 
-  it("only clears an uncertain test after checking both Raid Helper event lists", async () => {
-    mocks.create.mockRejectedValue(new Error("network timeout"));
-    await expect(createWdlRaidTest(actor)).rejects.toMatchObject({ code: "wdl_test_failed" });
-    const test = (await wdlRaidStatus()).test!;
-    const sent = mocks.create.mock.calls[0]![1];
-    mocks.scheduled.mockResolvedValue([{ id: "found", channelId: testChannel, title: sent.title, startTime: Number(sent.date), postTime: sent.schedule }]);
-    await expect(clearUncertainWdlTest(test.id, actor)).rejects.toMatchObject({ code: "wdl_test_found" });
-    mocks.scheduled.mockResolvedValue([]);
-    expect((await clearUncertainWdlTest(test.id, actor)).test?.state).toBe("failed");
+  it("does not activate if the fixture archive cannot be persisted", async () => {
+    await mocks.client!.query("UPDATE wdl_raid_settings SET activation_pending = true");
+    mocks.fixtures.mockResolvedValue(snapshot([makeFixture("old", 1)]));
+    mocks.archive.mockRejectedValue(new Error("Database unavailable"));
+    await expect(wdlFixtureTick()).rejects.toThrow("Database unavailable");
+    expect(await wdlRaidStatus()).toMatchObject({ enabled: false, activationPending: true, baselineAt: null });
+    expect((await mocks.client!.query("SELECT count(*)::int AS n FROM wdl_fixture_events")).rows[0].n).toBe(0);
+    expect(mocks.create).not.toHaveBeenCalled();
+  });
+
+  it("refuses manual activation with stale WDL data", async () => {
+    mocks.fixtures.mockResolvedValue({ ...snapshot([]), stale: true });
+    await expect(enableWdlRaidAutomation(actor)).rejects.toMatchObject({ code: "wdl_stale" });
+    expect(await wdlRaidStatus()).toMatchObject({ enabled: false, baselineAt: null });
   });
 
   it("ignores baselined fixtures and schedules a newly observed one only once", async () => {

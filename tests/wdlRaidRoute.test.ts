@@ -1,14 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
 
-const mocks = vi.hoisted(() => ({ session: vi.fn(), rate: vi.fn(), status: vi.fn(), create: vi.fn(), check: vi.fn(), clear: vi.fn(), approve: vi.fn(), disable: vi.fn(), link: vi.fn(), scheduled: vi.fn(), recover: vi.fn(), retry: vi.fn(), remove: vi.fn() }));
+const mocks = vi.hoisted(() => ({ session: vi.fn(), rate: vi.fn(), status: vi.fn(), enable: vi.fn(), disable: vi.fn(), link: vi.fn(), scheduled: vi.fn(), retry: vi.fn(), remove: vi.fn() }));
 vi.mock("@/lib/session", () => ({ getSession: mocks.session }));
 vi.mock("@/lib/ratelimit", () => ({ rateLimit: mocks.rate }));
 vi.mock("@/lib/env", () => ({ env: () => ({ OWNER_DISCORD_ID: "owner", APP_URL: "https://dashboard.test" }) }));
 vi.mock("@/server/services/wdlRaid", () => ({
-  wdlRaidStatus: mocks.status, createWdlRaidTest: mocks.create, checkWdlRaidTest: mocks.check, clearUncertainWdlTest: mocks.clear,
-  approveWdlRaidTest: mocks.approve, disableWdlRaidAutomation: mocks.disable, linkExistingWdlEvent: mocks.link,
-  recoverScheduledWdlEvent: mocks.scheduled, recoverWdlRaidTest: mocks.recover, deleteReviewedWdlEvent: mocks.remove,
+  wdlRaidStatus: mocks.status, enableWdlRaidAutomation: mocks.enable, disableWdlRaidAutomation: mocks.disable, linkExistingWdlEvent: mocks.link,
+  recoverScheduledWdlEvent: mocks.scheduled, deleteReviewedWdlEvent: mocks.remove,
   retryReviewedWdlFixture: mocks.retry,
 }));
 
@@ -25,27 +24,27 @@ beforeEach(() => {
   mocks.session.mockResolvedValue(owner);
   mocks.rate.mockResolvedValue(0);
   mocks.status.mockResolvedValue({ enabled: false });
-  mocks.create.mockResolvedValue({ enabled: false });
+  mocks.enable.mockResolvedValue({ enabled: true });
 });
 
-describe("WDL Admin test route", () => {
-  it("only lets the owner read status or schedule a test", async () => {
+describe("WDL Admin automation route", () => {
+  it("only lets the owner read status or enable automation", async () => {
     mocks.session.mockResolvedValue({ ...owner, discordId: "other" });
     expect((await GET(get(), context)).status).toBe(404);
-    expect((await POST(post({ action: "test" }), context)).status).toBe(404);
-    expect(mocks.create).not.toHaveBeenCalled();
+    expect((await POST(post({ action: "enable" }), context)).status).toBe(404);
+    expect(mocks.enable).not.toHaveBeenCalled();
   });
   it("enforces CSRF, read-only view-as, and action validation", async () => {
-    expect((await POST(post({ action: "test" }, "wrong"), context)).status).toBe(403);
-    expect((await POST(post({ action: "approve", testId: "invalid" }), context)).status).toBe(400);
+    expect((await POST(post({ action: "enable" }, "wrong"), context)).status).toBe(403);
+    expect((await POST(post({ action: "test" }), context)).status).toBe(400);
     mocks.session.mockResolvedValue({ ...owner, viewingAs: { adminId: "owner", adminName: "Owner" } });
-    expect((await POST(post({ action: "test" }), context)).status).toBe(403);
-    expect(mocks.create).not.toHaveBeenCalled();
+    expect((await POST(post({ action: "enable" }), context)).status).toBe(403);
+    expect(mocks.enable).not.toHaveBeenCalled();
   });
-  it("only sends the test after the owner posts the action", async () => {
+  it("enables only when the owner posts the action", async () => {
     expect((await GET(get(), context)).status).toBe(200);
-    expect(mocks.create).not.toHaveBeenCalled();
-    expect((await POST(post({ action: "test" }), context)).status).toBe(200);
-    expect(mocks.create).toHaveBeenCalledWith(owner);
+    expect(mocks.enable).not.toHaveBeenCalled();
+    expect((await POST(post({ action: "enable" }), context)).status).toBe(200);
+    expect(mocks.enable).toHaveBeenCalledWith(owner);
   });
 });
