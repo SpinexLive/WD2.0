@@ -223,7 +223,10 @@ function sameRosterContent(previous: Roster, input: SaveInput): boolean {
 /** Replaces squads and assignments if `version` is still current; otherwise reports a conflict instead of overwriting. */
 export async function saveRoster(eventId: string, input: SaveInput, editorId: string): Promise<Roster> {
   const seen = new Set<string>();
+  const squadIds = new Set<string>();
   for (const s of input.squads) {
+    if (squadIds.has(s.id)) throw new HttpError(400, "Each squad must have a unique ID.", "invalid_roster");
+    squadIds.add(s.id);
     if (s.slots.length !== s.size) throw new HttpError(400, `${s.name}: slots must match squad size`, "invalid_roster");
     if (s.slots.filter((p) => p?.isLeader).length > 1) throw new HttpError(400, `${s.name} has more than one leader`, "invalid_roster");
     for (const p of s.slots) {
@@ -260,8 +263,8 @@ export async function saveRoster(eventId: string, input: SaveInput, editorId: st
       });
     }
     const rosterId = upd.rows[0].id as string;
-    const before = await c.query<{ discord_id: string; name: string }>(
-      "SELECT a.discord_id, s.name FROM roster_assignments a JOIN roster_squads s ON s.id = a.squad_id WHERE a.roster_id = $1",
+    const before = await c.query<{ discord_id: string | null; squad_id: string }>(
+      "SELECT discord_id, squad_id FROM roster_assignments WHERE roster_id = $1",
       [rosterId],
     );
     const previousSquads = await c.query<{ id: string; compare_kd: boolean }>(
@@ -272,8 +275,8 @@ export async function saveRoster(eventId: string, input: SaveInput, editorId: st
     await c.query("DELETE FROM roster_squads WHERE roster_id = $1", [rosterId]);
     await insertSquads(c, rosterId, input.squads.map((s) => ({ ...s, compareKd: s.compareKd ?? previousComparison.get(s.id) ?? false })));
     // A player who was removed or moved to a different squad has to confirm again.
-    const now = new Map(input.squads.flatMap((s) => s.slots.flatMap((p) => (p?.discordId ? [[p.discordId, s.name] as const] : []))));
-    const stale = before.rows.filter((b) => now.get(b.discord_id) !== b.name).map((b) => b.discord_id);
+    const now = new Map(input.squads.flatMap((s) => s.slots.flatMap((p) => (p?.discordId ? [[p.discordId, s.id] as const] : []))));
+    const stale = before.rows.flatMap((b) => b.discord_id && now.get(b.discord_id) !== b.squad_id ? [b.discord_id] : []);
     if (stale.length) await c.query("DELETE FROM roster_responses WHERE roster_id = $1 AND discord_id = ANY($2::text[])", [rosterId, stale]);
   });
   publish("roster", { eventId });

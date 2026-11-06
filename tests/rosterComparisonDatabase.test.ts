@@ -123,4 +123,83 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)("saved squad comparison with Pos
     }), "editor");
     expect(Date.parse(changed.contentUpdatedAt!)).toBeGreaterThan(Date.parse(before.contentUpdatedAt!));
   });
+
+  it("preserves confirmed and declined responses through a squad rename and later saves", async () => {
+    const secondPlayer = "100000000000000002";
+    await mocks.client!.query(`
+      INSERT INTO roster_assignments (roster_id, squad_id, slot_index, discord_id, display_name, is_leader)
+      SELECT roster_id, id, 1, $1, 'Second player', false FROM roster_squads`, [secondPlayer]);
+    await mocks.client!.query(`
+      INSERT INTO roster_responses (roster_id, discord_id, response)
+      SELECT id, $1, 'confirmed' FROM rosters UNION ALL
+      SELECT id, $2, 'declined' FROM rosters`, [playerId, secondPlayer]);
+    const before = (await getRoster("event1"))!;
+    const renamed = await saveRoster("event1", saveSchema.parse({
+      version: before.version, settings: before.settings,
+      squads: before.squads.map((squad) => ({ ...squad, name: "Bravo", category: "BRAVO" })),
+    }), "editor");
+    expect(renamed.responses).toEqual({ [playerId]: "confirmed", [secondPlayer]: "declined" });
+    expect(Date.parse(renamed.contentUpdatedAt!)).toBeGreaterThan(Date.parse(before.contentUpdatedAt!));
+    const savedAgain = await saveRoster("event1", saveSchema.parse({
+      version: renamed.version, settings: renamed.settings, squads: renamed.squads,
+    }), "editor");
+    expect(savedAgain.responses).toEqual({ [playerId]: "confirmed", [secondPlayer]: "declined" });
+  });
+
+  it("clears confirmations for moves to a different squad even when names match", async () => {
+    await mocks.client!.query(`
+      INSERT INTO roster_squads (roster_id, position, name, category, size, leader_required)
+      SELECT id, 1, 'Alpha', 'INFANTRY', 2, false FROM rosters`);
+    await mocks.client!.query("INSERT INTO roster_responses (roster_id, discord_id, response) SELECT id, $1, 'confirmed' FROM rosters", [playerId]);
+    const before = (await getRoster("event1"))!;
+    const player = before.squads[0]!.slots[0]!;
+    const moved = before.squads.map((squad, index) => ({
+      ...squad, slots: index === 0 ? [null, null] : [player, null],
+    }));
+    const saved = await saveRoster("event1", saveSchema.parse({ version: before.version, settings: before.settings, squads: moved }), "editor");
+    expect(saved.responses).toEqual({});
+    expect(saved.squads[1]!.slots[0]!.discordId).toBe(playerId);
+  });
+
+  it("clears a response when a player moves into a newly created squad", async () => {
+    await mocks.client!.query("INSERT INTO roster_responses (roster_id, discord_id, response) SELECT id, $1, 'declined' FROM rosters", [playerId]);
+    const before = (await getRoster("event1"))!;
+    const squad = before.squads[0]!;
+    const saved = await saveRoster("event1", saveSchema.parse({
+      version: before.version, settings: before.settings,
+      squads: [
+        { ...squad, slots: [null, null] },
+        { ...squad, id: "new-squad", name: "Bravo" },
+      ],
+    }), "editor");
+    expect(saved.responses).toEqual({});
+    expect(saved.squads[1]!.slots[0]!.discordId).toBe(playerId);
+  });
+
+  it("keeps a confirmation when moving within a squad and clears it when removed", async () => {
+    await mocks.client!.query("INSERT INTO roster_responses (roster_id, discord_id, response) SELECT id, $1, 'confirmed' FROM rosters", [playerId]);
+    const before = (await getRoster("event1"))!;
+    const player = before.squads[0]!.slots[0]!;
+    const moved = await saveRoster("event1", saveSchema.parse({
+      version: before.version, settings: before.settings,
+      squads: before.squads.map((squad) => ({ ...squad, slots: [null, player] })),
+    }), "editor");
+    expect(moved.responses).toEqual({ [playerId]: "confirmed" });
+    const removed = await saveRoster("event1", saveSchema.parse({
+      version: moved.version, settings: moved.settings,
+      squads: moved.squads.map((squad) => ({ ...squad, slots: [null, null] })),
+    }), "editor");
+    expect(removed.responses).toEqual({});
+    expect((await mocks.client!.query("SELECT count(*)::int AS n FROM roster_responses")).rows[0].n).toBe(0);
+  });
+
+  it("rejects duplicated squad IDs rather than mistaking a move for a rename", async () => {
+    const before = (await getRoster("event1"))!;
+    const squad = before.squads[0]!;
+    await expect(saveRoster("event1", saveSchema.parse({
+      version: before.version, settings: before.settings,
+      squads: [squad, { ...squad, name: "Other", slots: [null, null] }],
+    }), "editor")).rejects.toMatchObject({ status: 400, code: "invalid_roster" });
+    expect((await getRoster("event1"))!.version).toBe(before.version);
+  });
 });
