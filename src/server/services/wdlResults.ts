@@ -1,14 +1,16 @@
-import { query } from "@/lib/db";
+import { independentQuery as query, tx } from "@/lib/db";
 import { audit } from "@/lib/audit";
 import { env } from "@/lib/env";
 import { HttpError, ProviderError } from "@/lib/http";
 import { FACTIONS, resolveFaction } from "@/lib/scouting";
 import type { Session } from "@/lib/session";
 import { parseWdlMap, wdlFixtureSchema, type WdlFixture, type WdlFixtures } from "@/lib/wdlFixtures";
-import { editMessage, postMessage, type DiscordMessagePayload } from "./discord";
+import { deleteMessage, editMessage, postMessage, type DiscordMessagePayload } from "./discord";
 import { getLeagueFixtures } from "./wardogsLeague";
 
 export const WDL_RESULTS_CHANNEL = "1568220944609316896";
+const WDL_RESULT_STYLE_VERSION = 2;
+const WDL_RESULTS_LOCK = 824035;
 const actor = { discordId: "system:wdl", displayName: "WDL results worker" };
 const safe = (value: string | null | undefined, fallback: string) =>
   (value?.trim().replace(/[\r\n]/g, " ").replace(/([\\*_`~|>])/g, "\\$1") || fallback).slice(0, 100);
@@ -20,9 +22,8 @@ export function wdlResultPayload(fixture: WdlFixture): DiscordMessagePayload {
   const lines = sorted.map((participant) => {
     const faction = resolveFaction(participant.faction);
     const emoji = faction ? `<:${faction}:${FACTIONS[faction].emojiId}> ` : "";
-    const position = participant.finishingPosition === null ? "Position TBC" : `Position ${participant.finishingPosition}`;
     const points = participant.points === null ? "Points TBC" : `${participant.points} points`;
-    return `${emoji}**${safe(participant.team.code || participant.team.name, "Team TBC")}** · ${position} · ${points}${participant.noShow ? " · No show" : ""}`;
+    return `${emoji}**${safe(participant.team.code || participant.team.name, "Team TBC")}** · ${points}${participant.noShow ? " · No show" : ""}`;
   });
   const description = completed
     ? [`**Map:** ${safe(location.map, "TBC")}`, `**Zone:** ${safe(location.zone, "TBC")}`,
@@ -37,13 +38,11 @@ export function wdlResultPayload(fixture: WdlFixture): DiscordMessagePayload {
       title: `${completed ? "WDL match result" : "WDL result withdrawn"}${fixture.number !== null ? ` #${fixture.number}` : ""}`.slice(0, 256),
       description: fullDescription,
       color: 0x8b1a1a,
+      thumbnail: { url: `${base}/images/WDL.webp` },
       ...(fixture.scheduledAt ? { timestamp: fixture.scheduledAt } : {}),
       footer: { text: completed ? "Official WDL result · Points are not in-game scores" : "Status changed in WDL" },
     }],
-    components: [{ type: 1, components: [
-      { type: 2, style: 5, label: "View WDL results", url: `${base}/wdl` },
-      { type: 2, style: 5, label: "Match feedback", url: `${base}/observe` },
-    ] }],
+    components: [],
     allowed_mentions: { parse: [] },
   };
 }
@@ -66,7 +65,16 @@ export async function retryUncertainWdlResult(fixtureId: string, user: Pick<Sess
 }
 
 export async function syncWdlResults(fixtures: WdlFixtures) {
+  await tx(async (client) => {
+    const lock = await client.query<{ acquired: boolean }>("SELECT pg_try_advisory_xact_lock($1) AS acquired", [WDL_RESULTS_LOCK]);
+    if (!lock.rows[0]?.acquired) return;
+    await syncWdlResultsLocked(fixtures);
+  });
+}
+
+async function syncWdlResultsLocked(fixtures: WdlFixtures) {
   if (env().DISCORD_GUILD_ID !== "1332320879073296404") throw new Error("WDL result channel is configured for a different Discord guild.");
+  await reorderExistingResults(fixtures);
   await query(
     `UPDATE wdl_result_posts SET state = 'uncertain', error = 'Discord posting was interrupted; check the results channel before retrying.', updated_at = now()
       WHERE state = 'posting' AND updated_at < now() - interval '5 minutes'`,
@@ -109,12 +117,14 @@ export async function syncWdlResults(fixtures: WdlFixtures) {
           error = NULL, updated_at = now()
        WHERE fixture_id = (
          SELECT fixture_id FROM wdl_result_posts
-          WHERE fixture_id = ANY($1::text[]) AND (
-            (state = 'pending' AND upper(fixture->>'status') = 'COMPLETED')
-             OR (state = 'posted' AND fixture IS DISTINCT FROM published_fixture))
-          ORDER BY updated_at, fixture_id FOR UPDATE SKIP LOCKED LIMIT 1
-       ) RETURNING fixture_id, fixture, state, message_id`,
-      [observedIds],
+          WHERE (state = 'pending' AND fixture_id = ANY($1::text[]) AND upper(fixture->>'status') = 'COMPLETED')
+             OR (state = 'posted' AND ((fixture_id = ANY($1::text[]) AND fixture IS DISTINCT FROM published_fixture)
+                 OR (published_style_version < $2 AND published_fixture IS NOT NULL)))
+          ORDER BY CASE WHEN state = 'pending' THEN 0 ELSE 1 END,
+            CASE WHEN state = 'pending' THEN (fixture->>'scheduledAt')::timestamptz END ASC NULLS LAST,
+            fixture_id FOR UPDATE SKIP LOCKED LIMIT 1
+       ) RETURNING fixture_id, CASE WHEN fixture_id = ANY($1::text[]) THEN fixture ELSE published_fixture END AS fixture, state, message_id`,
+      [observedIds, WDL_RESULT_STYLE_VERSION],
     );
     if (!row) break;
     let writing = false;
@@ -128,8 +138,8 @@ export async function syncWdlResults(fixtures: WdlFixtures) {
         if (!/^\d{15,22}$/.test(messageId)) throw new Error("Discord returned an invalid result message ID.");
         try {
           const saved = await query(
-            "UPDATE wdl_result_posts SET state = 'posted', message_id = $2, published_fixture = $3, error = NULL, updated_at = now() WHERE fixture_id = $1 AND state = 'posting' RETURNING fixture_id",
-            [row.fixture_id, messageId, JSON.stringify(fixture)],
+            "UPDATE wdl_result_posts SET state = 'posted', message_id = $2, published_fixture = $3, published_style_version = $4, error = NULL, updated_at = now() WHERE fixture_id = $1 AND state = 'posting' RETURNING fixture_id",
+            [row.fixture_id, messageId, JSON.stringify(fixture), WDL_RESULT_STYLE_VERSION],
           );
           if (!saved.length) throw new Error("The result changed state before its message ID was recorded.");
         } catch (error) {
@@ -141,8 +151,8 @@ export async function syncWdlResults(fixtures: WdlFixtures) {
         if (!row.message_id) throw new Error("The result has no Discord message ID.");
         await editMessage(WDL_RESULTS_CHANNEL, row.message_id, payload);
         const saved = await query(
-          "UPDATE wdl_result_posts SET state = 'posted', published_fixture = $2, error = NULL, updated_at = now() WHERE fixture_id = $1 AND state = 'updating' RETURNING fixture_id",
-          [row.fixture_id, JSON.stringify(fixture)],
+          "UPDATE wdl_result_posts SET state = 'posted', published_fixture = $2, published_style_version = $3, error = NULL, updated_at = now() WHERE fixture_id = $1 AND state = 'updating' RETURNING fixture_id",
+          [row.fixture_id, JSON.stringify(fixture), WDL_RESULT_STYLE_VERSION],
         );
         if (!saved.length) throw new Error("The result changed state before its edit could be recorded.");
         await audit(actor, "wdl.result_updated", "wdl_fixture", row.fixture_id, { messageId: row.message_id, channelId: WDL_RESULTS_CHANNEL });
@@ -156,6 +166,46 @@ export async function syncWdlResults(fixtures: WdlFixtures) {
       throw new Error(`WDL result ${row.fixture_id} could not be ${row.state === "posting" ? "posted" : "updated"}: ${message}`);
     }
   }
+}
+
+async function reorderExistingResults(fixtures: WdlFixtures) {
+  const rows = await query<{ message_id: string; fixture_id: string | null; deleted: boolean; state: string | null; current_message_id: string | null }>(
+    `SELECT reorder.message_id, reorder.fixture_id, reorder.deleted, posts.state, posts.message_id AS current_message_id
+       FROM wdl_result_reorder AS reorder LEFT JOIN wdl_result_posts AS posts ON posts.fixture_id = reorder.fixture_id
+      WHERE NOT reorder.completed ORDER BY reorder.message_id`,
+  );
+  if (!rows.length) return;
+  const current = new Map(fixtures.recent.map((fixture) => [fixture.id, fixture]));
+  if (rows.length !== 6 || rows.some((row) => !row.fixture_id || row.state !== "posted" || row.current_message_id !== row.message_id ||
+      !current.has(row.fixture_id) || !eligible(current.get(row.fixture_id)!))) {
+    throw new Error("The six existing result messages cannot all be verified against current completed WDL fixtures; no further reorder actions will run. Review the result channel and server logs.");
+  }
+  for (const row of rows) wdlResultPayload(current.get(row.fixture_id!)!);
+  for (const row of rows) {
+    if (row.deleted) continue;
+    await deleteMessage(WDL_RESULTS_CHANNEL, row.message_id);
+    await query("UPDATE wdl_result_reorder SET deleted = true WHERE message_id = $1 AND NOT completed", [row.message_id]);
+    await audit(actor, "wdl.result_reorder_deleted", "wdl_fixture", row.fixture_id!, { messageId: row.message_id, channelId: WDL_RESULTS_CHANNEL });
+  }
+  const reset = await query<{ count: string }>(
+    `WITH reset AS (
+       UPDATE wdl_result_posts AS posts
+          SET state = 'pending', message_id = NULL, published_fixture = NULL, error = NULL, updated_at = now()
+         FROM wdl_result_reorder AS reorder
+        WHERE NOT reorder.completed AND reorder.deleted AND posts.fixture_id = reorder.fixture_id
+          AND posts.state = 'posted' AND posts.message_id = reorder.message_id
+          AND (SELECT count(*) FROM wdl_result_reorder AS pending
+               JOIN wdl_result_posts AS linked ON linked.fixture_id = pending.fixture_id
+              WHERE NOT pending.completed AND pending.deleted
+                AND linked.state = 'posted' AND linked.message_id = pending.message_id) = $1
+        RETURNING posts.fixture_id
+     ), finished AS (
+       UPDATE wdl_result_reorder AS reorder SET completed = true
+        FROM reset WHERE reorder.fixture_id = reset.fixture_id AND NOT reorder.completed
+        RETURNING reorder.fixture_id
+     ) SELECT count(*)::text AS count FROM finished`, [rows.length],
+  );
+  if (Number(reset[0]?.count) !== rows.length) throw new Error("Could not queue all reordered WDL results. Check Admin and server logs before retrying.");
 }
 
 export async function wdlResultTick() {

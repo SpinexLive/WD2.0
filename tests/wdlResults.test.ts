@@ -5,16 +5,30 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   client: null as import("pg").Client | null,
-  post: vi.fn(), edit: vi.fn(), fixtures: vi.fn(), audit: vi.fn(),
+  post: vi.fn(), edit: vi.fn(), remove: vi.fn(), fixtures: vi.fn(), audit: vi.fn(),
 }));
 vi.mock("@/lib/db", () => ({
-  query: async (sql: string, values: unknown[] = []) => {
+  independentQuery: async (sql: string, values: unknown[] = []) => {
     if (!mocks.client) throw new Error("Test database is not connected");
     return (await mocks.client.query(sql, values)).rows;
   },
+  tx: async (fn: (client: import("pg").Client) => Promise<void>) => {
+    const client = new pg.Client({ connectionString: process.env.TEST_DATABASE_URL });
+    await client.connect();
+    try {
+      await client.query("BEGIN");
+      await fn(client);
+      await client.query("COMMIT");
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      await client.end();
+    }
+  },
 }));
 vi.mock("@/lib/env", () => ({ env: () => ({ DISCORD_GUILD_ID: "1332320879073296404", APP_URL: "https://dashboard.test" }) }));
-vi.mock("@/server/services/discord", () => ({ postMessage: mocks.post, editMessage: mocks.edit }));
+vi.mock("@/server/services/discord", () => ({ postMessage: mocks.post, editMessage: mocks.edit, deleteMessage: mocks.remove }));
 vi.mock("@/server/services/wardogsLeague", () => ({ getLeagueFixtures: mocks.fixtures }));
 vi.mock("@/lib/audit", () => ({ audit: mocks.audit }));
 
@@ -34,19 +48,21 @@ const result: WdlFixture = {
 const snapshot = (recent: WdlFixture[], upcoming: WdlFixture[] = []): WdlFixtures => ({ recent, upcoming });
 
 describe("WDL result presentation", () => {
-  it("shows placements, points and faction emojis without inventing match scores", () => {
+  it("shows points, faction emojis and the logo without positions or buttons", () => {
     const payload = wdlResultPayload(result);
-    const embed = payload.embeds[0] as { title: string; description: string; footer: { text: string } };
+    const embed = payload.embeds[0] as { title: string; description: string; thumbnail: { url: string }; footer: { text: string } };
     expect(embed.title).toBe("WDL match result #42");
     expect(embed.description).toContain("**Map:** Ozeti\n**Zone:** Default\n**Weather:** DayEarlyFog");
-    expect(embed.description).toContain("<:valkyra:1564588959542157382> **HTD** · Position 1 · 3 points");
-    expect(embed.description).toContain("<:manticore:1564588916110270504> **RMNT** · Position 2 · 2 points");
-    expect(embed.description).toContain("<:lonestar:1564588882551636058> **OKT** · Position TBC · Points TBC · No show");
-    expect(embed.description.indexOf("Position 1")).toBeLessThan(embed.description.indexOf("Position 2"));
+    expect(embed.description).toContain("<:valkyra:1564588959542157382> **HTD** · 3 points");
+    expect(embed.description).toContain("<:manticore:1564588916110270504> **RMNT** · 2 points");
+    expect(embed.description).toContain("<:lonestar:1564588882551636058> **OKT** · Points TBC · No show");
+    expect(embed.description.lastIndexOf("**HTD**")).toBeLessThan(embed.description.lastIndexOf("**RMNT**"));
+    expect(embed.description).not.toContain("Position");
     expect(embed.description).not.toContain("Hidden");
+    expect(embed.thumbnail.url).toBe("https://dashboard.test/images/WDL.webp");
     expect(embed.footer.text).toContain("not in-game scores");
     expect(payload.allowed_mentions).toEqual({ parse: [] });
-    expect(payload.components).toBeDefined();
+    expect(payload.components).toEqual([]);
   });
 
   it("labels a result withdrawn if WDL moves the fixture back to scheduled", () => {
@@ -65,8 +81,13 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)("WDL result posting with Postgre
     await mocks.client.connect();
     const migration = await readFile(resolve(process.cwd(), "migrations", "037_wdl_result_posts.sql"), "utf8");
     await mocks.client.query(migration.replace(/CREATE TABLE/g, "CREATE TEMP TABLE"));
+    const styleMigration = await readFile(resolve(process.cwd(), "migrations", "038_wdl_result_style.sql"), "utf8");
+    await mocks.client.query(styleMigration);
+    const reorderMigration = await readFile(resolve(process.cwd(), "migrations", "039_reorder_existing_wdl_results.sql"), "utf8");
+    await mocks.client.query(reorderMigration.replace(/CREATE TABLE/g, "CREATE TEMP TABLE"));
     mocks.post.mockResolvedValue("1568220944609316900");
     mocks.edit.mockResolvedValue(undefined);
+    mocks.remove.mockResolvedValue(undefined);
     mocks.audit.mockResolvedValue(undefined);
   });
   afterEach(async () => { await mocks.client?.end(); mocks.client = null; });
@@ -79,6 +100,77 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)("WDL result posting with Postgre
     expect(mocks.edit).not.toHaveBeenCalled();
     const rows = (await mocks.client!.query("SELECT fixture_id, state, message_id FROM wdl_result_posts")).rows;
     expect(rows).toEqual([{ fixture_id: "fixture", state: "posted", message_id: "1568220944609316900" }]);
+  });
+
+  it("posts oldest dated matches first, with undated matches last", async () => {
+    let id = 100000000000000000n;
+    mocks.post.mockImplementation(async () => String(id++));
+    const newest = { ...result, id: "newest", scheduledAt: "2026-11-08T19:00:00.000Z" };
+    const oldest = { ...result, id: "oldest", scheduledAt: "2025-01-08T19:00:00.000Z" };
+    const undated = { ...result, id: "undated", scheduledAt: null };
+    const middle = { ...result, id: "middle", scheduledAt: "2026-02-08T19:00:00.000Z" };
+    await syncWdlResults(snapshot([newest, undated, middle, oldest]));
+    expect(mocks.post.mock.calls.map((call) => call[1])).toEqual([
+      wdlResultPayload(oldest), wdlResultPayload(middle), wdlResultPayload(newest), wdlResultPayload(undated),
+    ]);
+  });
+
+  it("updates old-style messages even when absent from the current WDL feed", async () => {
+    await mocks.client!.query(
+      "INSERT INTO wdl_result_posts (fixture_id, fixture, published_fixture, state, message_id, published_style_version) VALUES ($1, $2, $2, 'posted', $3, 1)",
+      [result.id, JSON.stringify(result), "1568220944609316900"],
+    );
+    await syncWdlResults(snapshot([]));
+    expect(mocks.post).not.toHaveBeenCalled();
+    expect(mocks.edit).toHaveBeenCalledWith(WDL_RESULTS_CHANNEL, "1568220944609316900", wdlResultPayload(result));
+    expect((await mocks.client!.query("SELECT published_style_version FROM wdl_result_posts")).rows[0].published_style_version).toBe(2);
+    await syncWdlResults(snapshot([]));
+    expect(mocks.edit).toHaveBeenCalledOnce();
+  });
+
+  it("deletes only the six confirmed messages and reposts oldest first", async () => {
+    const ids = ["1568223527222513665", "1568223528237535285", "1568223529500151914", "1568223531114692610", "1568223532851142808", "1568223534256488499"];
+    const results = ids.map((messageId, index) => ({ ...result, id: `result-${index}`, scheduledAt: `2026-01-0${6 - index}T19:00:00.000Z`, messageId }));
+    for (const fixture of results) {
+      await mocks.client!.query("INSERT INTO wdl_result_posts (fixture_id, fixture, published_fixture, state, message_id) VALUES ($1, $2, $2, 'posted', $3)", [fixture.id, JSON.stringify(fixture), fixture.messageId]);
+    }
+    await mocks.client!.query("DROP TABLE wdl_result_reorder");
+    const migration = await readFile(resolve(process.cwd(), "migrations", "039_reorder_existing_wdl_results.sql"), "utf8");
+    await mocks.client!.query(migration.replace(/CREATE TABLE/g, "CREATE TEMP TABLE"));
+    let id = 100000000000000000n;
+    mocks.post.mockImplementation(async () => String(id++));
+    await syncWdlResults(snapshot(results));
+    expect(mocks.remove.mock.calls.map((call) => call[1])).toEqual(ids);
+    expect(mocks.post.mock.calls.map((call) => call[1])).toEqual([...results].reverse().map(wdlResultPayload));
+    expect((await mocks.client!.query("SELECT count(*)::int AS n FROM wdl_result_reorder WHERE completed")).rows[0].n).toBe(6);
+    await syncWdlResults(snapshot(results));
+    expect(mocks.remove).toHaveBeenCalledTimes(6);
+    expect(mocks.post).toHaveBeenCalledTimes(6);
+  });
+
+  it("does not delete any existing results when the confirmed set cannot be verified", async () => {
+    await mocks.client!.query("INSERT INTO wdl_result_reorder (message_id, fixture_id) VALUES ('1568223527222513665', NULL)");
+    await expect(syncWdlResults(snapshot([result]))).rejects.toThrow("cannot all be verified");
+    expect(mocks.remove).not.toHaveBeenCalled();
+    expect(mocks.post).not.toHaveBeenCalled();
+  });
+
+  it("resumes a partially completed reorder without deleting completed entries twice", async () => {
+    const ids = ["1568223527222513665", "1568223528237535285", "1568223529500151914", "1568223531114692610", "1568223532851142808", "1568223534256488499"];
+    const results = ids.map((messageId, index) => ({ ...result, id: `result-${index}`, messageId }));
+    for (const fixture of results) {
+      await mocks.client!.query("INSERT INTO wdl_result_posts (fixture_id, fixture, published_fixture, state, message_id) VALUES ($1, $2, $2, 'posted', $3)", [fixture.id, JSON.stringify(fixture), fixture.messageId]);
+      await mocks.client!.query("INSERT INTO wdl_result_reorder (message_id, fixture_id) VALUES ($1, $2)", [fixture.messageId, fixture.id]);
+    }
+    mocks.remove.mockResolvedValueOnce(undefined).mockRejectedValueOnce(new Error("Discord unavailable"));
+    await expect(syncWdlResults(snapshot(results))).rejects.toThrow("Discord unavailable");
+    expect(mocks.post).not.toHaveBeenCalled();
+    expect((await mocks.client!.query("SELECT count(*)::int AS n FROM wdl_result_reorder WHERE deleted")).rows[0].n).toBe(1);
+    let id = 100000000000000000n;
+    mocks.post.mockImplementation(async () => String(id++));
+    await syncWdlResults(snapshot(results));
+    expect(mocks.remove.mock.calls.filter((call) => call[1] === ids[0])).toHaveLength(1);
+    expect(mocks.post).toHaveBeenCalledTimes(6);
   });
 
   it("updates the original message when results change and withdraws a reversed result", async () => {
