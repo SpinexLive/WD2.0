@@ -6,7 +6,6 @@ import { getMatches } from "./wardogsRcon";
 import { getLeagueMembers } from "./wardogsLeague";
 import { kickMatchSync, matchSyncStatus } from "./matchHistory";
 import { gatewayReady } from "./rosterGateway";
-import { snapshotAttendance } from "./attendance";
 import { recruitAlertStatus } from "./recruitAlerts";
 
 const ALERT_AFTER_MS = 60 * 60_000;
@@ -47,7 +46,7 @@ export async function getHealth(force = false): Promise<Component[]> {
   const checks: [string, string, () => Promise<Result>][] = [
     ["database", "Database", async () => (await query("SELECT 1"), { ok: true, detail: null })],
     ["discord", "Discord API", async () => fromSnapshot(await getClanMembers())],
-    ["gateway", "Discord bot connection", async () => (gatewayReady() ? { ok: true, detail: null } : { ok: false, detail: "The bot isn't connected to the Discord gateway (buttons, voice presence and attendance are affected)." })],
+    ["gateway", "Discord bot connection", async () => (gatewayReady() ? { ok: true, detail: null } : { ok: false, detail: "The bot isn't connected to the Discord gateway (buttons and voice presence are affected)." })],
     ["raid-helper", "Raid Helper", async () => fromSnapshot(await getEvents())],
     ["wardogs-rcon", "Wardogs RCON API", async () => fromSnapshot(await getMatches())],
     ["wardogs-league", "Wardogs League API", async () => fromSnapshot(await getLeagueMembers())],
@@ -142,14 +141,13 @@ async function checkAlerts() {
   }
 }
 
-/** Every minute: record attendance and retry incomplete match syncs. Health checks run every 5 minutes. */
+/** Every minute: retry incomplete match syncs. Health checks run every 5 minutes. */
 export function startMonitor(): void {
   const s = state();
   if (process.env.NEXT_PHASE === "phase-production-build" || s.timer) return;
   const tick = async () => {
     s.ticks++;
     kickMatchSync();
-    await snapshotAttendance().catch((e: Error) => console.error("attendance snapshot failed:", e.message));
     if (s.ticks % 5 === 1) {
       await checkAlerts().catch((e: Error) => console.error("health check failed:", e.message));
     }

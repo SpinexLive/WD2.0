@@ -16,7 +16,7 @@ export function navigationGroups(access: NavAccess): NavGroup[] {
   const groups: NavGroup[] = [];
   if (access.isAdmin) {
     groups.push(
-      { id: "operations", label: "Operations", items: [ROSTER_NAV, BRIEFING_NAV, { href: "/attendance", label: "Attendance" }] },
+      { id: "operations", label: "Operations", items: [ROSTER_NAV, BRIEFING_NAV] },
       { id: "people", label: "People & league", items: [
         { href: "/members", label: "Members", logo: "/images/icons/wardogs.png" },
         { href: "/wdl", label: "WDL", logo: "/images/WDL.webp" },
