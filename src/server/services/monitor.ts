@@ -80,6 +80,22 @@ export async function getHealth(force = false): Promise<Component[]> {
       },
     ],
     [
+      "wdl-results",
+      "WDL result posts",
+      async () => {
+        const [row] = await query<{ last_error: string | null; uncertain: string; review: string }>(
+          `SELECT status.last_error, (SELECT count(*)::text FROM wdl_result_posts WHERE state = 'uncertain') AS uncertain,
+                  (SELECT count(*)::text FROM wdl_result_posts WHERE state = 'review') AS review
+             FROM wdl_result_post_status AS status WHERE status.id = 1`,
+        );
+        if (!row) throw new Error("WDL result posts migration has not been applied.");
+        if (row.last_error) return { ok: false, detail: row.last_error };
+        if (Number(row.uncertain)) return { ok: false, detail: "A WDL result post has an uncertain delivery; check Admin and Discord before retrying." };
+        if (Number(row.review)) return { ok: false, detail: "A WDL result has incomplete team data; check Admin and WDL." };
+        return { ok: true, detail: null };
+      },
+    ],
+    [
       "gold",
       "Gold price channel",
       async () => {

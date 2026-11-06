@@ -16,5 +16,7 @@ export async function register() {
     startRecruitAlertsScheduler();
     const { startWdlFixtureScheduler } = await import("./server/services/wdlRaid");
     startWdlFixtureScheduler();
+    const { startWdlResultsScheduler } = await import("./server/services/wdlResults");
+    startWdlResultsScheduler();
   }
 }

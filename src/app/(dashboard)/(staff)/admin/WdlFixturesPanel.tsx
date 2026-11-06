@@ -5,7 +5,7 @@ import { useApi } from "@/lib/client";
 import { ConfirmDialog, ErrorBanner, Skeleton, useToast } from "@/components/ui";
 import type { WdlCreatedEventLog, WdlEventDescriptionPreview, WdlRaidStatus } from "@/server/services/wdlRaid";
 
-type Confirmation = "enable" | "disable" | { link: string } | { scheduled: string } | { retry: string } | { remove: string };
+type Confirmation = "enable" | "disable" | { link: string } | { scheduled: string } | { retry: string } | { remove: string } | { retryResult: string };
 
 export default function WdlFixturesPanel() {
   const api = useApi();
@@ -100,7 +100,8 @@ export default function WdlFixturesPanel() {
       : confirm && "link" in confirm ? { action: "link", fixtureId: confirm.link, eventId: eventIds[confirm.link] }
         : confirm && "scheduled" in confirm ? { action: "link-scheduled", fixtureId: confirm.scheduled, scheduledId: eventIds[confirm.scheduled] }
           : confirm && "retry" in confirm ? { action: "retry", fixtureId: confirm.retry }
-            : confirm && "remove" in confirm ? { action: "delete", fixtureId: confirm.remove } : null;
+            : confirm && "remove" in confirm ? { action: "delete", fixtureId: confirm.remove }
+              : confirm && "retryResult" in confirm ? { action: "retry-result", fixtureId: confirm.retryResult } : null;
 
   return (
     <div className="space-y-4 p-4">
@@ -113,6 +114,15 @@ export default function WdlFixturesPanel() {
           <div className="rounded border border-ink-700 p-3 text-sm">
             <p>Automation: <strong>{data.enabled ? "On" : data.activationPending ? "Waiting for a fresh WDL baseline" : "Off"}</strong></p>
             {data.lastError && <p className="text-red-400">Worker: {data.lastError}</p>}
+          </div>
+          <div className="rounded border border-ink-700 p-3 text-sm">
+            <p><strong>WDL result posts</strong> · <a className="text-blood-300 hover:underline" href="https://discord.com/channels/1332320879073296404/1568220944609316896" target="_blank" rel="noopener noreferrer">Open results channel</a></p>
+            <p className="text-xs text-stone/60">Completed results are posted independently of Raid Helper automation. Uncertain posts are not retried automatically: check Discord before taking action.</p>
+            {data.results.lastError && <p className="text-red-400">Results worker: {data.results.lastError}</p>}
+            {data.results.issues.map((issue) => <div key={issue.fixtureId}>
+              <p className={issue.error ? "text-red-400" : "text-stone/60"}>Fixture {issue.fixtureNumber ? `#${issue.fixtureNumber}` : issue.fixtureId}: {issue.state}{issue.error ? ` · ${issue.error}` : ""}{issue.messageId ? ` · Message ${issue.messageId}` : ""}</p>
+              {issue.state === "uncertain" && <button className="btn-ghost mt-1" disabled={busy} onClick={() => setConfirm({ retryResult: issue.fixtureId })}>Retry result post</button>}
+            </div>)}
           </div>
           <div className="flex flex-wrap gap-2">
             {!data.enabled && !data.activationPending && <button className="btn-primary" disabled={busy} onClick={() => setConfirm("enable")}>Enable automation</button>}
@@ -174,14 +184,15 @@ export default function WdlFixturesPanel() {
         </>
       )}
       {confirm && confirmBody && (
-        <ConfirmDialog title={confirm === "enable" ? "Enable WDL automation?" : confirm === "disable" ? "Disable WDL automation?" : typeof confirm === "object" && "remove" in confirm ? "Delete the Raid Helper event?" : typeof confirm === "object" && "retry" in confirm ? "Retry event creation?" : "Link this event?"}
-          confirmLabel={confirm === "enable" ? "Enable automation" : confirm === "disable" ? "Disable" : typeof confirm === "object" && "remove" in confirm ? "Delete event" : typeof confirm === "object" && "retry" in confirm ? "Retry creation" : "Link event"}
+        <ConfirmDialog title={confirm === "enable" ? "Enable WDL automation?" : confirm === "disable" ? "Disable WDL automation?" : typeof confirm === "object" && "remove" in confirm ? "Delete the Raid Helper event?" : typeof confirm === "object" && "retry" in confirm ? "Retry event creation?" : typeof confirm === "object" && "retryResult" in confirm ? "Retry result post?" : "Link this event?"}
+          confirmLabel={confirm === "enable" ? "Enable automation" : confirm === "disable" ? "Disable" : typeof confirm === "object" && "remove" in confirm ? "Delete event" : typeof confirm === "object" && "retry" in confirm ? "Retry creation" : typeof confirm === "object" && "retryResult" in confirm ? "Retry result post" : "Link event"}
           danger={typeof confirm === "object" && "remove" in confirm} busy={busy} onCancel={() => setConfirm(null)} onConfirm={() => void run(confirmBody)}>
           {confirm === "enable" ? data?.baselineAt ? "The original baseline will be retained; newly observed fixtures may be processed after re-enabling." : "Current WDL fixtures will be baselined and newly observed fixtures will create Raid Helper events."
             : confirm === "disable" ? "No new creation attempts will start. A request already in progress may still complete. Existing Raid Helper events remain in place."
               : typeof confirm === "object" && "remove" in confirm ? "This permanently deletes the linked Raid Helper event and may remove its sign-ups. The dashboard roster is not deleted. Check the fixture before continuing."
                 : typeof confirm === "object" && "retry" in confirm ? "Check Raid Helper for an existing posted or scheduled event first. Retrying an uncertain request can create a duplicate if Raid Helper has not listed the earlier event yet."
-                  : "Confirm that the chosen Raid Helper event has the current WDL teams, map and time, and the correct member role and briefing voice channel. Update it in Raid Helper first if needed. The dashboard will link it rather than create a duplicate."}
+                  : typeof confirm === "object" && "retryResult" in confirm ? "Check the results channel for this fixture first. If a message was already delivered, remove it before retrying; otherwise a duplicate will be posted. The fixture must still be completed and visible in WDL."
+                    : "Confirm that the chosen Raid Helper event has the current WDL teams, map and time, and the correct member role and briefing voice channel. Update it in Raid Helper first if needed. The dashboard will link it rather than create a duplicate."}
         </ConfirmDialog>
       )}
       {preview && (

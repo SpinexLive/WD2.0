@@ -64,6 +64,8 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)("WDL fixture automation with Pos
     await mocks.client.query("CREATE TEMP TABLE audit_logs (id bigserial PRIMARY KEY, target_id text, target_type text, action text, details jsonb, created_at timestamptz NOT NULL DEFAULT now())");
     const registry = await readFile(resolve(process.cwd(), "migrations", "036_wdl_created_events.sql"), "utf8");
     await mocks.client.query(registry.replace(/CREATE TABLE/g, "CREATE TEMP TABLE"));
+    const results = await readFile(resolve(process.cwd(), "migrations", "037_wdl_result_posts.sql"), "utf8");
+    await mocks.client.query(results.replace(/CREATE TABLE/g, "CREATE TEMP TABLE"));
     mocks.fixtures.mockResolvedValue(snapshot([]));
     mocks.archive.mockResolvedValue(undefined);
     mocks.names.mockResolvedValue(names);

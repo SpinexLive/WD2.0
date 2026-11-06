@@ -19,11 +19,22 @@ export async function wdlRaidStatus() {
   const events = await query<{ fixture_id: string; fixture: WdlFixture; state: string; scheduled_id: string | null; event_id: string | null; event_channel_id: string | null; error: string | null }>(
     "SELECT fixture_id, fixture, state, scheduled_id, event_id, event_channel_id, error FROM wdl_fixture_events WHERE NOT baseline ORDER BY updated_at DESC LIMIT 100",
   );
+  const resultPosts = await query<{ fixture_id: string; fixture_number: string | null; state: string; message_id: string | null; error: string | null }>(
+    "SELECT fixture_id, fixture->>'number' AS fixture_number, state, message_id, error FROM wdl_result_posts WHERE state <> 'posted' OR error IS NOT NULL ORDER BY updated_at DESC LIMIT 100",
+  );
+  const [resultsStatus] = await query<{ last_error: string | null; last_checked_at: Date | null }>(
+    "SELECT last_error, last_checked_at FROM wdl_result_post_status WHERE id = 1",
+  );
+  if (!resultsStatus) throw new Error("WDL result posts migration has not been applied.");
   return {
     enabled: settings.enabled, activationPending: settings.activation_pending,
     baselineAt: settings.baseline_at?.toISOString() ?? null, lastError: settings.last_error,
     events: events.map((row) => ({ fixtureId: row.fixture_id, fixture: row.fixture, state: row.state,
       scheduledId: row.scheduled_id, eventId: row.event_id, eventChannelId: row.event_channel_id, error: row.error })),
+    results: {
+      lastError: resultsStatus.last_error, lastCheckedAt: resultsStatus.last_checked_at?.toISOString() ?? null,
+      issues: resultPosts.map((row) => ({ fixtureId: row.fixture_id, fixtureNumber: row.fixture_number, state: row.state, messageId: row.message_id, error: row.error })),
+    },
   };
 }
 export type WdlRaidStatus = Awaited<ReturnType<typeof wdlRaidStatus>>;
