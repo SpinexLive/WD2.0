@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useApi } from "@/lib/client";
 import { ErrorBanner, Skeleton, WarnBanner } from "@/components/ui";
+import { WdlParticipants } from "@/components/WdlParticipants";
 import type { WdlFixture } from "@/lib/wdlFixtures";
 import type { WdlFixtureOverview } from "@/server/services/wdlFixtures";
 
@@ -23,16 +24,7 @@ function Fixture({ fixture, result, eventId, eventState }: { fixture: WdlFixture
         {[fixture.number !== null ? `#${fixture.number}` : null, fixture.status, competition?.competition || "Competition TBC", competition?.season, competition?.division, competition?.round != null ? `Round ${competition.round}` : null, fixture.map || "Map TBC", fixture.gameMode || "Mode TBC"]
           .filter(Boolean).join(" · ") || "Fixture details TBC"}
       </div>
-      <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-stone/70">
-        {fixture.participants.map((p, index) => (
-          <span key={`${p.team.code ?? p.team.name ?? "team"}-${index}`}>
-            {p.team.code || p.team.name || "Team TBC"}: {p.faction ?? "Faction TBC"}
-            {result && p.finishingPosition !== null ? ` · Position ${p.finishingPosition}` : ""}
-            {result && p.points !== null ? ` · ${p.points} points` : ""}
-            {result && p.noShow === true ? " · No show" : ""}
-          </span>
-        ))}
-      </div>
+      <WdlParticipants participants={fixture.participants} result={result} />
       {eventId && <Link href={`/rosters/${encodeURIComponent(eventId)}`} className="text-xs text-blood-300 hover:underline">Open roster →</Link>}
       {eventState && ["review", "uncertain", "waiting"].includes(eventState) && <p className="text-xs text-warn">Raid Helper event needs staff review.</p>}
     </article>

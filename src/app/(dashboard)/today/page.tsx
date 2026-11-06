@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { useApi, useLive } from "@/lib/client";
 import { EmptyState, ErrorBanner, Skeleton, useToast } from "@/components/ui";
+import { WdlParticipants } from "@/components/WdlParticipants";
 import type { TodayData } from "@/server/services/today";
 import { fixtureOpponents } from "@/lib/wdlFixtures";
 
@@ -110,6 +111,7 @@ export default function TodayPage() {
               <>
                 <p className="font-semibold">RMNT v {fixtureOpponents(data.league.fixture)?.join(" v ") ?? "Teams TBC"}</p>
                 <p className="text-sm text-stone/60">{data.league.fixture.scheduledAt ? new Date(data.league.fixture.scheduledAt).toLocaleString("en-GB") : "Time TBC"} · {data.league.fixture.map ?? "Map TBC"}</p>
+                <WdlParticipants participants={data.league.fixture.participants} />
                 {data.league.eventUrl && <a href={data.league.eventUrl} target="_blank" rel="noopener noreferrer" className="text-xs text-blood-300 hover:underline">Open Raid Helper signup →</a>}
               </>
             ) : !data.league.error ? <p className="text-sm text-stone/55">No upcoming League fixture returned by WDL.</p> : null}
