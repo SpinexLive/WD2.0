@@ -44,14 +44,36 @@ const clean = (value: string | null | undefined) => value?.replace(/@/g, "@\u200
 
 export function wdlLocationAndFactions(fixture: WdlFixture) {
   const location = parseWdlMap(fixture.map);
+  const teams = fixture.participants.map((p) => {
+    const faction = resolveFaction(p.faction);
+    const name = clean(p.team.code || p.team.name);
+    return {
+      ours: p.team.code?.trim().toUpperCase() === "RMNT",
+      label: faction ? `<:${faction}:${FACTIONS[faction].emojiId}> ${name}` : `${name} (${clean(p.faction)})`,
+    };
+  });
   return [
     `**Map:** ${clean(location.map)}`,
     `**Zone:** ${clean(location.zone)}`,
     `**Weather:** ${clean(location.weather)}`,
-    `**Factions:** ${fixture.participants.map((p) => {
-      const faction = resolveFaction(p.faction);
-      return `${clean(p.team.code || p.team.name)}: ${faction ? `<:${faction}:${FACTIONS[faction].emojiId}> ` : ""}${clean(p.faction)}`;
-    }).join(" | ")}`,
+    "",
+    teams.filter((team) => !team.ours).map((team) => team.label).join("  "),
+    teams.filter((team) => team.ours).map((team) => team.label).join("  "),
+  ];
+}
+
+function competitionLines(fixture: WdlFixture) {
+  const competition = fixture.competition;
+  const present = (value: string | null | undefined) => {
+    const trimmed = value?.trim();
+    return trimmed && !/^(?:tbd|tdb)$/i.test(trimmed) ? clean(trimmed) : null;
+  };
+  const name = [present(competition?.competition), present(competition?.season)].filter(Boolean).join(" / ");
+  const division = present(competition?.division);
+  return [
+    ...(name ? [`**Competition:** ${name}`] : []),
+    ...(division ? [`**Division:** ${division}`] : []),
+    ...(competition?.round != null ? [`**Round:** ${competition.round}`] : []),
   ];
 }
 
@@ -60,13 +82,36 @@ export function updatedWdlDescription(description: string, fixture: WdlFixture) 
   const lines = description.split("\n");
   const labels = ["Map", "Zone", "Weather", "Factions", "Game Mode"];
   const indices = labels.map((label) => lines.flatMap((line, index) => line.startsWith(`**${label}:**`) ? [index] : []));
+  const replacement = wdlLocationAndFactions(fixture);
+  const mapIndex = indices[0]![0];
+  if (indices[0]!.length === 1 && indices[1]!.length === 1 && indices[2]!.length === 1 &&
+      indices[3]!.length === 0 && indices[4]!.length === 0 &&
+      mapIndex !== undefined && lines.slice(mapIndex, mapIndex + replacement.length).join("\n") === replacement.join("\n")) {
+    return description;
+  }
   if (indices[0]!.length !== 1 || indices[3]!.length !== 1 || indices.some((matches) => matches.length > 1)) {
     throw new HttpError(409, "The event description does not have uniquely identifiable map and faction fields; review it in Raid Helper.", "wdl_description_unsafe");
   }
-  const replacement = wdlLocationAndFactions(fixture);
   const removed = new Set(indices.flat());
-  const mapIndex = indices[0]![0]!;
-  return lines.flatMap((line, index) => index === mapIndex ? replacement : removed.has(index) ? [] : [line]).join("\n");
+  const competition = fixture.competition;
+  const oldCompetition = `**Competition:** ${clean(competition?.competition)} / ${clean(competition?.season)}`;
+  const oldDivision = `**Division:** ${clean(competition?.division)} / Round ${competition?.round ?? "TBD"}`;
+  const competitionIndex = lines.indexOf(oldCompetition);
+  const replaceCompetition = competitionIndex >= 0 && lines.indexOf(oldCompetition, competitionIndex + 1) === -1 &&
+    lines[competitionIndex + 1] === oldDivision && lines.indexOf(oldDivision, competitionIndex + 2) === -1;
+  return lines.flatMap((line, index) => {
+    if (replaceCompetition && index === competitionIndex) {
+      const details = competitionLines(fixture);
+      if (competitionIndex === 2 && mapIndex === 4 &&
+          lines[0]?.startsWith("**Briefing Start:**") && lines[1]?.startsWith("**Match Start:**")) {
+        return ["", ...details, ...(details.length ? [""] : [])];
+      }
+      return details;
+    }
+    if (replaceCompetition && index === competitionIndex + 1) return [];
+    if (index === mapIndex) return replacement;
+    return removed.has(index) ? [] : [line];
+  }).join("\n");
 }
 
 export function wdlEventBody(
@@ -93,12 +138,12 @@ export function wdlEventBody(
   if (temporaryRole.length > 100 || names.roleNames.includes(temporaryRole.toLowerCase())) {
     throw new HttpError(409, "The temporary role name is too long or already exists; review this fixture manually.", "wdl_role_collision");
   }
-  const competition = fixture.competition;
+  const details = competitionLines(fixture);
   const description = [
     `**Briefing Start:** <t:${briefing}:F>`,
     `**Match Start:** <t:${matchTime}:F>`,
-    `**Competition:** ${clean(competition?.competition)} / ${clean(competition?.season)}`,
-    `**Division:** ${clean(competition?.division)} / Round ${competition?.round ?? "TBD"}`,
+    ...(details.length ? ["", ...details] : []),
+    "",
     ...wdlLocationAndFactions(fixture),
   ].join("\n");
   const postAt = briefing - TEN_DAYS;
@@ -204,7 +249,7 @@ export async function updateWdlEventDescription(eventId: string, description: st
     headers: raidHeaders(), body: { description }, retries: 0, timeoutMs: 15000,
   });
   const result = z.object({ status: z.string(), event: z.object({ id: z.string() }) }).safeParse(data);
-  if (!result.success || !["success", "ok"].includes(result.data.status.toLowerCase()) || result.data.event.id !== eventId) {
+  if (!result.success || !["success", "ok", "event updated!"].includes(result.data.status.toLowerCase()) || result.data.event.id !== eventId) {
     throw new Error("Raid Helper did not confirm the event update.");
   }
 }

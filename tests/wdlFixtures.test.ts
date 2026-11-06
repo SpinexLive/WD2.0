@@ -46,14 +46,31 @@ describe("WDL fixture parsing and event creation", () => {
       participants: fixture.participants.map((p, index) => ({ ...p, faction: ["MANTICORE", "lonestar", "VALKYRA"][index]! })),
     };
     const description = wdlEventBody(updated, names, matchSeconds - 20 * 86400).description;
-    expect(description).toContain("**Map:** Ozeti\n**Zone:** Default\n**Weather:** DayEarlyFog");
-    expect(description).toContain("RMNT: <:manticore:1564588916110270504> MANTICORE");
-    expect(description).toContain("WTH: <:lonestar:1564588882551636058> lonestar");
-    expect(description).toContain("VLK: <:valkyra:1564588959542157382> VALKYRA");
+    expect(description).toBe([
+      `**Briefing Start:** <t:${matchSeconds - 1800}:F>`,
+      `**Match Start:** <t:${matchSeconds}:F>`,
+      "",
+      "**Map:** Ozeti", "**Zone:** Default", "**Weather:** DayEarlyFog", "",
+      "<:lonestar:1564588882551636058> WTH  <:valkyra:1564588959542157382> VLK",
+      "<:manticore:1564588916110270504> RMNT",
+    ].join("\n"));
     expect(description).not.toContain("Unwanted mode");
     const missing = wdlEventBody({ ...fixture, map: null }, names, matchSeconds - 20 * 86400).description;
     expect(missing).toContain("**Map:** TBD\n**Zone:** TBD\n**Weather:** TBD");
-    expect(missing).toContain("RMNT: TBD");
+    expect(missing).toContain("RMNT (TBD)");
+    expect(missing).not.toContain("**Competition:**");
+    expect(missing).not.toContain("**Division:**");
+    expect(missing).not.toContain("**Round:**");
+  });
+
+  it("shows only competition, division and round values that are actually available", () => {
+    const description = wdlEventBody({ ...fixture, competition: { competition: "League", season: "TDB", division: "TBD", round: 3 } }, names, matchSeconds - 20 * 86400).description;
+    expect(description).toContain("**Competition:** League\n**Round:** 3");
+    expect(description).not.toContain("**Division:**");
+    expect(description).not.toContain("TDB");
+    const partial = wdlEventBody({ ...fixture, competition: { competition: null, season: "Season 2", division: "Division A", round: null } }, names, matchSeconds - 20 * 86400).description;
+    expect(partial).toContain("**Competition:** Season 2\n**Division:** Division A");
+    expect(partial).not.toContain("**Round:**");
   });
 
   it("uses the chosen briefing, post time and Raid Helper options", () => {

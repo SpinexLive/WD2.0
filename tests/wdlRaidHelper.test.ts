@@ -69,10 +69,20 @@ describe("Raid Helper fixture API", () => {
   it("preserves unrelated staff text while updating identified fields", () => {
     const current = "Notes above\n**Map:** Old · Default · Fog\nManual notes\n**Factions:** RMNT: MANTICORE\nNotes below";
     const proposed = updatedWdlDescription(current, { ...fixture, map: "Ozeti · Default · DayEarlyFog" });
-    expect(proposed).toContain("Notes above\n**Map:** Ozeti\n**Zone:** Default\n**Weather:** DayEarlyFog\n**Factions:**");
+    expect(proposed).toContain("Notes above\n**Map:** Ozeti\n**Zone:** Default\n**Weather:** DayEarlyFog\n\nWTH (TBD)\nRMNT (TBD)");
     expect(proposed).toContain("Manual notes\nNotes below");
     expect(proposed).not.toContain("Old ·");
     expect(updatedWdlDescription(proposed, { ...fixture, map: "Ozeti · Default · DayEarlyFog" })).toBe(proposed);
+  });
+
+  it("removes old generated placeholder competition lines while preserving staff notes", () => {
+    const current = "**Briefing Start:** time\n**Match Start:** time\n**Competition:** TBD / TBD\n**Division:** TBD / Round TBD\n**Map:** Old\n**Factions:** Old\nStaff note";
+    const proposed = updatedWdlDescription(current, fixture);
+    expect(proposed).toBe("**Briefing Start:** time\n**Match Start:** time\n\n**Map:** TBD\n**Zone:** TBD\n**Weather:** TBD\n\nWTH (TBD)\nRMNT (TBD)\nStaff note");
+    expect(proposed).not.toContain("**Competition:**");
+    expect(proposed).not.toContain("**Division:**");
+    expect(proposed).toContain("Staff note");
+    expect(updatedWdlDescription(proposed, fixture)).toBe(proposed);
   });
 
   it("excludes ambiguous or unexpected descriptions", () => {
@@ -87,6 +97,8 @@ describe("Raid Helper fixture API", () => {
     expect(request).toHaveBeenCalledWith(expect.objectContaining({
       method: "PATCH", url: expect.stringContaining("/api/v4/events/event1"), body: { description: "New" }, retries: 0,
     }));
+    request.mockResolvedValue({ data: { status: "Event updated!", event: { id: "event1" } } });
+    await expect(updateWdlEventDescription("event1", "New")).resolves.toBeUndefined();
     request.mockResolvedValue({ data: { status: "success", event: { id: "other" } } });
     await expect(updateWdlEventDescription("event1", "New")).rejects.toThrow("did not confirm");
   });
