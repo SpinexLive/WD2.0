@@ -18,4 +18,8 @@ export const FACTIONS = {
   valkyra: { label: "Valkyra", emojiId: "1564588959542157382", image: "/images/wardogs-factions-valkyra.webp" },
 } as const;
 export type Faction = keyof typeof FACTIONS;
-export const isFaction = (v: unknown): v is Faction => typeof v === "string" && v in FACTIONS;
+export const isFaction = (v: unknown): v is Faction => typeof v === "string" && Object.prototype.hasOwnProperty.call(FACTIONS, v);
+export const resolveFaction = (value: string | null | undefined): Faction | null => {
+  const normalized = value?.trim().toLowerCase();
+  return isFaction(normalized) ? normalized : null;
+};

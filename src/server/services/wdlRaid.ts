@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+import { z } from "zod";
 import { independentQuery, query, tx } from "@/lib/db";
 import { audit } from "@/lib/audit";
 import { HttpError, ProviderError } from "@/lib/http";
@@ -5,7 +7,7 @@ import type { Session } from "@/lib/session";
 import { fixtureOpponents, type WdlFixture, type WdlFixtures } from "@/lib/wdlFixtures";
 import { getLeagueFixtures } from "./wardogsLeague";
 import { archiveWdlFixtures } from "./wdlFixtures";
-import { createWdlRaidEvent, deleteWdlRaidEvent, getPostedWdlEvents, getRawWdlEvent, getScheduledWdlEvents, wdlEventBody, wdlEventNames, WDL_EVENT_CHANNEL } from "./wdlRaidHelper";
+import { createWdlRaidEvent, deleteWdlRaidEvent, getPostedWdlEvents, getRawWdlEvent, getScheduledWdlEvents, updateWdlEventDescription, updatedWdlDescription, wdlEventBody, wdlEventNames, WDL_EVENT_CHANNEL } from "./wdlRaidHelper";
 
 type Actor = Pick<Session, "discordId" | "displayName">;
 
@@ -127,6 +129,88 @@ async function currentUpcomingFixture(fixtureId: string) {
   const fixture = snapshot.data.upcoming.find((item) => item.id === fixtureId);
   if (!fixture || fixture.status.toUpperCase() !== "SCHEDULED") throw new HttpError(409, "This fixture is not currently scheduled in WDL.", "wdl_fixture_incomplete");
   return fixture;
+}
+
+const signupIds = z.array(z.object({ id: z.number(), userId: z.string() }));
+
+async function prepareWdlEventDescription(fixtureId: string) {
+  const [row] = await query<{ fixture: WdlFixture; state: string; event_id: string | null; event_channel_id: string | null; verified: boolean }>(
+    `SELECT fixture.fixture, fixture.state, fixture.event_id, fixture.event_channel_id,
+            EXISTS (SELECT 1 FROM wdl_created_events AS recorded
+                     WHERE recorded.fixture_id = fixture.fixture_id AND recorded.event_id = fixture.event_id
+                       AND recorded.channel_id = fixture.event_channel_id AND recorded.origin = 'automatic'
+                       AND recorded.event_verified) AS verified
+       FROM wdl_fixture_events AS fixture WHERE fixture.fixture_id = $1`, [fixtureId],
+  );
+  if (!row || row.state !== "posted" || !row.event_id || row.event_channel_id !== WDL_EVENT_CHANNEL || !row.verified) {
+    throw new HttpError(409, "Only verified, automatically created and posted events can be previewed. Scheduled, linked, unverified and review-state events are excluded.", "wdl_event_ineligible");
+  }
+  const fixture = await currentUpcomingFixture(fixtureId);
+  if (fixtureChanged(row.fixture, fixture)) throw new HttpError(409, "The WDL fixture has changed; review it before editing the event.", "wdl_fixture_changed");
+  const opponents = fixtureOpponents(fixture);
+  const briefing = fixture.scheduledAt ? Math.floor(Date.parse(fixture.scheduledAt) / 1000) - 1800 : NaN;
+  if (!opponents || !Number.isFinite(briefing) || briefing <= Date.now() / 1000) {
+    throw new HttpError(409, "The fixture is incomplete or briefing has started; review it manually.", "wdl_fixture_incomplete");
+  }
+  const event = await getRawWdlEvent(row.event_id);
+  if (event.id !== row.event_id || event.serverId !== "1332320879073296404" || event.channelId !== row.event_channel_id ||
+      event.templateId !== "ct34" || event.startTime !== briefing || event.title !== `RMNT v ${opponents.join(" v ")}` ||
+      typeof event.description !== "string") {
+    throw new HttpError(409, "The Raid Helper event identity or description does not match the recorded fixture; review it manually.", "wdl_wrong_event");
+  }
+  const proposed = updatedWdlDescription(event.description, fixture);
+  const signups = signupIds.safeParse(event.signUps);
+  if (!signups.success) throw new HttpError(409, "Raid Helper did not return identifiable signups; review this event manually.", "wdl_signups_unavailable");
+  const version = createHash("sha256").update(JSON.stringify([fixtureId, fixture, event.id, event.channelId, event.title,
+    event.templateId, event.startTime, event.description, proposed])).digest("hex");
+  return {
+    preview: { fixtureId, fixture, eventId: event.id, title: event.title, startTime: event.startTime, current: event.description, proposed, version, changed: proposed !== event.description },
+    signups: signups.data,
+  };
+}
+
+export async function previewWdlEventDescription(fixtureId: string) {
+  return (await prepareWdlEventDescription(fixtureId)).preview;
+}
+export type WdlEventDescriptionPreview = Awaited<ReturnType<typeof previewWdlEventDescription>>;
+
+export async function applyWdlEventDescription(fixtureId: string, version: string, actor: Actor) {
+  const { preview, signups } = await prepareWdlEventDescription(fixtureId);
+  if (preview.version !== version) throw new HttpError(409, "The fixture or event changed since the preview. Preview it again.", "wdl_preview_stale");
+  if (!preview.changed) throw new HttpError(409, "The event description is already up to date.", "wdl_no_change");
+  const claimed = await query(
+    `UPDATE wdl_fixture_events SET state = 'uncertain', error = 'Description update in progress or unconfirmed; check Raid Helper before retrying.', updated_at = now()
+      WHERE fixture_id = $1 AND state = 'posted' AND event_id = $2
+        AND fixture = $3::jsonb RETURNING fixture_id`,
+    [fixtureId, preview.eventId, JSON.stringify(preview.fixture)],
+  );
+  if (!claimed.length) throw new HttpError(409, "The fixture changed or another update is in progress. Preview it again.", "wdl_preview_stale");
+  await audit(actor, "wdl.event_description_update_started", "wdl_fixture", fixtureId, { eventId: preview.eventId });
+  try {
+    await updateWdlEventDescription(preview.eventId, preview.proposed);
+    const updated = await getRawWdlEvent(preview.eventId);
+    if (updated.id !== preview.eventId || updated.serverId !== "1332320879073296404" || updated.channelId !== WDL_EVENT_CHANNEL ||
+        updated.title !== preview.title || updated.templateId !== "ct34" || updated.startTime !== preview.startTime || updated.description !== preview.proposed) {
+      throw new Error("Raid Helper readback did not match the confirmed update.");
+    }
+    const updatedSignups = signupIds.safeParse(updated.signUps);
+    if (!updatedSignups.success || signups.some((signup) => !updatedSignups.data.some((item) => item.id === signup.id && item.userId === signup.userId))) {
+      throw new Error("The signup list could not be verified after the event update.");
+    }
+  } catch (error) {
+    console.error("WDL event description update could not be verified:", error instanceof Error ? error.message : "unknown error");
+    await audit(actor, "wdl.event_description_update_uncertain", "wdl_fixture", fixtureId, { eventId: preview.eventId });
+    throw new HttpError(502, "The update could not be verified. Check the event and its signups in Raid Helper before taking further action.", "wdl_update_uncertain");
+  }
+  const finished = await query(
+    `UPDATE wdl_fixture_events SET state = 'posted', error = NULL, updated_at = now()
+      WHERE fixture_id = $1 AND state = 'uncertain' AND event_id = $2
+        AND fixture = $3::jsonb AND error = 'Description update in progress or unconfirmed; check Raid Helper before retrying.'
+      RETURNING fixture_id`, [fixtureId, preview.eventId, JSON.stringify(preview.fixture)],
+  );
+  if (!finished.length) throw new HttpError(409, "The description was updated, but the fixture changed during the operation. Review its dashboard status and Raid Helper.", "wdl_update_review");
+  await audit(actor, "wdl.event_description_updated", "wdl_fixture", fixtureId, { eventId: preview.eventId });
+  return wdlRaidStatus();
 }
 
 export async function recoverScheduledWdlEvent(fixtureId: string, scheduledId: string, actor: Actor) {

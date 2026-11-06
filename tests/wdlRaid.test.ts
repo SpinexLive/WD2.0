@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   client: null as import("pg").Client | null, migrationPending: false,
   fixtures: vi.fn(), archive: vi.fn(), names: vi.fn(), create: vi.fn(), scheduled: vi.fn(),
-  posted: vi.fn(), raw: vi.fn(), remove: vi.fn(), audit: vi.fn(),
+  posted: vi.fn(), raw: vi.fn(), remove: vi.fn(), update: vi.fn(), audit: vi.fn(),
 }));
 vi.mock("@/lib/db", () => ({
   query: async (sql: string, values: unknown[] = []) => {
@@ -31,10 +31,10 @@ vi.mock("@/server/services/wdlFixtures", () => ({ archiveWdlFixtures: mocks.arch
 vi.mock("@/server/services/wdlRaidHelper", async (original) => {
   const actual = await original<typeof import("@/server/services/wdlRaidHelper")>();
   return { ...actual, wdlEventNames: mocks.names, createWdlRaidEvent: mocks.create, getScheduledWdlEvents: mocks.scheduled,
-    getPostedWdlEvents: mocks.posted, getRawWdlEvent: mocks.raw, deleteWdlRaidEvent: mocks.remove };
+    getPostedWdlEvents: mocks.posted, getRawWdlEvent: mocks.raw, deleteWdlRaidEvent: mocks.remove, updateWdlEventDescription: mocks.update };
 });
 
-import { deleteReviewedWdlEvent, disableWdlRaidAutomation, enableWdlRaidAutomation, linkExistingWdlEvent, recoverScheduledWdlEvent, retryReviewedWdlFixture, wdlCreatedEventLog, wdlFixtureTick, wdlRaidStatus } from "@/server/services/wdlRaid";
+import { applyWdlEventDescription, deleteReviewedWdlEvent, disableWdlRaidAutomation, enableWdlRaidAutomation, linkExistingWdlEvent, previewWdlEventDescription, recoverScheduledWdlEvent, retryReviewedWdlFixture, wdlCreatedEventLog, wdlFixtureTick, wdlRaidStatus } from "@/server/services/wdlRaid";
 import type { WdlFixture } from "@/lib/wdlFixtures";
 
 const actor = { discordId: "839225558806167582", displayName: "Owner" };
@@ -71,9 +71,79 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)("WDL fixture automation with Pos
     mocks.scheduled.mockResolvedValue([]);
     mocks.posted.mockResolvedValue([]);
     mocks.remove.mockResolvedValue(undefined);
+    mocks.update.mockResolvedValue(undefined);
     mocks.audit.mockResolvedValue(undefined);
   });
   afterEach(async () => { await mocks.client?.end(); mocks.client = null; });
+
+  async function postedFixture() {
+    const fixture = makeFixture("edit", 9);
+    fixture.map = "Ozeti · Default · DayEarlyFog";
+    const event = {
+      id: "event1", serverId: "1332320879073296404", channelId: productionChannel, title: "RMNT v WTH",
+      templateId: "ct34", startTime: Math.floor(Date.parse(fixture.scheduledAt!) / 1000) - 1800,
+      description: "**Map:** Old\n**Factions:** RMNT: TBD | WTH: TBD\nStaff note",
+      signUps: [{ id: 1, userId: "player1" }],
+    };
+    mocks.fixtures.mockResolvedValue(snapshot([fixture]));
+    mocks.raw.mockResolvedValue(event);
+    await mocks.client!.query("INSERT INTO wdl_fixture_events (fixture_id, fixture, state, event_id, event_channel_id) VALUES ($1, $2, 'posted', $3, $4)", [fixture.id, JSON.stringify(fixture), event.id, event.channelId]);
+    await mocks.client!.query("INSERT INTO wdl_created_events (fixture_id, event_id, channel_id, event_verified, origin) VALUES ($1, $2, $3, true, 'automatic')", [fixture.id, event.id, event.channelId]);
+    return { fixture, event };
+  }
+
+  it("previews and updates one verified event, then verifies readback and audits", async () => {
+    const { fixture, event } = await postedFixture();
+    const preview = await previewWdlEventDescription(fixture.id);
+    expect(preview.current).toContain("Staff note");
+    expect(preview.proposed).toContain("**Weather:** DayEarlyFog");
+    expect(preview.proposed).toContain("Staff note");
+    mocks.raw.mockResolvedValueOnce(event).mockResolvedValueOnce({ ...event, description: preview.proposed });
+    await applyWdlEventDescription(fixture.id, preview.version, actor);
+    expect(mocks.update).toHaveBeenCalledOnce();
+    expect(mocks.update).toHaveBeenCalledWith(event.id, preview.proposed);
+    expect(mocks.audit).toHaveBeenCalledWith(actor, "wdl.event_description_updated", "wdl_fixture", fixture.id, { eventId: event.id });
+    expect((await wdlRaidStatus()).events[0]).toMatchObject({ state: "posted", error: null });
+  });
+
+  it("rejects stale previews and ineligible scheduled or unverified events", async () => {
+    const { fixture, event } = await postedFixture();
+    const preview = await previewWdlEventDescription(fixture.id);
+    mocks.raw.mockResolvedValue({ ...event, description: `${event.description}\nNew note` });
+    await expect(applyWdlEventDescription(fixture.id, preview.version, actor)).rejects.toMatchObject({ code: "wdl_preview_stale" });
+    await mocks.client!.query("UPDATE wdl_fixture_events SET state = 'scheduled' WHERE fixture_id = $1", [fixture.id]);
+    await expect(previewWdlEventDescription(fixture.id)).rejects.toMatchObject({ code: "wdl_event_ineligible" });
+    await mocks.client!.query("UPDATE wdl_fixture_events SET state = 'posted' WHERE fixture_id = $1", [fixture.id]);
+    await mocks.client!.query("UPDATE wdl_created_events SET event_verified = false WHERE fixture_id = $1", [fixture.id]);
+    await expect(previewWdlEventDescription(fixture.id)).rejects.toMatchObject({ code: "wdl_event_ineligible" });
+    expect(mocks.update).not.toHaveBeenCalled();
+  });
+
+  it("locks uncertain writes against repeat attempts when the provider fails or readback differs", async () => {
+    const { fixture } = await postedFixture();
+    const preview = await previewWdlEventDescription(fixture.id);
+    mocks.update.mockRejectedValue(new Error("network timeout"));
+    await expect(applyWdlEventDescription(fixture.id, preview.version, actor)).rejects.toMatchObject({ code: "wdl_update_uncertain" });
+    expect((await wdlRaidStatus()).events[0]).toMatchObject({ state: "uncertain" });
+    await expect(applyWdlEventDescription(fixture.id, preview.version, actor)).rejects.toMatchObject({ code: "wdl_event_ineligible" });
+    expect(mocks.update).toHaveBeenCalledOnce();
+  });
+
+  it("marks a mismatching readback uncertain rather than claiming success", async () => {
+    const { fixture } = await postedFixture();
+    const preview = await previewWdlEventDescription(fixture.id);
+    await expect(applyWdlEventDescription(fixture.id, preview.version, actor)).rejects.toMatchObject({ code: "wdl_update_uncertain" });
+    expect((await wdlRaidStatus()).events[0]).toMatchObject({ state: "uncertain" });
+    expect(mocks.audit).not.toHaveBeenCalledWith(actor, "wdl.event_description_updated", expect.anything(), expect.anything(), expect.anything());
+  });
+
+  it("reports missing signups after readback as uncertain", async () => {
+    const { fixture, event } = await postedFixture();
+    const preview = await previewWdlEventDescription(fixture.id);
+    mocks.raw.mockResolvedValueOnce(event).mockResolvedValueOnce({ ...event, description: preview.proposed, signUps: [] });
+    await expect(applyWdlEventDescription(fixture.id, preview.version, actor)).rejects.toMatchObject({ code: "wdl_update_uncertain" });
+    expect((await wdlRaidStatus()).events[0]).toMatchObject({ state: "uncertain" });
+  });
 
   it("does not create production events while disabled", async () => {
     mocks.fixtures.mockResolvedValue(snapshot([makeFixture("new", 1)]));

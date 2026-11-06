@@ -7,7 +7,7 @@ vi.mock("@/lib/env", () => ({ env: () => ({
 }) }));
 vi.mock("@/lib/http", async (original) => ({ ...await original<typeof import("@/lib/http")>(), requestJson: request }));
 
-import { createWdlRaidEvent, deleteWdlRaidEvent, getPostedWdlEvents, wdlEventBody, wdlEventNames } from "@/server/services/wdlRaidHelper";
+import { createWdlRaidEvent, deleteWdlRaidEvent, getPostedWdlEvents, updateWdlEventDescription, updatedWdlDescription, wdlEventBody, wdlEventNames } from "@/server/services/wdlRaidHelper";
 import type { WdlFixture } from "@/lib/wdlFixtures";
 
 const fixture: WdlFixture = {
@@ -64,5 +64,30 @@ describe("Raid Helper fixture API", () => {
     request.mockResolvedValue({ data: { status: "failure" } });
     await expect(deleteWdlRaidEvent("event1")).rejects.toThrow("did not confirm");
     expect(request).toHaveBeenCalledWith(expect.objectContaining({ method: "DELETE", retries: 0 }));
+  });
+
+  it("preserves unrelated staff text while updating identified fields", () => {
+    const current = "Notes above\n**Map:** Old · Default · Fog\nManual notes\n**Factions:** RMNT: MANTICORE\nNotes below";
+    const proposed = updatedWdlDescription(current, { ...fixture, map: "Ozeti · Default · DayEarlyFog" });
+    expect(proposed).toContain("Notes above\n**Map:** Ozeti\n**Zone:** Default\n**Weather:** DayEarlyFog\n**Factions:**");
+    expect(proposed).toContain("Manual notes\nNotes below");
+    expect(proposed).not.toContain("Old ·");
+    expect(updatedWdlDescription(proposed, { ...fixture, map: "Ozeti · Default · DayEarlyFog" })).toBe(proposed);
+  });
+
+  it("excludes ambiguous or unexpected descriptions", () => {
+    expect(() => updatedWdlDescription("**Map:** One\n**Map:** Two\n**Factions:** A", fixture)).toThrow("uniquely");
+    expect(() => updatedWdlDescription("**Map:** One", fixture)).toThrow("uniquely");
+    expect(() => updatedWdlDescription("**Map:** One\r\n**Factions:** A", fixture)).toThrow("unexpected format");
+  });
+
+  it("patches only the description without retries and checks the response", async () => {
+    request.mockResolvedValue({ data: { status: "success", event: { id: "event1" } } });
+    await updateWdlEventDescription("event1", "New");
+    expect(request).toHaveBeenCalledWith(expect.objectContaining({
+      method: "PATCH", url: expect.stringContaining("/api/v4/events/event1"), body: { description: "New" }, retries: 0,
+    }));
+    request.mockResolvedValue({ data: { status: "success", event: { id: "other" } } });
+    await expect(updateWdlEventDescription("event1", "New")).rejects.toThrow("did not confirm");
   });
 });

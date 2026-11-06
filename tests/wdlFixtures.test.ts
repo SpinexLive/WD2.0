@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { fixtureOpponents, wdlFixturesSchema } from "@/lib/wdlFixtures";
+import { fixtureOpponents, parseWdlMap, wdlFixturesSchema } from "@/lib/wdlFixtures";
 import { wdlEventBody } from "@/server/services/wdlRaidHelper";
 
 const match = "2026-11-25T19:00:00.000Z";
@@ -30,6 +30,30 @@ describe("WDL fixture parsing and event creation", () => {
     expect(wdlFixturesSchema.safeParse({ upcoming: [fixture, fixture], recent: [] }).success).toBe(false);
     expect(wdlFixturesSchema.safeParse({ upcoming: [{ ...fixture, scheduledAt: "not a date" }], recent: [] }).success).toBe(false);
     expect(wdlFixturesSchema.safeParse({ upcoming: [], recent: null }).success).toBe(false);
+  });
+
+  it("splits map, zone and weather without losing missing or extra fields", () => {
+    expect(parseWdlMap("Ozeti · Default · DayEarlyFog")).toEqual({ map: "Ozeti", zone: "Default", weather: "DayEarlyFog" });
+    expect(parseWdlMap("Ozeti")).toEqual({ map: "Ozeti", zone: null, weather: null });
+    expect(parseWdlMap(null)).toEqual({ map: null, zone: null, weather: null });
+    expect(parseWdlMap(" · Default · Fog · Extra")).toEqual({ map: null, zone: "Default", weather: "Fog · Extra" });
+    expect(parseWdlMap("Ozeti ·  · ")).toEqual({ map: "Ozeti", zone: null, weather: null });
+  });
+
+  it("formats separate location fields and known faction emojis in the Raid Helper description", () => {
+    const updated = {
+      ...fixture, map: "Ozeti · Default · DayEarlyFog", gameMode: "Unwanted mode",
+      participants: fixture.participants.map((p, index) => ({ ...p, faction: ["MANTICORE", "lonestar", "VALKYRA"][index]! })),
+    };
+    const description = wdlEventBody(updated, names, matchSeconds - 20 * 86400).description;
+    expect(description).toContain("**Map:** Ozeti\n**Zone:** Default\n**Weather:** DayEarlyFog");
+    expect(description).toContain("RMNT: <:manticore:1564588916110270504> MANTICORE");
+    expect(description).toContain("WTH: <:lonestar:1564588882551636058> lonestar");
+    expect(description).toContain("VLK: <:valkyra:1564588959542157382> VALKYRA");
+    expect(description).not.toContain("Unwanted mode");
+    const missing = wdlEventBody({ ...fixture, map: null }, names, matchSeconds - 20 * 86400).description;
+    expect(missing).toContain("**Map:** TBD\n**Zone:** TBD\n**Weather:** TBD");
+    expect(missing).toContain("RMNT: TBD");
   });
 
   it("uses the chosen briefing, post time and Raid Helper options", () => {

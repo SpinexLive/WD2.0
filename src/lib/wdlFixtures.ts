@@ -36,6 +36,15 @@ export const wdlFixturesSchema = z.object({
 export type WdlFixture = z.infer<typeof wdlFixtureSchema>;
 export type WdlFixtures = z.infer<typeof wdlFixturesSchema>;
 
+export function parseWdlMap(value: string | null | undefined) {
+  const [map, zone, ...weatherParts] = (value ?? "").split("·").map((part) => part.trim());
+  return {
+    map: map || null,
+    zone: zone || null,
+    weather: weatherParts.join(" · ").trim() || null,
+  };
+}
+
 /** Never infer our participant from an opponent's name or from its position in the array. */
 export function fixtureOpponents(fixture: WdlFixture): string[] | null {
   const ours = fixture.participants.filter((participant) => participant.team.code?.trim().toUpperCase() === "RMNT");

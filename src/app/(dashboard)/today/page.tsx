@@ -5,6 +5,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useApi, useLive } from "@/lib/client";
 import { EmptyState, ErrorBanner, Skeleton, useToast } from "@/components/ui";
 import { WdlParticipants } from "@/components/WdlParticipants";
+import { WdlMapDetails } from "@/components/WdlMapDetails";
 import type { TodayData } from "@/server/services/today";
 import { fixtureOpponents } from "@/lib/wdlFixtures";
 
@@ -110,7 +111,8 @@ export default function TodayPage() {
             {data.league.fixture ? (
               <>
                 <p className="font-semibold">RMNT v {fixtureOpponents(data.league.fixture)?.join(" v ") ?? "Teams TBC"}</p>
-                <p className="text-sm text-stone/60">{data.league.fixture.scheduledAt ? new Date(data.league.fixture.scheduledAt).toLocaleString("en-GB") : "Time TBC"} · {data.league.fixture.map ?? "Map TBC"}</p>
+                <p className="text-sm text-stone/60">{data.league.fixture.scheduledAt ? new Date(data.league.fixture.scheduledAt).toLocaleString("en-GB") : "Time TBC"}</p>
+                <p className="text-sm text-stone/60"><WdlMapDetails value={data.league.fixture.map} /></p>
                 <WdlParticipants participants={data.league.fixture.participants} />
                 {data.league.eventUrl && <a href={data.league.eventUrl} target="_blank" rel="noopener noreferrer" className="text-xs text-blood-300 hover:underline">Open Raid Helper signup →</a>}
               </>

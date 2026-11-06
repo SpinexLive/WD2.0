@@ -1,10 +1,11 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useApi } from "@/lib/client";
 import { ErrorBanner, Skeleton, WarnBanner } from "@/components/ui";
 import { WdlParticipants } from "@/components/WdlParticipants";
+import { WdlMapDetails } from "@/components/WdlMapDetails";
 import type { WdlFixture } from "@/lib/wdlFixtures";
 import type { WdlFixtureOverview } from "@/server/services/wdlFixtures";
 
@@ -12,7 +13,7 @@ const date = (value: string | null) => value
   ? new Date(value).toLocaleString("en-GB", { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })
   : "Time TBC";
 
-function Fixture({ fixture, result, eventId, eventState }: { fixture: WdlFixture; result: boolean; eventId?: string | null; eventState?: string }) {
+export function Fixture({ fixture, result, eventId, eventState }: { fixture: WdlFixture; result: boolean; eventId?: string | null; eventState?: string }) {
   const competition = fixture.competition;
   return (
     <article className="space-y-1 px-4 py-3 text-sm">
@@ -21,9 +22,10 @@ function Fixture({ fixture, result, eventId, eventState }: { fixture: WdlFixture
         <span className="text-xs text-stone/60">{date(fixture.scheduledAt)}</span>
       </div>
       <div className="text-xs text-stone/60">
-        {[fixture.number !== null ? `#${fixture.number}` : null, fixture.status, competition?.competition || "Competition TBC", competition?.season, competition?.division, competition?.round != null ? `Round ${competition.round}` : null, fixture.map || "Map TBC", fixture.gameMode || "Mode TBC"]
+        {[fixture.number !== null ? `#${fixture.number}` : null, fixture.status, competition?.competition || "Competition TBC", competition?.season, competition?.division, competition?.round != null ? `Round ${competition.round}` : null]
           .filter(Boolean).join(" · ") || "Fixture details TBC"}
       </div>
+      <div className="text-xs text-stone/60"><WdlMapDetails value={fixture.map} /></div>
       <WdlParticipants participants={fixture.participants} result={result} />
       {eventId && <Link href={`/rosters/${encodeURIComponent(eventId)}`} className="text-xs text-blood-300 hover:underline">Open roster →</Link>}
       {eventState && ["review", "uncertain", "waiting"].includes(eventState) && <p className="text-xs text-warn">Raid Helper event needs staff review.</p>}

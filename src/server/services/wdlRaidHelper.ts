@@ -1,7 +1,8 @@
 import { z } from "zod";
 import { env } from "@/lib/env";
 import { HttpError, requestJson } from "@/lib/http";
-import { fixtureOpponents, type WdlFixture } from "@/lib/wdlFixtures";
+import { fixtureOpponents, parseWdlMap, type WdlFixture } from "@/lib/wdlFixtures";
+import { FACTIONS, resolveFaction } from "@/lib/scouting";
 
 export const WDL_EVENT_CHANNEL = "1546479425644793877";
 export const WDL_MEMBER_ROLE = "1546184733174669424";
@@ -41,6 +42,33 @@ export async function wdlEventNames() {
 
 const clean = (value: string | null | undefined) => value?.replace(/@/g, "@\u200b").replace(/[\r\n]/g, " ").trim() || "TBD";
 
+export function wdlLocationAndFactions(fixture: WdlFixture) {
+  const location = parseWdlMap(fixture.map);
+  return [
+    `**Map:** ${clean(location.map)}`,
+    `**Zone:** ${clean(location.zone)}`,
+    `**Weather:** ${clean(location.weather)}`,
+    `**Factions:** ${fixture.participants.map((p) => {
+      const faction = resolveFaction(p.faction);
+      return `${clean(p.team.code || p.team.name)}: ${faction ? `<:${faction}:${FACTIONS[faction].emojiId}> ` : ""}${clean(p.faction)}`;
+    }).join(" | ")}`,
+  ];
+}
+
+export function updatedWdlDescription(description: string, fixture: WdlFixture) {
+  if (description.includes("\r")) throw new HttpError(409, "The event description has an unexpected format; review it in Raid Helper.", "wdl_description_unsafe");
+  const lines = description.split("\n");
+  const labels = ["Map", "Zone", "Weather", "Factions", "Game Mode"];
+  const indices = labels.map((label) => lines.flatMap((line, index) => line.startsWith(`**${label}:**`) ? [index] : []));
+  if (indices[0]!.length !== 1 || indices[3]!.length !== 1 || indices.some((matches) => matches.length > 1)) {
+    throw new HttpError(409, "The event description does not have uniquely identifiable map and faction fields; review it in Raid Helper.", "wdl_description_unsafe");
+  }
+  const replacement = wdlLocationAndFactions(fixture);
+  const removed = new Set(indices.flat());
+  const mapIndex = indices[0]![0]!;
+  return lines.flatMap((line, index) => index === mapIndex ? replacement : removed.has(index) ? [] : [line]).join("\n");
+}
+
 export function wdlEventBody(
   fixture: WdlFixture,
   names: Awaited<ReturnType<typeof wdlEventNames>>,
@@ -71,8 +99,7 @@ export function wdlEventBody(
     `**Match Start:** <t:${matchTime}:F>`,
     `**Competition:** ${clean(competition?.competition)} / ${clean(competition?.season)}`,
     `**Division:** ${clean(competition?.division)} / Round ${competition?.round ?? "TBD"}`,
-    `**Map:** ${clean(fixture.map)}`,
-    `**Factions:** ${fixture.participants.map((p) => `${clean(p.team.code)}: ${clean(p.faction)}`).join(" | ")}`,
+    ...wdlLocationAndFactions(fixture),
   ].join("\n");
   const postAt = briefing - TEN_DAYS;
   return {
@@ -168,6 +195,18 @@ export async function getRawWdlEvent(eventId: string) {
     id: z.string(), serverId: z.string(), channelId: z.string(), title: z.string(),
     templateId: z.string(), startTime: z.number(), scheduledId: z.string().nullable().optional(),
   }).passthrough().parse(data);
+}
+
+export async function updateWdlEventDescription(eventId: string, description: string) {
+  if (!/^[\w-]{1,64}$/.test(eventId)) throw new HttpError(400, "Invalid Raid Helper event ID.", "invalid_event");
+  const { data } = await requestJson({
+    provider: "raid-helper", method: "PATCH", url: raidUrl(`/api/v4/events/${encodeURIComponent(eventId)}`),
+    headers: raidHeaders(), body: { description }, retries: 0, timeoutMs: 15000,
+  });
+  const result = z.object({ status: z.string(), event: z.object({ id: z.string() }) }).safeParse(data);
+  if (!result.success || !["success", "ok"].includes(result.data.status.toLowerCase()) || result.data.event.id !== eventId) {
+    throw new Error("Raid Helper did not confirm the event update.");
+  }
 }
 
 export async function deleteWdlRaidEvent(eventId: string) {

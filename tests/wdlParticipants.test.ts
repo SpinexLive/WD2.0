@@ -2,6 +2,8 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { WdlParticipants } from "@/components/WdlParticipants";
+import { WdlMapDetails } from "@/components/WdlMapDetails";
+import { Fixture } from "@/app/(dashboard)/(staff)/wdl/FixturesPanel";
 import type { WdlFixture } from "@/lib/wdlFixtures";
 
 const participant = (code: string, faction: string | null): WdlFixture["participants"][number] => ({
@@ -30,5 +32,23 @@ describe("WDL participant faction icons", () => {
     expect(markup).toContain("0 points");
     expect(markup).toContain("No show");
     expect(markup).not.toContain("<img");
+  });
+
+  it("renders labeled WDL map fields and does not display game mode", () => {
+    const fixture: WdlFixture = {
+      id: "fixture", number: 106, status: "SCHEDULED", scheduledAt: null,
+      map: "Ozeti · Default · DayEarlyFog", gameMode: "Unwanted mode", competition: null,
+      participants: [participant("RMNT", "MANTICORE")],
+    };
+    const markup = renderToStaticMarkup(createElement(Fixture, { fixture, result: false }));
+    expect(markup).toContain("Map: Ozeti");
+    expect(markup).toContain("Zone: Default");
+    expect(markup).toContain("Weather: DayEarlyFog");
+    expect(markup).not.toContain("Unwanted mode");
+    expect(markup).not.toContain("Mode TBC");
+    const missing = renderToStaticMarkup(createElement(WdlMapDetails, { value: null }));
+    expect(missing).toContain("Map: TBC");
+    expect(missing).toContain("Zone: TBC");
+    expect(missing).toContain("Weather: TBC");
   });
 });

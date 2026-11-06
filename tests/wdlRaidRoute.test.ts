@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
 
-const mocks = vi.hoisted(() => ({ session: vi.fn(), rate: vi.fn(), status: vi.fn(), log: vi.fn(), enable: vi.fn(), disable: vi.fn(), link: vi.fn(), scheduled: vi.fn(), retry: vi.fn(), remove: vi.fn() }));
+const mocks = vi.hoisted(() => ({ session: vi.fn(), rate: vi.fn(), status: vi.fn(), log: vi.fn(), enable: vi.fn(), disable: vi.fn(), link: vi.fn(), scheduled: vi.fn(), retry: vi.fn(), remove: vi.fn(), preview: vi.fn(), update: vi.fn() }));
 vi.mock("@/lib/session", () => ({ getSession: mocks.session }));
 vi.mock("@/lib/ratelimit", () => ({ rateLimit: mocks.rate }));
 vi.mock("@/lib/env", () => ({ env: () => ({ OWNER_DISCORD_ID: "owner", APP_URL: "https://dashboard.test" }) }));
@@ -9,6 +9,7 @@ vi.mock("@/server/services/wdlRaid", () => ({
   wdlRaidStatus: mocks.status, wdlCreatedEventLog: mocks.log, enableWdlRaidAutomation: mocks.enable, disableWdlRaidAutomation: mocks.disable, linkExistingWdlEvent: mocks.link,
   recoverScheduledWdlEvent: mocks.scheduled, deleteReviewedWdlEvent: mocks.remove,
   retryReviewedWdlFixture: mocks.retry,
+  previewWdlEventDescription: mocks.preview, applyWdlEventDescription: mocks.update,
 }));
 
 import { GET, POST } from "@/app/api/admin/wdl-fixtures/route";
@@ -48,6 +49,22 @@ describe("WDL Admin automation route", () => {
     expect(mocks.enable).not.toHaveBeenCalled();
     expect((await POST(post({ action: "enable" }), context)).status).toBe(200);
     expect(mocks.enable).toHaveBeenCalledWith(owner);
+  });
+
+  it("restricts preview and update to the owner with CSRF and a valid preview version", async () => {
+    const update = { action: "update-description", fixtureId: "fixture", version: "a".repeat(64) };
+    mocks.session.mockResolvedValue({ ...owner, discordId: "other" });
+    expect((await POST(post({ action: "preview-description", fixtureId: "fixture" }), context)).status).toBe(404);
+    expect((await POST(post(update), context)).status).toBe(404);
+    mocks.session.mockResolvedValue(owner);
+    expect((await POST(post(update, "wrong"), context)).status).toBe(403);
+    expect((await POST(post({ ...update, version: "invalid" }), context)).status).toBe(400);
+    expect(mocks.update).not.toHaveBeenCalled();
+    mocks.preview.mockResolvedValue({ version: update.version });
+    mocks.update.mockResolvedValue({ enabled: true });
+    expect((await POST(post({ action: "preview-description", fixtureId: "fixture" }), context)).status).toBe(200);
+    expect((await POST(post(update), context)).status).toBe(200);
+    expect(mocks.update).toHaveBeenCalledWith("fixture", update.version, owner);
   });
 
   it("restricts the event ID log to the owner and validates pagination", async () => {

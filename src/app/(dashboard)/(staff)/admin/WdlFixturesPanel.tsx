@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { useApi } from "@/lib/client";
 import { ConfirmDialog, ErrorBanner, Skeleton, useToast } from "@/components/ui";
-import type { WdlCreatedEventLog, WdlRaidStatus } from "@/server/services/wdlRaid";
+import type { WdlCreatedEventLog, WdlEventDescriptionPreview, WdlRaidStatus } from "@/server/services/wdlRaid";
 
 type Confirmation = "enable" | "disable" | { link: string } | { scheduled: string } | { retry: string } | { remove: string };
 
@@ -19,6 +19,7 @@ export default function WdlFixturesPanel() {
   const [logError, setLogError] = useState<string | null>(null);
   const [logLoading, setLogLoading] = useState(false);
   const [logRetryCursor, setLogRetryCursor] = useState<string | null>(null);
+  const [preview, setPreview] = useState<WdlEventDescriptionPreview | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -61,6 +62,39 @@ export default function WdlFixturesPanel() {
     }
   }
 
+  async function previewDescription(fixtureId: string) {
+    setBusy(true);
+    try {
+      const result = await api<WdlEventDescriptionPreview>("/api/admin/wdl-fixtures", { method: "POST", body: { action: "preview-description", fixtureId } });
+      setError(null);
+      if (result.changed) setPreview(result);
+      else toast({ text: "The event description is already up to date.", tone: "ok" });
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function updateDescription() {
+    if (!preview) return;
+    setBusy(true);
+    try {
+      setData(await api<WdlRaidStatus>("/api/admin/wdl-fixtures", { method: "POST", body: {
+        action: "update-description", fixtureId: preview.fixtureId, version: preview.version,
+      } }));
+      setError(null);
+      toast({ text: "Event description updated and read back from Raid Helper.", tone: "ok" });
+    } catch (e) {
+      const message = (e as Error).message;
+      await load();
+      setError(message);
+    } finally {
+      setPreview(null);
+      setBusy(false);
+    }
+  }
+
   const confirmBody = confirm === "enable" ? { action: "enable" }
     : confirm === "disable" ? { action: "disable" }
       : confirm && "link" in confirm ? { action: "link", fixtureId: confirm.link, eventId: eventIds[confirm.link] }
@@ -88,6 +122,7 @@ export default function WdlFixturesPanel() {
           {data.events.length > 0 && (
             <div className="space-y-2">
               <h3 className="font-semibold">Fixture event status</h3>
+              <p className="text-xs text-stone/60">Description previews are available individually for verified, automatically created posted events with an unchanged upcoming fixture. Scheduled, linked, unverified, past and review-state events are excluded and are not updated automatically.</p>
               {data.events.map((event) => (
                 <div key={event.fixtureId} className="rounded border border-ink-700 p-3 text-sm">
                   <p><strong>Fixture {event.fixture.number ?? event.fixtureId}</strong> · {event.state}</p>
@@ -95,6 +130,7 @@ export default function WdlFixturesPanel() {
                   {event.eventId && <p>Raid Helper event ID: {event.eventId}</p>}
                   {event.eventId && event.eventChannelId && <p><a className="text-blood-300 hover:underline" target="_blank" rel="noopener noreferrer" href={`https://discord.com/channels/1332320879073296404/${encodeURIComponent(event.eventChannelId)}/${encodeURIComponent(event.eventId)}`}>Open Raid Helper event</a></p>}
                   {event.scheduledId && <p>Scheduled event ID: {event.scheduledId}</p>}
+                  {event.state === "posted" && event.eventId && <button className="btn-ghost mt-2" disabled={busy} onClick={() => void previewDescription(event.fixtureId)}>Preview description update</button>}
                   {event.state === "review" && event.scheduledId && !event.eventId && <p className="text-xs text-stone/60">Review the scheduled event in Raid Helper; deleting scheduled events here has not been verified.</p>}
                   {["review", "uncertain", "creating"].includes(event.state) && (
                     <div className="mt-2 flex flex-wrap gap-2">
@@ -105,36 +141,36 @@ export default function WdlFixturesPanel() {
                       {event.state === "review" && event.eventId && <button className="btn-ghost" disabled={busy} onClick={() => setConfirm({ remove: event.fixtureId })}>Delete linked event</button>}
                     </div>
                   )}
-                  <details className="rounded border border-ink-700 p-3" onToggle={(event) => {
-                    if (event.currentTarget.open && !eventLog && !logLoading && !logError) void loadEventLog(null);
-                  }}>
-                    <summary className="cursor-pointer text-sm font-semibold">Created event ID log</summary>
-                    <p className="mt-2 text-xs text-stone/60">All recorded IDs are retained. Verified refers to event identity; review the fixture status before any future edits. Older records and unverified IDs need additional review.</p>
-                    {logError && <ErrorBanner message={logError} onRetry={() => void loadEventLog(logRetryCursor)} />}
-                    {logLoading && !eventLog && <Skeleton className="mt-2 h-16" />}
-                    {eventLog && (
-                      <>
-                        {eventLog.events.length === 0 && <p className="mt-2 text-sm text-stone/60">No event IDs have been recorded yet.</p>}
-                        <div className="mt-2 divide-y divide-ink-700">
-                          {eventLog.events.map((event) => (
-                            <div className="space-y-1 py-2 text-sm" key={event.id}>
-                              <p><strong>Fixture {event.fixtureId}</strong> · {event.origin === "automatic" ? "Created by automation" : "Older record: origin unverified"}</p>
-                              {event.scheduledId && <p>Scheduled event ID: {event.scheduledId}</p>}
-                              {event.eventId && <p>Posted event ID: {event.eventId} · {event.eventVerified ? "verified" : "unverified"}</p>}
-                              {event.eventId && event.channelId && /^\d{15,22}$/.test(event.eventId) && /^\d{15,22}$/.test(event.channelId) &&
-                                <a className="text-xs text-blood-300 hover:underline" target="_blank" rel="noopener noreferrer" href={`https://discord.com/channels/1332320879073296404/${event.channelId}/${event.eventId}`}>Open event in Discord</a>}
-                              <p className="text-xs text-stone/50">Recorded {new Date(event.createdAt).toLocaleString("en-GB")}</p>
-                            </div>
-                          ))}
-                        </div>
-                        {eventLog.nextCursor && <button className="btn-ghost mt-2" disabled={logLoading} onClick={() => void loadEventLog(eventLog.nextCursor)}>Load older IDs</button>}
-                      </>
-                    )}
-                  </details>
                 </div>
               ))}
             </div>
           )}
+          <details className="rounded border border-ink-700 p-3" onToggle={(event) => {
+            if (event.currentTarget.open && !eventLog && !logLoading && !logError) void loadEventLog(null);
+          }}>
+            <summary className="cursor-pointer text-sm font-semibold">Created event ID log</summary>
+            <p className="mt-2 text-xs text-stone/60">All recorded IDs are retained. Verified refers to event identity; review the fixture status before any future edits. Older records and unverified IDs need additional review.</p>
+            {logError && <ErrorBanner message={logError} onRetry={() => void loadEventLog(logRetryCursor)} />}
+            {logLoading && !eventLog && <Skeleton className="mt-2 h-16" />}
+            {eventLog && (
+              <>
+                {eventLog.events.length === 0 && <p className="mt-2 text-sm text-stone/60">No event IDs have been recorded yet.</p>}
+                <div className="mt-2 divide-y divide-ink-700">
+                  {eventLog.events.map((event) => (
+                    <div className="space-y-1 py-2 text-sm" key={event.id}>
+                      <p><strong>Fixture {event.fixtureId}</strong> · {event.origin === "automatic" ? "Created by automation" : "Older record: origin unverified"}</p>
+                      {event.scheduledId && <p>Scheduled event ID: {event.scheduledId}</p>}
+                      {event.eventId && <p>Posted event ID: {event.eventId} · {event.eventVerified ? "verified" : "unverified"}</p>}
+                      {event.eventId && event.channelId && /^\d{15,22}$/.test(event.eventId) && /^\d{15,22}$/.test(event.channelId) &&
+                        <a className="text-xs text-blood-300 hover:underline" target="_blank" rel="noopener noreferrer" href={`https://discord.com/channels/1332320879073296404/${event.channelId}/${event.eventId}`}>Open event in Discord</a>}
+                      <p className="text-xs text-stone/50">Recorded {new Date(event.createdAt).toLocaleString("en-GB")}</p>
+                    </div>
+                  ))}
+                </div>
+                {eventLog.nextCursor && <button className="btn-ghost mt-2" disabled={logLoading} onClick={() => void loadEventLog(eventLog.nextCursor)}>Load older IDs</button>}
+              </>
+            )}
+          </details>
         </>
       )}
       {confirm && confirmBody && (
@@ -146,6 +182,16 @@ export default function WdlFixturesPanel() {
               : typeof confirm === "object" && "remove" in confirm ? "This permanently deletes the linked Raid Helper event and may remove its sign-ups. The dashboard roster is not deleted. Check the fixture before continuing."
                 : typeof confirm === "object" && "retry" in confirm ? "Check Raid Helper for an existing posted or scheduled event first. Retrying an uncertain request can create a duplicate if Raid Helper has not listed the earlier event yet."
                   : "Confirm that the chosen Raid Helper event has the current WDL teams, map and time, and the correct member role and briefing voice channel. Update it in Raid Helper first if needed. The dashboard will link it rather than create a duplicate."}
+        </ConfirmDialog>
+      )}
+      {preview && (
+        <ConfirmDialog title="Update this Raid Helper event?" confirmLabel="Update description" busy={busy} onCancel={() => setPreview(null)} onConfirm={() => void updateDescription()}>
+          <p>Fixture {preview.fixtureId} · {preview.title} · Event ID {preview.eventId}</p>
+          <p className="mt-2">Only the description is sent. Raid Helper does not explicitly guarantee that signups are preserved by this edit. The dashboard checks signup IDs afterwards, but cannot verify all signup details; check them in Raid Helper. Concurrent signups or cancellations can also require manual review. Staff should avoid editing this event while confirming because Raid Helper does not offer a conditional update.</p>
+          <p className="mt-3 font-semibold">Current description</p>
+          <pre className="mt-1 whitespace-pre-wrap break-words rounded border border-ink-700 p-2 text-xs">{preview.current}</pre>
+          <p className="mt-3 font-semibold">Proposed description</p>
+          <pre className="mt-1 whitespace-pre-wrap break-words rounded border border-ink-700 p-2 text-xs">{preview.proposed}</pre>
         </ConfirmDialog>
       )}
       {node}
