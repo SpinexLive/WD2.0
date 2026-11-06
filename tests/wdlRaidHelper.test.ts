@@ -85,6 +85,22 @@ describe("Raid Helper fixture API", () => {
     expect(updatedWdlDescription(proposed, fixture)).toBe(proposed);
   });
 
+  it("previews moving previously grouped opponents onto separate lines without losing other text", () => {
+    const match = {
+      ...fixture, map: "Ozeti · Default · DayEarlyFog",
+      participants: [
+        { ...fixture.participants[0]!, faction: "MANTICORE" },
+        { ...fixture.participants[1]!, team: { code: "HTD", name: null }, faction: "VALKYRA" },
+        { ...fixture.participants[1]!, team: { code: "OKT", name: null }, faction: "LONESTAR" },
+      ],
+    };
+    const current = "Staff note\n**Map:** Ozeti\n**Zone:** Default\n**Weather:** DayEarlyFog\n\n<:valkyra:1564588959542157382> HTD  <:lonestar:1564588882551636058> OKT\n<:manticore:1564588916110270504> RMNT\nMore notes";
+    const proposed = current.replace("HTD  <:lonestar:", "HTD\n<:lonestar:");
+    expect(updatedWdlDescription(current, match)).toBe(proposed);
+    expect(updatedWdlDescription(proposed, match)).toBe(proposed);
+    expect(() => updatedWdlDescription(current.replace("HTD  ", "HTD edited  "), match)).toThrow("uniquely");
+  });
+
   it("excludes ambiguous or unexpected descriptions", () => {
     expect(() => updatedWdlDescription("**Map:** One\n**Map:** Two\n**Factions:** A", fixture)).toThrow("uniquely");
     expect(() => updatedWdlDescription("**Map:** One", fixture)).toThrow("uniquely");

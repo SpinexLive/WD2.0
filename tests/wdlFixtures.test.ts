@@ -51,7 +51,8 @@ describe("WDL fixture parsing and event creation", () => {
       `**Match Start:** <t:${matchSeconds}:F>`,
       "",
       "**Map:** Ozeti", "**Zone:** Default", "**Weather:** DayEarlyFog", "",
-      "<:lonestar:1564588882551636058> WTH  <:valkyra:1564588959542157382> VLK",
+      "<:lonestar:1564588882551636058> WTH",
+      "<:valkyra:1564588959542157382> VLK",
       "<:manticore:1564588916110270504> RMNT",
     ].join("\n"));
     expect(description).not.toContain("Unwanted mode");

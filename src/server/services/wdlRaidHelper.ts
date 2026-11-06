@@ -42,7 +42,7 @@ export async function wdlEventNames() {
 
 const clean = (value: string | null | undefined) => value?.replace(/@/g, "@\u200b").replace(/[\r\n]/g, " ").trim() || "TBD";
 
-export function wdlLocationAndFactions(fixture: WdlFixture) {
+function locationAndFactions(fixture: WdlFixture, groupedOpponents: boolean) {
   const location = parseWdlMap(fixture.map);
   const teams = fixture.participants.map((p) => {
     const faction = resolveFaction(p.faction);
@@ -57,9 +57,15 @@ export function wdlLocationAndFactions(fixture: WdlFixture) {
     `**Zone:** ${clean(location.zone)}`,
     `**Weather:** ${clean(location.weather)}`,
     "",
-    teams.filter((team) => !team.ours).map((team) => team.label).join("  "),
-    teams.filter((team) => team.ours).map((team) => team.label).join("  "),
+    ...(groupedOpponents
+      ? [teams.filter((team) => !team.ours).map((team) => team.label).join("  "),
+        teams.filter((team) => team.ours).map((team) => team.label).join("  ")]
+      : [...teams.filter((team) => !team.ours), ...teams.filter((team) => team.ours)].map((team) => team.label)),
   ];
+}
+
+export function wdlLocationAndFactions(fixture: WdlFixture) {
+  return locationAndFactions(fixture, false);
 }
 
 function competitionLines(fixture: WdlFixture) {
@@ -83,11 +89,14 @@ export function updatedWdlDescription(description: string, fixture: WdlFixture) 
   const labels = ["Map", "Zone", "Weather", "Factions", "Game Mode"];
   const indices = labels.map((label) => lines.flatMap((line, index) => line.startsWith(`**${label}:**`) ? [index] : []));
   const replacement = wdlLocationAndFactions(fixture);
+  const previous = locationAndFactions(fixture, true);
   const mapIndex = indices[0]![0];
   if (indices[0]!.length === 1 && indices[1]!.length === 1 && indices[2]!.length === 1 &&
-      indices[3]!.length === 0 && indices[4]!.length === 0 &&
-      mapIndex !== undefined && lines.slice(mapIndex, mapIndex + replacement.length).join("\n") === replacement.join("\n")) {
-    return description;
+      indices[3]!.length === 0 && indices[4]!.length === 0 && mapIndex !== undefined) {
+    if (lines.slice(mapIndex, mapIndex + replacement.length).join("\n") === replacement.join("\n")) return description;
+    if (lines.slice(mapIndex, mapIndex + previous.length).join("\n") === previous.join("\n")) {
+      return [...lines.slice(0, mapIndex), ...replacement, ...lines.slice(mapIndex + previous.length)].join("\n");
+    }
   }
   if (indices[0]!.length !== 1 || indices[3]!.length !== 1 || indices.some((matches) => matches.length > 1)) {
     throw new HttpError(409, "The event description does not have uniquely identifiable map and faction fields; review it in Raid Helper.", "wdl_description_unsafe");
