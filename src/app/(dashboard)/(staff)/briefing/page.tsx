@@ -89,7 +89,7 @@ function BriefingChannelsDialog({ roster, onClose }: { roster: BriefingRoster; o
   const api = useApi();
   const [groups, setGroups] = useState<ChannelGroup[]>(() => roster.squads.map((squad) => ({
     id: crypto.randomUUID(),
-    name: `${roster.title}-${squad.name}`,
+    name: squad.name,
     squadIds: [squad.id],
   })));
   const [creating, setCreating] = useState(false);
