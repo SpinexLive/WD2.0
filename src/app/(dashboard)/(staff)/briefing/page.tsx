@@ -1,8 +1,9 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { useApi, useLive } from "@/lib/client";
+import { useApi, useLive, type ApiError } from "@/lib/client";
 import { EmptyState, ErrorBanner, Skeleton } from "@/components/ui";
+import { formatBriefingChannelName } from "@/lib/briefingChannels";
 import type { Briefing, BriefingPlayer, BriefingRoster } from "@/server/services/briefing";
 
 const RESPONSE_LABEL: Record<string, string> = { accepted: "Confirmed", declined: "Declined" };
@@ -65,11 +66,153 @@ function RosterView({ r, voiceAvailable }: { r: BriefingRoster; voiceAvailable: 
   );
 }
 
+interface ChannelGroup {
+  id: string;
+  name: string;
+  squadIds: string[];
+}
+
+interface CreatedChannel {
+  id: string;
+  name: string;
+  squadNames: string[];
+  deleteAt: string;
+  cleanupRequired?: boolean;
+}
+
+interface CreatedChannelsResult {
+  guildId: string;
+  channels: CreatedChannel[];
+}
+
+function BriefingChannelsDialog({ roster, onClose }: { roster: BriefingRoster; onClose: () => void }) {
+  const api = useApi();
+  const [groups, setGroups] = useState<ChannelGroup[]>(() => roster.squads.map((squad) => ({
+    id: crypto.randomUUID(),
+    name: `${roster.title}-${squad.name}`,
+    squadIds: [squad.id],
+  })));
+  const [creating, setCreating] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [created, setCreated] = useState<CreatedChannelsResult | null>(null);
+
+  const assignedSquads = new Set(groups.flatMap((group) => group.squadIds));
+  const canCreate = groups.some((group) => group.squadIds.length > 0 && !!formatBriefingChannelName(group.name))
+    && new Set(groups.filter((group) => group.squadIds.length > 0).map((group) => formatBriefingChannelName(group.name))).size === groups.filter((group) => group.squadIds.length > 0).length;
+
+  function assignSquad(squadId: string, groupId: string, checked: boolean) {
+    setGroups((previous) => previous.map((group) => ({
+      ...group,
+      squadIds: group.id === groupId
+        ? checked ? [...group.squadIds.filter((id) => id !== squadId), squadId] : group.squadIds.filter((id) => id !== squadId)
+        : group.squadIds.filter((id) => id !== squadId),
+    })));
+  }
+
+  async function createChannels() {
+    const channels = groups.filter((group) => group.squadIds.length > 0);
+    setCreating(true);
+    setError(null);
+    try {
+      const result = await api<CreatedChannelsResult>("/api/briefing/channels", {
+        method: "POST",
+        body: { eventId: roster.eventId, channels: channels.map(({ name, squadIds }) => ({ name, squadIds })) },
+      });
+      setCreated(result);
+    } catch (caught) {
+      const apiError = caught as ApiError;
+      setError(apiError.message);
+      const partial = apiError.extra?.created;
+      const guildId = apiError.extra?.guildId;
+      if (Array.isArray(partial) && typeof guildId === "string") setCreated({ channels: partial as CreatedChannel[], guildId });
+    } finally {
+      setCreating(false);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-3" role="presentation">
+      <section role="dialog" aria-modal="true" aria-labelledby="briefing-channels-title" className="max-h-[90vh] w-full max-w-3xl overflow-y-auto rounded-xl border border-ink-600 bg-ink-900 p-5 shadow-2xl">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <h2 id="briefing-channels-title" className="text-xl font-bold">Create squad voice channels</h2>
+            <p className="mt-1 text-sm text-stone/60">{roster.title} · created under the briefing category, visible to the clan voice role, and automatically deleted at midnight UK time on its creation day.</p>
+          </div>
+          {!creating && <button className="btn-ghost" onClick={onClose}>{created ? "Done" : "Cancel"}</button>}
+        </div>
+
+        {created ? (
+          <div className="mt-5 space-y-3">
+            {error && <ErrorBanner message={error} />}
+            <p className="text-sm text-stone/70">{error ? "These channels were created before the failure:" : `Created ${created.channels.length} voice channel${created.channels.length === 1 ? "" : "s"}.`}</p>
+            <ul className="space-y-2">
+              {created.channels.map((channel) => (
+                <li key={channel.id} className="rounded-lg border border-ink-700 px-3 py-2">
+                  <a className="font-semibold text-blood-300 hover:underline" href={`https://discord.com/channels/${created.guildId}/${channel.id}`} target="_blank" rel="noreferrer">{channel.name}</a>
+                  <div className="text-xs text-stone/50">{channel.squadNames.join(" + ")}</div>
+                  {channel.cleanupRequired ? (
+                    <div className="mt-1 text-xs text-red-300">Automatic deletion was not scheduled. Delete this channel manually.</div>
+                  ) : (
+                    <div className="mt-1 text-xs text-stone/50">
+                      Auto-delete: {new Intl.DateTimeFormat("en-GB", { timeZone: "Europe/London", dateStyle: "medium", timeStyle: "short" }).format(new Date(channel.deleteAt))} UK time
+                    </div>
+                  )}
+                </li>
+              ))}
+            </ul>
+          </div>
+        ) : (
+          <>
+            <div className="mt-5 space-y-3">
+              {groups.map((group) => (
+                <section key={group.id} className="rounded-lg border border-ink-700 p-3">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <label className="min-w-0 flex-1">
+                      <span className="sr-only">Channel name</span>
+                      <input className="input w-full" value={group.name} onChange={(event) => setGroups((current) => current.map((item) => item.id === group.id ? { ...item, name: event.target.value } : item))} aria-label="Channel name" />
+                    </label>
+                    <span className="max-w-full truncate text-xs text-stone/45">Preview: {formatBriefingChannelName(group.name) || "Enter a channel name"}</span>
+                  </div>
+                  <div className="mt-3 flex flex-wrap gap-x-4 gap-y-2">
+                    {roster.squads.map((squad) => (
+                      <label key={squad.id} className="flex items-center gap-2 text-sm text-stone/75">
+                        <input
+                          type="checkbox"
+                          checked={group.squadIds.includes(squad.id)}
+                          onChange={(event) => assignSquad(squad.id, group.id, event.target.checked)}
+                        />
+                        {squad.name}
+                      </label>
+                    ))}
+                  </div>
+                  {groups.length > 1 && <button className="mt-2 text-xs text-blood-300 hover:underline" onClick={() => setGroups((current) => current.filter((item) => item.id !== group.id))}>Remove channel</button>}
+                </section>
+              ))}
+            </div>
+            <button className="btn-ghost mt-3" onClick={() => setGroups((current) => [...current, { id: crypto.randomUUID(), name: "shared-channel", squadIds: [] }])}>Add channel</button>
+            <div className="mt-4 text-xs text-stone/50">
+              {assignedSquads.size} of {roster.squads.length} squads assigned. Unassigned squads will not get a channel. Each channel is visible only to the configured clan role (and server administrators), and will be deleted at midnight UK time on its creation day.
+            </div>
+            {error && <div className="mt-3"><ErrorBanner message={error} /></div>}
+            <div className="mt-5 flex justify-end gap-2 border-t border-ink-700 pt-4">
+              <button className="btn-ghost" onClick={onClose} disabled={creating}>Cancel</button>
+              <button className="btn-primary" onClick={() => void createChannels()} disabled={!canCreate || creating}>
+                {creating ? "Creating…" : `Create ${groups.filter((group) => group.squadIds.length > 0).length} voice channels`}
+              </button>
+            </div>
+          </>
+        )}
+      </section>
+    </div>
+  );
+}
+
 export default function BriefingPage() {
   const api = useApi();
   const [data, setData] = useState<Briefing | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
+  const [showChannelSetup, setShowChannelSetup] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -117,7 +260,15 @@ export default function BriefingPage() {
       )}
 
       {data && data.rosters.length > 0 && !current && <p className="text-sm text-stone/50">Select a roster above to open it.</p>}
-      {data && current && <RosterView r={current} voiceAvailable={data.voiceAvailable} />}
+      {data && current && (
+        <>
+          <div className="flex justify-end">
+            <button className="btn-primary" onClick={() => setShowChannelSetup(true)} disabled={current.squads.length === 0}>Set up squad voice channels</button>
+          </div>
+          <RosterView r={current} voiceAvailable={data.voiceAvailable} />
+          {showChannelSetup && <BriefingChannelsDialog key={current.eventId} roster={current} onClose={() => setShowChannelSetup(false)} />}
+        </>
+      )}
     </div>
   );
 }

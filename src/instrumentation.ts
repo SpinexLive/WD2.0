@@ -20,5 +20,7 @@ export async function register() {
     startWdlResultsScheduler();
     const { startWdlMatchdayIconScheduler } = await import("./server/services/wdlMatchdayIcon");
     startWdlMatchdayIconScheduler();
+    const { startBriefingChannelCleanupScheduler } = await import("./server/services/briefingChannelCleanup");
+    startBriefingChannelCleanupScheduler();
   }
 }

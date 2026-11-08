@@ -17,6 +17,7 @@ export interface BriefingPlayer {
 }
 
 export interface BriefingSquad {
+  id: string;
   name: string;
   size: number;
   slots: (BriefingPlayer | null)[];
@@ -46,6 +47,7 @@ export async function buildBriefing() {
     const roster = await getRoster(e.id);
     if (!roster) continue;
     const squads: BriefingSquad[] = roster.squads.map((s) => ({
+      id: s.id,
       name: s.name,
       size: s.size,
       slots: s.slots.map((p) =>
