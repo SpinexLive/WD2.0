@@ -4,57 +4,64 @@ import { env } from "@/lib/env";
 import { query } from "@/lib/db";
 import { requestJson } from "@/lib/http";
 import type { WdlFixture, WdlFixtures } from "@/lib/wdlFixtures";
+import { CALENDAR_TIME_ZONE, HOLIDAY_LOGOS, londonDate, type CalendarIconVariant } from "@/lib/calendarLogos";
 import { getLeagueFixtures } from "./wardogsLeague";
 
 const API = "https://discord.com/api/v10";
-const TIME_ZONE = "Europe/London";
 const MATCHDAY_MS = 60 * 60 * 1000;
 const CANCELLED_STATUSES = new Set(["CANCELLED", "CANCELED", "POSTPONED", "ABANDONED", "VOID"]);
-type IconVariant = "matchday" | "default";
-
-function londonParts(timestamp: number): Record<string, string> {
-  return Object.fromEntries(new Intl.DateTimeFormat("en-GB", {
-    timeZone: TIME_ZONE,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    hourCycle: "h23",
-  }).formatToParts(timestamp).map(({ type, value }) => [type, value]));
-}
-
-function matchdayDate(timestamp: number): string {
-  const parts = londonParts(timestamp);
-  return `${parts.year}-${parts.month}-${parts.day}`;
-}
 
 /** Match-day starts at 01:00 London time and lasts until one hour after each RMNT match starts. */
 export function isWdlMatchdayIconActive(fixtures: WdlFixtures, now = Date.now()): boolean {
-  const currentParts = londonParts(now);
-  const currentDate = `${currentParts.year}-${currentParts.month}-${currentParts.day}`;
-  const currentHour = Number(currentParts.hour);
-
-  return [...fixtures.upcoming, ...fixtures.recent].some((fixture: WdlFixture) => {
+  const nowParts = new Intl.DateTimeFormat("en-GB", {
+    timeZone: CALENDAR_TIME_ZONE,
+    hour: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(now);
+  const currentHour = Number(nowParts.find((part) => part.type === "hour")?.value);
+  const currentDate = londonDate(now);
+  const starts = [...fixtures.upcoming, ...fixtures.recent].flatMap((fixture: WdlFixture) => {
     const scheduledAt = fixture.scheduledAt ? Date.parse(fixture.scheduledAt) : NaN;
-    if (!Number.isFinite(scheduledAt) || CANCELLED_STATUSES.has(fixture.status.toUpperCase())) return false;
-    if (!fixture.participants.some((participant) => participant.team.code?.trim().toUpperCase() === "RMNT")) return false;
-
-    const date = matchdayDate(scheduledAt);
-    const matchdayStarted = currentDate > date || (currentDate === date && currentHour >= 1);
-    return matchdayStarted && now < scheduledAt + MATCHDAY_MS;
+    if (!Number.isFinite(scheduledAt) || CANCELLED_STATUSES.has(fixture.status.toUpperCase())) return [];
+    if (!fixture.participants.some((participant) => participant.team.code?.trim().toUpperCase() === "RMNT")) return [];
+    return [{ date: londonDate(scheduledAt), scheduledAt }];
   });
+  const dates = new Set(starts.map((match) => match.date));
+  return [...dates].some((date) => {
+    const latestStart = Math.max(...starts.filter((match) => match.date === date).map((match) => match.scheduledAt));
+    const matchdayStarted = currentDate > date || (currentDate === date && currentHour >= 1);
+    return matchdayStarted && now < latestStart + MATCHDAY_MS;
+  });
+}
+
+export function getCalendarIconVariant(fixtures: WdlFixtures, now = Date.now()): CalendarIconVariant {
+  const today = londonDate(now);
+  const activeHoliday = HOLIDAY_LOGOS.find((logo) => today >= logo.startDate && today <= logo.endDate);
+  const matchdayActive = isWdlMatchdayIconActive(fixtures, now);
+  if (activeHoliday) {
+    const isSingleDay = activeHoliday.startDate === activeHoliday.endDate;
+    if (isSingleDay || !matchdayActive) return activeHoliday.key;
+    return "matchday";
+  }
+  return matchdayActive ? "matchday" : "default";
 }
 
 function botHeaders() {
   return { Authorization: `Bot ${env().DISCORD_BOT_TOKEN}` };
 }
 
-async function updateServerIcon(variant: IconVariant): Promise<void> {
-  const relativePath = variant === "matchday"
-    ? ["public", "images", "calendar logos", "matchday.png"]
-    : ["public", "images", "icon.png"];
-  const image = await readFile(resolve(process.cwd(), ...relativePath));
-  const body = `data:image/png;base64,${image.toString("base64")}`;
+async function updateServerIcon(variant: CalendarIconVariant): Promise<void> {
+  let imagePath: string[];
+  if (variant === "default") {
+    imagePath = ["public", "images", "icon.png"];
+  } else if (variant === "matchday") {
+    imagePath = ["public", "images", "calendar logos", "matchday.png"];
+  } else {
+    const logo = HOLIDAY_LOGOS.find((item) => item.key === variant);
+    if (!logo) throw new Error(`Unknown calendar icon variant: ${variant}`);
+    imagePath = ["public", ...logo.image.slice(1).split("/")];
+  }
+  const body = `data:image/png;base64,${(await readFile(resolve(process.cwd(), ...imagePath))).toString("base64")}`;
   await requestJson({
     provider: "discord",
     method: "PATCH",
@@ -72,7 +79,7 @@ async function recordError(previous: string | null, error: unknown): Promise<voi
 }
 
 export async function syncWdlMatchdayIcon(now = Date.now()): Promise<void> {
-  const [state] = await query<{ current_icon: IconVariant | null; last_error: string | null }>(
+  const [state] = await query<{ current_icon: CalendarIconVariant | null; last_error: string | null }>(
     "SELECT current_icon, last_error FROM wdl_matchday_icon_state WHERE id = 1",
   );
   if (!state) throw new Error("WDL matchday icon migration has not been applied.");
@@ -89,7 +96,7 @@ export async function syncWdlMatchdayIcon(now = Date.now()): Promise<void> {
     return;
   }
 
-  const desired: IconVariant = isWdlMatchdayIconActive(snapshot.data, now) ? "matchday" : "default";
+  const desired = getCalendarIconVariant(snapshot.data, now);
   if (state.current_icon === desired || (desired === "default" && state.current_icon === null)) {
     if (state.last_error) await query("UPDATE wdl_matchday_icon_state SET last_error = NULL WHERE id = 1");
     return;

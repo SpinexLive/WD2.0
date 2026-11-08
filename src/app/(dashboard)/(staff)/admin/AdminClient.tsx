@@ -12,12 +12,13 @@ import LoadoutPanel from "./LoadoutPanel";
 import ServerNamePanel from "./ServerNamePanel";
 import RecruitTestPanel from "./RecruitTestPanel";
 import WdlFixturesPanel from "./WdlFixturesPanel";
+import CalendarLogosPanel from "./CalendarLogosPanel";
 
 interface Overview {
   audit: { id: string; actor: string | null; action: string; targetType: string | null; targetId: string | null; details: unknown; at: string }[];
 }
 
-type Tab = "whitelist" | "gold" | "wdl-role" | "wdl-fixtures" | "seeding-afk" | "loadout" | "server-name" | "recruit-test" | "status" | "audit";
+type Tab = "whitelist" | "gold" | "wdl-role" | "wdl-fixtures" | "calendar-logos" | "seeding-afk" | "loadout" | "server-name" | "recruit-test" | "status" | "audit";
 
 const fmt = (v: string | null) => (v ? new Date(v).toLocaleString("en-GB", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" }) : "-");
 
@@ -41,7 +42,7 @@ export default function AdminClient() {
   }, [api]);
   useEffect(() => void load(), [load]);
 
-  const tabs: [Tab, string][] = [["whitelist", "Whitelist links"], ["gold", "Gold price"], ["wdl-role", "WDL role"], ["wdl-fixtures", "WDL fixtures"], ["seeding-afk", "Seeding AFK"], ["loadout", "Loadout"], ["server-name", "Server name"], ["recruit-test", "Recruit test"], ["status", "Status"], ["audit", "Audit log"]];
+  const tabs: [Tab, string][] = [["whitelist", "Whitelist links"], ["gold", "Gold price"], ["wdl-role", "WDL role"], ["wdl-fixtures", "WDL fixtures"], ["calendar-logos", "Calendar logos"], ["seeding-afk", "Seeding AFK"], ["loadout", "Loadout"], ["server-name", "Server name"], ["recruit-test", "Recruit test"], ["status", "Status"], ["audit", "Audit log"]];
 
   return (
     <div className="flex flex-col gap-4 md:h-full">
@@ -67,6 +68,8 @@ export default function AdminClient() {
           <WdlRolePanel />
         ) : tab === "wdl-fixtures" ? (
           <WdlFixturesPanel />
+        ) : tab === "calendar-logos" ? (
+          <CalendarLogosPanel />
         ) : tab === "seeding-afk" ? (
           <SeedingAfkPanel />
         ) : tab === "loadout" ? (

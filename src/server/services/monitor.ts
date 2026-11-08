@@ -95,8 +95,8 @@ export async function getHealth(force = false): Promise<Component[]> {
       },
     ],
     [
-      "wdl-matchday-icon",
-      "WDL matchday server icon",
+      "calendar-icon",
+      "Calendar server icon",
       async () => {
         const [row] = await query<{ last_error: string | null }>("SELECT last_error FROM wdl_matchday_icon_state WHERE id = 1");
         if (!row) throw new Error("WDL matchday icon migration has not been applied.");
