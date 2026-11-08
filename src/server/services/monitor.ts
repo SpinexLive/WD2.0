@@ -95,6 +95,15 @@ export async function getHealth(force = false): Promise<Component[]> {
       },
     ],
     [
+      "wdl-matchday-icon",
+      "WDL matchday server icon",
+      async () => {
+        const [row] = await query<{ last_error: string | null }>("SELECT last_error FROM wdl_matchday_icon_state WHERE id = 1");
+        if (!row) throw new Error("WDL matchday icon migration has not been applied.");
+        return row.last_error ? { ok: false, detail: row.last_error } : { ok: true, detail: null };
+      },
+    ],
+    [
       "gold",
       "Gold price channel",
       async () => {

@@ -18,5 +18,7 @@ export async function register() {
     startWdlFixtureScheduler();
     const { startWdlResultsScheduler } = await import("./server/services/wdlResults");
     startWdlResultsScheduler();
+    const { startWdlMatchdayIconScheduler } = await import("./server/services/wdlMatchdayIcon");
+    startWdlMatchdayIconScheduler();
   }
 }
