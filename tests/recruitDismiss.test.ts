@@ -34,7 +34,7 @@ const messageId = "111111111111111111";
 const candidate = { steamId, name: "Alpha", matches: 3, kd: 2.5, avgCash: 45000 };
 const actor: Session = {
   id: "session", discordId: "123456789012345678", username: "staff", displayName: "Staff member",
-  avatarUrl: "", csrfToken: "csrf", isAdmin: true, isReviewer: false, canManageNews: false,
+  avatarUrl: "", csrfToken: "csrf", isAdmin: true, canViewMembers: false, isReviewer: false, canManageNews: false,
 };
 
 describe.skipIf(!process.env.TEST_DATABASE_URL)("dashboard recruit status and Discord embed", () => {

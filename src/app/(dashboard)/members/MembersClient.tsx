@@ -33,7 +33,7 @@ function scaleColor(t: number): string {
   return `rgb(${[0, 1, 2].map((k) => Math.round(a[k]! + (b[k]! - a[k]!) * f)).join(",")})`;
 }
 
-export default function MembersPage() {
+export default function MembersClient({ canManage }: { canManage: boolean }) {
   const api = useApi();
   const [data, setData] = useState<Data | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -112,7 +112,7 @@ export default function MembersPage() {
         <button className="btn-ghost" disabled={loading} onClick={() => load(true)}>{loading ? "Refreshing…" : "Refresh"}</button>
       </div>
 
-      {data?.leagueOnly && data.leagueOnly.length > 0 && !dismissed && (
+      {canManage && data?.leagueOnly && data.leagueOnly.length > 0 && !dismissed && (
         <div role="alert" className="flex flex-wrap items-center justify-between gap-4 rounded-lg border border-blood-500 bg-blood-700/30 shadow-glow p-5">
           <div>
             <div className="text-lg font-bold">Action needed: {data.leagueOnly.length} Wardogs League member{data.leagueOnly.length === 1 ? "" : "s"} to remove</div>

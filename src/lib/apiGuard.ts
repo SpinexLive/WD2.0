@@ -25,6 +25,8 @@ export interface GuardOptions {
   reviewerOnly?: boolean;
   /** Reviewers or staff (staff need to read notes in order to moderate them). */
   reviewerOrStaff?: boolean;
+  /** Staff and the dedicated Members viewer role may read this route; viewers cannot mutate it. */
+  membersViewerOnly?: boolean;
 }
 
 export function errorResponse(err: unknown): NextResponse {
@@ -62,6 +64,9 @@ export function protectedRoute<P = Record<string, string>>(handler: Handler<P>, 
         if (!session.isReviewer && !session.isAdmin) throw new HttpError(403, "Scouting feedback is limited to reviewers and staff", "forbidden");
       } else if (options.reviewerOnly) {
         if (!session.isReviewer) throw new HttpError(403, "Scouting feedback is limited to the reviewer role", "forbidden");
+      } else if (options.membersViewerOnly) {
+        const readOnly = req.method === "GET" || req.method === "HEAD";
+        if (!session.isAdmin && !(readOnly && session.canViewMembers)) throw new HttpError(403, "This area is for REMNANT staff or Members viewers only", "forbidden");
       } else if (!session.isAdmin && !options.allowMember) throw new HttpError(403, "This area is for REMNANT staff only", "forbidden");
 
       const mutating = req.method !== "GET" && req.method !== "HEAD";

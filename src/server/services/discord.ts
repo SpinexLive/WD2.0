@@ -58,6 +58,11 @@ export function hasMemberRole(roles: string[]): boolean {
   return roles.includes(env().DISCORD_MEMBER_ROLE_ID);
 }
 
+/** Can view the Members dashboard page without granting general staff access. */
+export function hasMembersViewerRole(roles: string[]): boolean {
+  return roles.includes(env().DISCORD_MEMBERS_VIEWER_ROLE_ID);
+}
+
 // ---- OAuth2 (user token is used only during login and never stored) ----
 
 export function authorizeUrl(state: string): string {

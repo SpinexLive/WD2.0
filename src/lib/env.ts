@@ -16,6 +16,7 @@ const schema = z.object({
   DISCORD_GUILD_ID: snowflake,
   DISCORD_ALLOWED_ROLE_IDS: idList,
   DISCORD_MEMBER_ROLE_ID: snowflake,
+  DISCORD_MEMBERS_VIEWER_ROLE_ID: snowflake.default("1547229723141345351"),
   // Whole-clan role (includes members who don't play Wardogs); used for the public member count.
   DISCORD_CLAN_ROLE_ID: snowflake.default("1433399320903815188"),
   RAID_HELPER_API_TOKEN: z.string().min(1),

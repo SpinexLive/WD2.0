@@ -15,4 +15,4 @@ export const GET = protectedRoute<{ id: string }>(async ({ req, params }) => {
   const member = (await getClanMembers(false)).data.find((m) => m.id === params.id);
   if (!member) throw new HttpError(404, "That Discord user is not a clan member", "not_found");
   return buildProfile(member, force);
-});
+}, { membersViewerOnly: true });

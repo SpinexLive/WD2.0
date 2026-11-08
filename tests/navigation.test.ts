@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { matchesNav, navigationGroups, type NavAccess } from "@/lib/navigation";
 import { hasNewsRole, NEWS_ROLE_ID } from "@/lib/permissions";
 
-const member: NavAccess = { isAdmin: false, isReviewer: false, isOwner: false, canManageNews: false };
+const member: NavAccess = { isAdmin: false, canViewMembers: false, isReviewer: false, isOwner: false, canManageNews: false };
 const links = (access: NavAccess) => navigationGroups(access).flatMap((g) => g.items.map((n) => n.href));
 
 describe("grouped navigation access", () => {
@@ -12,6 +12,12 @@ describe("grouped navigation access", () => {
   });
   it("adds scouting for reviewers without adding staff tools", () => {
     expect(links({ ...member, isReviewer: true }).sort()).toEqual(["/observe", "/scouting", "/me", "/leaderboard"].sort());
+  });
+  it("adds only Members for the dedicated viewer role", () => {
+    const viewer = { ...member, canViewMembers: true };
+    expect(links(viewer).sort()).toEqual(["/members", "/observe", "/me", "/leaderboard"].sort());
+    expect(links(viewer)).not.toContain("/rosters");
+    expect(links(viewer)).not.toContain("/admin");
   });
   it("gives staff all operational links but restricts News and Admin independently", () => {
     const staff = { ...member, isAdmin: true };

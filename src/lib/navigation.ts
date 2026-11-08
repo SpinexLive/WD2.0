@@ -1,6 +1,6 @@
 export interface NavItem { href: string; label: string; logo?: string }
 export interface NavGroup { id: string; label: string; items: NavItem[] }
-export interface NavAccess { isAdmin: boolean; isReviewer: boolean; isOwner: boolean; canManageNews: boolean }
+export interface NavAccess { isAdmin: boolean; canViewMembers: boolean; isReviewer: boolean; isOwner: boolean; canManageNews: boolean }
 
 export const TODAY_NAV: NavItem = { href: "/today", label: "Today", logo: "/images/icons/accept.png" };
 export const ME_NAV: NavItem = { href: "/me", label: "My stats" };
@@ -9,6 +9,7 @@ const ROSTER_NAV: NavItem = { href: "/rosters", label: "Rosters", logo: "/images
 const BRIEFING_NAV: NavItem = { href: "/briefing", label: "Briefing" };
 export const STAFF_TABS = [TODAY_NAV, ROSTER_NAV, BRIEFING_NAV, BOARD_NAV];
 export const MEMBER_TABS = [TODAY_NAV, ME_NAV, BOARD_NAV];
+export const MEMBER_VIEWER_TABS = [TODAY_NAV, { href: "/members", label: "Members", logo: "/images/icons/wardogs.png" }, ME_NAV, BOARD_NAV];
 
 export const matchesNav = (path: string, href: string) => path === href || path.startsWith(`${href}/`);
 
@@ -24,6 +25,8 @@ export function navigationGroups(access: NavAccess): NavGroup[] {
         { href: "/loadout", label: "Loadout unlocks" },
       ] },
     );
+  } else if (access.canViewMembers) {
+    groups.push({ id: "people", label: "People", items: [{ href: "/members", label: "Members", logo: "/images/icons/wardogs.png" }] });
   }
   groups.push({ id: "intelligence", label: "Match intelligence", items: [
     { href: "/observe", label: "Match Feedback" },

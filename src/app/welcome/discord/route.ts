@@ -3,7 +3,7 @@ import { timingSafeEqual } from "node:crypto";
 import { query } from "@/lib/db";
 import { env } from "@/lib/env";
 import { createSession, sessionCookieOptions, SESSION_COOKIE, STATE_COOKIE } from "@/lib/session";
-import { exchangeCode, fetchOwnGuildMember, hasAuthorisedRole, hasMemberRole } from "@/server/services/discord";
+import { exchangeCode, fetchOwnGuildMember, hasAuthorisedRole, hasMemberRole, hasMembersViewerRole } from "@/server/services/discord";
 import { audit } from "@/lib/audit";
 
 export const dynamic = "force-dynamic";
@@ -30,7 +30,7 @@ export async function GET(req: NextRequest) {
     const accessToken = await exchangeCode(code);
     const member = await fetchOwnGuildMember(accessToken);
     if (!member) return deny("not_in_guild");
-    if (!hasAuthorisedRole(member.roles) && !hasMemberRole(member.roles)) {
+    if (!hasAuthorisedRole(member.roles) && !hasMemberRole(member.roles) && !hasMembersViewerRole(member.roles)) {
       await audit({ discordId: member.id, displayName: member.displayName }, "login.denied", "user", member.id);
       return deny("forbidden");
     }

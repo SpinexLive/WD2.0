@@ -7,7 +7,7 @@ import { useEffect, useState } from "react";
 import { AppProvider, useApp } from "@/lib/client";
 import { Avatar } from "./ui";
 import { SidebarNav } from "./SidebarNav";
-import { STAFF_TABS, MEMBER_TABS } from "@/lib/navigation";
+import { STAFF_TABS, MEMBER_TABS, MEMBER_VIEWER_TABS } from "@/lib/navigation";
 
 function ViewAsPicker({ csrfToken }: { csrfToken: string }) {
   const [open, setOpen] = useState(false);
@@ -51,7 +51,7 @@ function ViewAsPicker({ csrfToken }: { csrfToken: string }) {
   );
 }
 
-function Inner({ children, isOwner, isAdmin, isReviewer, canManageNews, canViewAs, viewingAs }: { children: React.ReactNode; isOwner: boolean; isAdmin: boolean; isReviewer: boolean; canManageNews: boolean; canViewAs: boolean; viewingAs: string | null }) {
+function Inner({ children, isOwner, isAdmin, canViewMembers, isReviewer, canManageNews, canViewAs, viewingAs }: { children: React.ReactNode; isOwner: boolean; isAdmin: boolean; canViewMembers: boolean; isReviewer: boolean; canManageNews: boolean; canViewAs: boolean; viewingAs: string | null }) {
   const { user, csrfToken } = useApp();
   const path = usePathname();
   const [open, setOpen] = useState(false);
@@ -66,7 +66,7 @@ function Inner({ children, isOwner, isAdmin, isReviewer, canManageNews, canViewA
     window.location.href = "/";
   }
 
-  const nav = <SidebarNav access={{ isAdmin, isReviewer, isOwner, canManageNews }} onNavigate={() => setOpen(false)} />;
+  const nav = <SidebarNav access={{ isAdmin, canViewMembers, isReviewer, isOwner, canManageNews }} onNavigate={() => setOpen(false)} />;
 
   return (
     <div className="flex min-h-screen md:h-screen md:overflow-hidden">
@@ -101,7 +101,7 @@ function Inner({ children, isOwner, isAdmin, isReviewer, canManageNews, canViewA
         <main className="min-w-0 flex-1 p-4 pb-24 md:min-h-0 md:overflow-y-auto md:p-4 md:pb-4">{children}</main>
       </div>
       <nav aria-label="Primary" className="fixed inset-x-0 bottom-0 z-30 flex border-t border-ink-700 bg-ink-950/95 pb-[env(safe-area-inset-bottom)] backdrop-blur-md md:hidden">
-        {(isAdmin ? STAFF_TABS : MEMBER_TABS).map((n) => {
+        {(isAdmin ? STAFF_TABS : canViewMembers ? MEMBER_VIEWER_TABS : MEMBER_TABS).map((n) => {
           const on = path.startsWith(n.href);
           return (
             <Link key={n.href} href={n.href} className={`flex flex-1 flex-col items-center gap-0.5 py-2 text-[10px] font-bold uppercase tracking-wider ${on ? "text-stone" : "text-stone/50"}`}>
@@ -119,10 +119,10 @@ function Inner({ children, isOwner, isAdmin, isReviewer, canManageNews, canViewA
   );
 }
 
-export function Shell(props: { user: { id: string; displayName: string; username: string; avatarUrl: string }; csrfToken: string; isOwner?: boolean; isAdmin?: boolean; isReviewer?: boolean; canManageNews?: boolean; canViewAs?: boolean; viewingAs?: string | null; children: React.ReactNode }) {
+export function Shell(props: { user: { id: string; displayName: string; username: string; avatarUrl: string }; csrfToken: string; isOwner?: boolean; isAdmin?: boolean; canViewMembers?: boolean; isReviewer?: boolean; canManageNews?: boolean; canViewAs?: boolean; viewingAs?: string | null; children: React.ReactNode }) {
   return (
     <AppProvider value={{ user: props.user, csrfToken: props.csrfToken }}>
-      <Inner isOwner={!!props.isOwner} isAdmin={props.isAdmin !== false} isReviewer={!!props.isReviewer} canManageNews={!!props.canManageNews} canViewAs={!!props.canViewAs} viewingAs={props.viewingAs ?? null}>{props.children}</Inner>
+      <Inner isOwner={!!props.isOwner} isAdmin={props.isAdmin !== false} canViewMembers={!!props.canViewMembers} isReviewer={!!props.isReviewer} canManageNews={!!props.canManageNews} canViewAs={!!props.canViewAs} viewingAs={props.viewingAs ?? null}>{props.children}</Inner>
     </AppProvider>
   );
 }

@@ -23,7 +23,7 @@ async function settle<T>(p: Promise<Snapshot<T>>): Promise<{ snap: Snapshot<T> |
   }
 }
 
-export const GET = protectedRoute(async ({ req }) => {
+export const GET = protectedRoute(async ({ req, session }) => {
   const force = req.nextUrl.searchParams.get("refresh") === "1";
   kickMatchSync(force);
   const [clan, league, apps, links] = await Promise.all([getClanMembers(force), settle(getLeagueMembers(force)), settle(getLeagueApplications(force)), resolveLinks()]);
@@ -79,8 +79,8 @@ export const GET = protectedRoute(async ({ req }) => {
 
   return {
     members,
-    leagueOnly,
-    applications: leagueApps ? applications : null,
+    leagueOnly: session.isAdmin ? leagueOnly : null,
+    applications: session.isAdmin && leagueApps ? applications : null,
     summary: {
       total: members.length,
       registered: members.filter((m) => m.registration === "registered").length,
@@ -97,4 +97,4 @@ export const GET = protectedRoute(async ({ req }) => {
       statsPending,
     },
   };
-});
+}, { membersViewerOnly: true });

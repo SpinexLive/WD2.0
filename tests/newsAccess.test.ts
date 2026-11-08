@@ -13,7 +13,7 @@ vi.mock("@/server/services/news", async (original) => ({
   createNews: vi.fn(), listNews: vi.fn(), updateNews: vi.fn(), deleteNews: vi.fn(),
 }));
 
-const session: Session = { id: "session", discordId: "100000000000000001", displayName: "Staff", username: "staff", avatarUrl: "", csrfToken: "csrf", isAdmin: true, isReviewer: false, canManageNews: false };
+const session: Session = { id: "session", discordId: "100000000000000001", displayName: "Staff", username: "staff", avatarUrl: "", csrfToken: "csrf", isAdmin: true, canViewMembers: false, isReviewer: false, canManageNews: false };
 const id = "c1ecdb8d-58b2-40d2-8a69-b69a2c291b17";
 const context = { params: Promise.resolve({ id }) };
 const request = (method: string) => new NextRequest("https://example.com/api/news", {
