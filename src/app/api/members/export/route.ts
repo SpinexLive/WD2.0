@@ -16,7 +16,7 @@ export const GET = protectedRoute(async ({ session }) => {
 
   const csv = memberCsv(clan.data.map((member) => ({
     displayName: member.displayName,
-    username: member.username,
+    discordId: member.id,
     steamId: links.steamIds.get(member.id) ?? null,
   })));
   return new NextResponse(`\uFEFF${csv}`, {

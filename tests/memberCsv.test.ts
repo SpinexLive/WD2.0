@@ -21,23 +21,23 @@ beforeEach(() => {
   mocks.members.mockResolvedValue({
     stale: false,
     data: [
-      { id: "1", displayName: "❖ Fjolle", username: "discord.user" },
-      { id: "2", displayName: "Second", username: "other.user" },
+      { id: "123456789012345678", displayName: "❖ Fjolle", username: "discord.user" },
+      { id: "987654321098765432", displayName: "Second", username: "other.user" },
     ],
   });
   mocks.links.mockResolvedValue({
-    steamIds: new Map([["1", "76561198000000001"]]),
+    steamIds: new Map([["123456789012345678", "76561198000000001"]]),
     source: { available: true, stale: false },
   });
 });
 
 describe("member CSV export", () => {
   it("quotes CSV fields, preserves newlines and neutralizes spreadsheet formulas", () => {
-    expect(memberCsv([{ displayName: 'Name, "quoted"\nline', username: " =SUM(1,2)", steamId: null }]))
-      .toBe('name,discord_name,steam_id\r\n"Name, ""quoted""\nline","\' =SUM(1,2)",""\r\n');
+    expect(memberCsv([{ displayName: ' =Name, "quoted"\nline', discordId: "123456789012345678", steamId: null }]))
+      .toBe('name,discord_id,steam_id\r\n"\' =Name, ""quoted""\nline","123456789012345678",""\r\n');
   });
 
-  it("returns all members with the requested columns and exact Steam IDs", async () => {
+  it("returns all members with the requested columns and exact Discord and Steam IDs", async () => {
     const response = await GET(request(), context);
     expect(response.status).toBe(200);
     expect(response.headers.get("content-type")).toContain("text/csv");
@@ -45,7 +45,7 @@ describe("member CSV export", () => {
     const bytes = new Uint8Array(await response.arrayBuffer());
     expect(Array.from(bytes.slice(0, 3))).toEqual([0xef, 0xbb, 0xbf]);
     expect(new TextDecoder().decode(bytes)).toBe(
-      'name,discord_name,steam_id\r\n"❖ Fjolle","discord.user","76561198000000001"\r\n"Second","other.user",""\r\n',
+      'name,discord_id,steam_id\r\n"❖ Fjolle","123456789012345678","76561198000000001"\r\n"Second","987654321098765432",""\r\n',
     );
     expect(mocks.members).toHaveBeenCalledWith(true);
     expect(mocks.links).toHaveBeenCalledWith(true);

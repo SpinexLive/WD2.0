@@ -1,6 +1,6 @@
 export interface MemberCsvRow {
   displayName: string;
-  username: string;
+  discordId: string;
   steamId: string | null;
 }
 
@@ -10,6 +10,6 @@ function csvCell(value: string): string {
 }
 
 export function memberCsv(members: MemberCsvRow[]): string {
-  const rows = members.map((member) => [member.displayName, member.username, member.steamId ?? ""].map(csvCell).join(","));
-  return `name,discord_name,steam_id\r\n${rows.join("\r\n")}${rows.length ? "\r\n" : ""}`;
+  const rows = members.map((member) => [member.displayName, member.discordId, member.steamId ?? ""].map(csvCell).join(","));
+  return `name,discord_id,steam_id\r\n${rows.join("\r\n")}${rows.length ? "\r\n" : ""}`;
 }
