@@ -33,7 +33,7 @@ function scaleColor(t: number): string {
   return `rgb(${[0, 1, 2].map((k) => Math.round(a[k]! + (b[k]! - a[k]!) * f)).join(",")})`;
 }
 
-export default function MembersClient({ canManage }: { canManage: boolean }) {
+export default function MembersClient({ canManage, canExport }: { canManage: boolean; canExport: boolean }) {
   const api = useApi();
   const [data, setData] = useState<Data | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -44,6 +44,32 @@ export default function MembersClient({ canManage }: { canManage: boolean }) {
   const toggleSort = (key: SortKey) => setSort((s) => (s.key === key ? { key, dir: s.dir === 1 ? -1 : 1 } : { key, dir: key === "kd" || key === "matches" ? -1 : 1 }));
   const [dismissed, setDismissed] = useState(false);
   const [selected, setSelected] = useState<Member | null>(null);
+  const [exporting, setExporting] = useState(false);
+  const [exportError, setExportError] = useState<string | null>(null);
+
+  async function exportMembers() {
+    setExporting(true);
+    setExportError(null);
+    try {
+      const response = await fetch("/api/members/export", { cache: "no-store" });
+      if (!response.ok) {
+        const body = await response.json().catch(() => null) as { error?: { message?: string } } | null;
+        throw new Error(body?.error?.message ?? `Export failed (${response.status}).`);
+      }
+      const url = URL.createObjectURL(await response.blob());
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = "remnant-members.csv";
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      setExportError(e instanceof Error ? e.message : "Could not export members.");
+    } finally {
+      setExporting(false);
+    }
+  }
 
   const load = useCallback(
     async (refresh = false) => {
@@ -109,7 +135,10 @@ export default function MembersClient({ canManage }: { canManage: boolean }) {
     <div className="flex flex-col gap-4 md:h-full">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h1 className="page-title">Members</h1>
-        <button className="btn-ghost" disabled={loading} onClick={() => load(true)}>{loading ? "Refreshing…" : "Refresh"}</button>
+        <div className="flex flex-wrap gap-2">
+          {canExport && <button className="btn-ghost" disabled={exporting} onClick={() => void exportMembers()}>{exporting ? "Exporting…" : "Export CSV"}</button>}
+          <button className="btn-ghost" disabled={loading} onClick={() => load(true)}>{loading ? "Refreshing…" : "Refresh"}</button>
+        </div>
       </div>
 
       {canManage && data?.leagueOnly && data.leagueOnly.length > 0 && !dismissed && (
@@ -125,6 +154,7 @@ export default function MembersClient({ canManage }: { canManage: boolean }) {
         </div>
       )}
       {error && <ErrorBanner message={error} onRetry={() => load()} />}
+      {exportError && <ErrorBanner message={exportError} onRetry={exportMembers} />}
 
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         {cards.map(([label, value], i) => (
