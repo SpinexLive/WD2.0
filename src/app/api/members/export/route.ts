@@ -19,7 +19,7 @@ export const GET = protectedRoute(async ({ session }) => {
     username: member.username,
     steamId: links.steamIds.get(member.id) ?? null,
   })));
-  return new NextResponse(csv, {
+  return new NextResponse(`\uFEFF${csv}`, {
     headers: {
       "Content-Type": "text/csv; charset=utf-8",
       "Content-Disposition": 'attachment; filename="remnant-members.csv"',

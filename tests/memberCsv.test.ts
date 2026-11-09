@@ -21,7 +21,7 @@ beforeEach(() => {
   mocks.members.mockResolvedValue({
     stale: false,
     data: [
-      { id: "1", displayName: "Nickname", username: "discord.user" },
+      { id: "1", displayName: "❖ Fjolle", username: "discord.user" },
       { id: "2", displayName: "Second", username: "other.user" },
     ],
   });
@@ -42,8 +42,10 @@ describe("member CSV export", () => {
     expect(response.status).toBe(200);
     expect(response.headers.get("content-type")).toContain("text/csv");
     expect(response.headers.get("cache-control")).toBe("private, no-store");
-    expect(await response.text()).toBe(
-      'name,discord_name,steam_id\r\n"Nickname","discord.user","76561198000000001"\r\n"Second","other.user",""\r\n',
+    const bytes = new Uint8Array(await response.arrayBuffer());
+    expect(Array.from(bytes.slice(0, 3))).toEqual([0xef, 0xbb, 0xbf]);
+    expect(new TextDecoder().decode(bytes)).toBe(
+      'name,discord_name,steam_id\r\n"❖ Fjolle","discord.user","76561198000000001"\r\n"Second","other.user",""\r\n',
     );
     expect(mocks.members).toHaveBeenCalledWith(true);
     expect(mocks.links).toHaveBeenCalledWith(true);
