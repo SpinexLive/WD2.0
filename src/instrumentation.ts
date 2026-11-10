@@ -22,5 +22,9 @@ export async function register() {
     startWdlMatchdayIconScheduler();
     const { startBriefingChannelCleanupScheduler } = await import("./server/services/briefingChannelCleanup");
     startBriefingChannelCleanupScheduler();
+    const { startGwlArchiveScheduler } = await import("./server/services/gwlFixtures");
+    startGwlArchiveScheduler();
+    const { startGwlRaidScheduler } = await import("./server/services/gwlRaid");
+    startGwlRaidScheduler();
   }
 }

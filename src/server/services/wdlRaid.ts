@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { z } from "zod";
-import { independentQuery, query, tx } from "@/lib/db";
+import { independentQuery, query, tx, withLeagueEventLock } from "@/lib/db";
 import { audit } from "@/lib/audit";
 import { HttpError, ProviderError } from "@/lib/http";
 import type { Session } from "@/lib/session";
@@ -419,6 +419,10 @@ async function reconcileScheduledWdlEvents() {
 
 /** Polls fixtures and creates at most one event per pass. Claims are durable before POST. */
 export async function wdlFixtureTick() {
+  await withLeagueEventLock(runWdlFixtureTick);
+}
+
+async function runWdlFixtureTick() {
   await recoverRecordedWdlEventIds();
   await reconcileScheduledWdlEvents();
   const snapshot = await getLeagueFixtures(true);
@@ -499,7 +503,12 @@ export async function wdlFixtureTick() {
     });
     for (const event of scheduled) if (event.channelId === WDL_EVENT_CHANNEL) reserved.push(event.title.toLowerCase());
     body = wdlEventBody(candidate.fixture, { ...names, roleNames: [...names.roleNames, ...reserved] }, now);
-    const possible = [...posted, ...scheduled].some((event) => possibleWdlEvent(candidate.fixture, Number(body.date), event));
+    const sameTimeGwl = await query(
+      `SELECT match_number FROM gwl_raid_events
+        WHERE state IN ('creating', 'scheduled', 'posted', 'review', 'uncertain')
+          AND start_time IS NOT NULL AND abs(start_time - $1::bigint) < 60 LIMIT 1`, [Number(body.date)],
+    );
+    const possible = sameTimeGwl.length > 0 || [...posted, ...scheduled].some((event) => possibleWdlEvent(candidate.fixture, Number(body.date), event));
     if (possible) {
       await query("UPDATE wdl_fixture_events SET state = 'review', error = $2, updated_at = now() WHERE fixture_id = $1 AND state = 'pending'",
         [candidate.fixture_id, "A Raid Helper event exists at the same time. Review and link it before creating another."]);

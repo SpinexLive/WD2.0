@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { HOLIDAY_LOGOS } from "@/lib/calendarLogos";
 import { wdlFixtureSchema, type WdlFixtures } from "@/lib/wdlFixtures";
-import { getCalendarIconVariant, isWdlMatchdayIconActive } from "@/server/services/wdlMatchdayIcon";
+import { getCalendarIconVariant, isGwlMatchdayIconActive, isWdlMatchdayIconActive } from "@/server/services/wdlMatchdayIcon";
+import { gwlFixtureSchema } from "@/server/services/gwl";
 
 function fixtures(scheduledAt: string, code = "RMNT", status = "SCHEDULED"): WdlFixtures {
   const fixture = wdlFixtureSchema.parse({
@@ -89,5 +90,18 @@ describe("WDL matchday server icon schedule", () => {
     const data = { upcoming: [second], recent: [first] };
     expect(isWdlMatchdayIconActive(data, Date.parse("2026-11-08T17:00:00+00:00"))).toBe(true);
     expect(isWdlMatchdayIconActive(data, Date.parse("2026-11-08T20:00:00+00:00"))).toBe(false);
+  });
+
+  it("uses GWL fixtures with the same timing and holiday precedence", () => {
+    const fixture = gwlFixtureSchema.parse({
+      number: "42", status: "SCHEDULED", map: "Map", layer: null,
+      startsAt: "2027-03-26T19:00:00Z", region: "EU", sides: [],
+    });
+    const now = Date.parse("2027-03-26T12:00:00Z");
+    const active = isGwlMatchdayIconActive({ upcoming: [fixture], recent: [] }, now);
+    expect(active).toBe(true);
+    expect(getCalendarIconVariant(fixtures("2027-04-10T19:00:00Z"), now, active)).toBe("matchday");
+    expect(isGwlMatchdayIconActive({ upcoming: [{ ...fixture, status: "CANCELLED" }], recent: [] }, now)).toBe(false);
+    expect(isGwlMatchdayIconActive({ upcoming: [fixture], recent: [] }, Date.parse("2027-03-26T20:00:00Z"))).toBe(false);
   });
 });

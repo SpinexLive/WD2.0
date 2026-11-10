@@ -6,8 +6,10 @@ import { getPlayerMatches, getStoredTotals, type ProfileMatch } from "./matchHis
 import { getClanPlayers } from "./compare";
 import { mergeBoards } from "@/lib/leaderboardMerge";
 import { getLeagueFixtures } from "./wardogsLeague";
+import { getGwlFixtures, nextGwlFixture, type GwlFixture } from "./gwl";
 import type { WdlFixture } from "@/lib/wdlFixtures";
 import { query } from "@/lib/db";
+import { WDL_EVENT_CHANNEL } from "./wdlRaidHelper";
 import { env } from "@/lib/env";
 
 const LOOKBACK_S = 2 * 3600;
@@ -28,11 +30,12 @@ export interface TodayData {
   rank: { rank: number; of: number; kills: number } | null;
   linked: boolean;
   league: { fixture: WdlFixture | null; stale: boolean; error: string | null; eventUrl: string | null };
+  gwl: { fixture: GwlFixture | null; stale: boolean; error: string | null; eventUrl: string | null } | null;
 }
 
 /** Everything the Today page shows for one signed-in user. */
 export async function buildToday(discordId: string): Promise<TodayData> {
-  const [events, players, league] = await Promise.all([
+  const [events, players, league, gwl] = await Promise.all([
     getEvents().catch(() => null),
     getClanPlayers().catch(() => []),
     getLeagueFixtures().then((snapshot) => ({
@@ -43,6 +46,11 @@ export async function buildToday(discordId: string): Promise<TodayData> {
       stale: snapshot.stale,
       error: snapshot.stale ? snapshot.error ?? "Using older fixture data." : null,
     }), (error: unknown) => ({ fixture: null, stale: false, error: error instanceof Error ? error.message : "Could not load WDL fixtures." })),
+    env().GWL_API_KEY ? getGwlFixtures().then((snapshot) => ({
+      fixture: nextGwlFixture(snapshot.data.upcoming),
+      stale: snapshot.stale,
+      error: snapshot.stale ? snapshot.error ?? "Using older fixture data." : null,
+    }), (error: unknown) => ({ fixture: null, stale: false, error: error instanceof Error ? error.message : "Could not load GWL fixtures." })) : null,
   ]);
   const [linkedEvent] = league.fixture ? await query<{ event_id: string | null; event_channel_id: string | null }>(
     "SELECT event_id, event_channel_id FROM wdl_fixture_events WHERE fixture_id = $1 AND state = 'posted'", [league.fixture.id],
@@ -50,6 +58,10 @@ export async function buildToday(discordId: string): Promise<TodayData> {
   const eventUrl = linkedEvent?.event_id && linkedEvent.event_channel_id
     ? `https://discord.com/channels/${env().DISCORD_GUILD_ID}/${encodeURIComponent(linkedEvent.event_channel_id)}/${encodeURIComponent(linkedEvent.event_id)}`
     : null;
+  const [gwlEvent] = gwl?.fixture ? await query<{ event_id: string }>(
+    "SELECT event_id FROM gwl_raid_events WHERE match_number = $1 AND state = 'posted' AND event_id IS NOT NULL", [gwl.fixture.number],
+  ) : [];
+  const gwlEventUrl = gwlEvent ? `https://discord.com/channels/${env().DISCORD_GUILD_ID}/${WDL_EVENT_CHANNEL}/${encodeURIComponent(gwlEvent.event_id)}` : null;
   const cutoff = Math.floor(Date.now() / 1000) - LOOKBACK_S;
   const upcoming = (events?.data ?? []).filter((e) => e.startTime !== null && e.startTime >= cutoff).sort((a, b) => a.startTime! - b.startTime!);
 
@@ -88,5 +100,5 @@ export async function buildToday(discordId: string): Promise<TodayData> {
     const row = board.find((r) => r.steamId === me.steamId);
     if (row) rank = { rank: row.rank, of: board.length, kills: row.kills };
   }
-  return { next, voice, latestMatch, rank, linked: !!me, league: { ...league, eventUrl } };
+  return { next, voice, latestMatch, rank, linked: !!me, league: { ...league, eventUrl }, gwl: gwl ? { ...gwl, eventUrl: gwlEventUrl } : null };
 }

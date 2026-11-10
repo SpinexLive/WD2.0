@@ -8,6 +8,7 @@ import { WdlParticipants } from "@/components/WdlParticipants";
 import { WdlMapDetails } from "@/components/WdlMapDetails";
 import type { TodayData } from "@/server/services/today";
 import { fixtureOpponents } from "@/lib/wdlFixtures";
+import { gwlMapLabel } from "@/lib/gwl";
 
 function useCountdown(startTime: number | null) {
   const [now, setNow] = useState(() => Date.now());
@@ -106,7 +107,7 @@ export default function TodayPage() {
           )}
 
           <section className="card space-y-1 p-4">
-            <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-stone/60">Next League match</div>
+            <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-stone/60">Next WDL match</div>
             {data.league.error && <p className="text-xs text-warn">WDL fixture data is {data.league.stale ? "outdated" : "unavailable"}: {data.league.error}</p>}
             {data.league.fixture ? (
               <>
@@ -118,6 +119,17 @@ export default function TodayPage() {
               </>
             ) : !data.league.error ? <p className="text-sm text-stone/55">No upcoming League fixture returned by WDL.</p> : null}
           </section>
+
+          {data.gwl && <section className="card space-y-1 p-4">
+            <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-stone/60">Next GWL match</div>
+            {data.gwl.error && <p className="text-xs text-warn">GWL fixture data is {data.gwl.stale ? "outdated" : "unavailable"}: {data.gwl.error}</p>}
+            {data.gwl.fixture ? <>
+              <p className="font-semibold">{data.gwl.fixture.sides.map((side) => side.team.tag || side.team.name || side.team.slug).join(" v ") || "Teams TBC"}</p>
+              <p className="text-sm text-stone/60">{new Date(data.gwl.fixture.startsAt).toLocaleString("en-GB")}</p>
+              <p className="text-sm text-stone/60">{gwlMapLabel(data.gwl.fixture.map)}{data.gwl.fixture.layer ? ` · ${data.gwl.fixture.layer}` : ""} · {data.gwl.fixture.status}</p>
+              {data.gwl.eventUrl && <a href={data.gwl.eventUrl} target="_blank" rel="noopener noreferrer" className="text-xs text-blood-300 hover:underline">Open Raid Helper signup →</a>}
+            </> : !data.gwl.error ? <p className="text-sm text-stone/55">No upcoming match returned by GWL.</p> : null}
+          </section>}
 
           <div className="grid gap-4 sm:grid-cols-2">
             <section className="card space-y-1 p-4">

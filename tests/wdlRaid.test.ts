@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   posted: vi.fn(), raw: vi.fn(), remove: vi.fn(), update: vi.fn(), audit: vi.fn(),
 }));
 vi.mock("@/lib/db", () => ({
+  withLeagueEventLock: async (fn: () => Promise<void>) => fn(),
   query: async (sql: string, values: unknown[] = []) => {
     if (!mocks.client) throw new Error("Test database is not connected");
     return (await mocks.client.query(sql, values)).rows;
@@ -66,6 +67,8 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)("WDL fixture automation with Pos
     await mocks.client.query(registry.replace(/CREATE TABLE/g, "CREATE TEMP TABLE"));
     const results = await readFile(resolve(process.cwd(), "migrations", "037_wdl_result_posts.sql"), "utf8");
     await mocks.client.query(results.replace(/CREATE TABLE/g, "CREATE TEMP TABLE"));
+    const gwlEvents = await readFile(resolve(process.cwd(), "migrations", "045_gwl_raid_events.sql"), "utf8");
+    await mocks.client.query(gwlEvents.replace(/CREATE TABLE/g, "CREATE TEMP TABLE"));
     mocks.fixtures.mockResolvedValue(snapshot([]));
     mocks.archive.mockResolvedValue(undefined);
     mocks.names.mockResolvedValue(names);

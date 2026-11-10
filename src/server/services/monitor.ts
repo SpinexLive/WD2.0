@@ -4,6 +4,7 @@ import { getClanMembers, postMessage } from "./discord";
 import { getEvents } from "./raidHelper";
 import { getMatches } from "./wardogsRcon";
 import { getLeagueMembers } from "./wardogsLeague";
+import { getGwlTeam } from "./gwl";
 import { kickMatchSync, matchSyncStatus } from "./matchHistory";
 import { gatewayReady } from "./rosterGateway";
 import { recruitAlertStatus } from "./recruitAlerts";
@@ -50,6 +51,15 @@ export async function getHealth(force = false): Promise<Component[]> {
     ["raid-helper", "Raid Helper", async () => fromSnapshot(await getEvents())],
     ["wardogs-rcon", "Wardogs RCON API", async () => fromSnapshot(await getMatches())],
     ["wardogs-league", "Wardogs League API", async () => fromSnapshot(await getLeagueMembers())],
+    ...(env().GWL_API_KEY ? [["gwl", "Global Wardogs League API", async () => fromSnapshot(await getGwlTeam())] as [string, string, () => Promise<Result>]] : []),
+    ...(env().GWL_API_KEY ? [["gwl-raid", "GWL Raid Helper events", async () => {
+      const [row] = await query<{ last_error: string | null; issues: string }>(
+        "SELECT last_error, (SELECT count(*)::text FROM gwl_raid_events WHERE state IN ('review', 'uncertain', 'waiting')) AS issues FROM gwl_raid_status WHERE id = 1",
+      );
+      if (!row) throw new Error("GWL Raid Helper migration has not been applied.");
+      if (row.last_error) return { ok: false, detail: row.last_error };
+      return Number(row.issues) ? { ok: false, detail: "GWL events need manual review; check the GWL page and Raid Helper." } : { ok: true, detail: null };
+    }] as [string, string, () => Promise<Result>]] : []),
     [
       "match-sync",
       "Match history sync",

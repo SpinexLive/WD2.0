@@ -34,3 +34,11 @@ export async function tx<T>(fn: (client: PoolClient) => Promise<T>): Promise<T> 
     client.release();
   }
 }
+
+/** Serialize the two league event workers, including their external duplicate checks and writes. */
+export async function withLeagueEventLock(fn: () => Promise<void>): Promise<void> {
+  await tx(async (client) => {
+    const result = await client.query<{ acquired: boolean }>("SELECT pg_try_advisory_xact_lock($1) AS acquired", [824035]);
+    if (result.rows[0]?.acquired) await fn();
+  });
+}

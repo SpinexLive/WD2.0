@@ -21,7 +21,7 @@ describe("grouped navigation access", () => {
   });
   it("gives staff all operational links but restricts News and Admin independently", () => {
     const staff = { ...member, isAdmin: true };
-    expect(links(staff).sort()).toEqual(["/rosters", "/briefing", "/members", "/wdl", "/recruit", "/loadout", "/observe", "/scouting", "/feedback-setup", "/me", "/leaderboard"].sort());
+    expect(links(staff).sort()).toEqual(["/rosters", "/briefing", "/members", "/wdl", "/gwl", "/recruit", "/loadout", "/observe", "/scouting", "/feedback-setup", "/me", "/leaderboard"].sort());
     expect(links({ ...staff, canManageNews: true })).toContain("/news");
     expect(links({ ...staff, canManageNews: true })).not.toContain("/admin");
     expect(links({ ...staff, isOwner: true })).toContain("/admin");
