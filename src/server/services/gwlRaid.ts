@@ -14,7 +14,9 @@ type EventRow = {
 const actor = { discordId: "system:gwl", displayName: "GWL fixture worker" };
 const relevant = (fixture: GwlFixture) => JSON.stringify({
   status: fixture.status.toUpperCase(), startsAt: fixture.startsAt, map: fixture.map, layer: fixture.layer, region: fixture.region,
-  sides: fixture.sides.map((side) => ({ team: side.team, faction: side.faction })).sort((a, b) => a.team.slug.localeCompare(b.team.slug)),
+  sides: fixture.sides.map((side) => ({
+    slug: side.team.slug, name: side.team.name, tag: side.team.tag, faction: side.faction,
+  })).sort((a, b) => a.slug.localeCompare(b.slug)),
 });
 
 export async function gwlRaidStatus() {

@@ -104,6 +104,24 @@ describe("GWL event automation", () => {
     } finally { vi.useRealTimers(); }
   });
 
+  it("treats PostgreSQL-reordered team fields as unchanged", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(now);
+    try {
+      const row = database();
+      row.fixture = {
+        ...fixture,
+        sides: fixture.sides.map((side) => ({
+          ...side, team: { tag: side.team.tag, name: side.team.name, slug: side.team.slug },
+        })),
+      };
+      mocks.create.mockResolvedValue({ event: { id: "schedule1" } });
+      await gwlFixtureTick();
+      expect(row.state).toBe("scheduled");
+      expect(mocks.create).toHaveBeenCalledOnce();
+    } finally { vi.useRealTimers(); }
+  });
+
   it("marks an uncertain write and never retries it", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(now);
