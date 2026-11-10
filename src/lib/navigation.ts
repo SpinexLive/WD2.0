@@ -21,7 +21,7 @@ export function navigationGroups(access: NavAccess): NavGroup[] {
       { id: "people", label: "People & league", items: [
         { href: "/members", label: "Members", logo: "/images/icons/wardogs.png" },
         { href: "/wdl", label: "WDL", logo: "/images/WDL.webp" },
-        { href: "/gwl", label: "GWL", logo: "/images/GWL.png" },
+        { href: "/gwl", label: "GWL", logo: "/images/gwl.png" },
         { href: "/recruit", label: "Recruit" },
         { href: "/loadout", label: "Loadout unlocks" },
       ] },

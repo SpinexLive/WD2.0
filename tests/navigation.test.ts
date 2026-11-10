@@ -1,4 +1,6 @@
 import { describe, expect, it } from "vitest";
+import { readdirSync } from "node:fs";
+import { join } from "node:path";
 import { matchesNav, navigationGroups, type NavAccess } from "@/lib/navigation";
 import { hasNewsRole, NEWS_ROLE_ID } from "@/lib/permissions";
 
@@ -26,6 +28,11 @@ describe("grouped navigation access", () => {
     expect(links({ ...staff, canManageNews: true })).not.toContain("/admin");
     expect(links({ ...staff, isOwner: true })).toContain("/admin");
     expect(links({ ...staff, isOwner: true })).not.toContain("/news");
+  });
+  it("uses the exact case of the GWL image filename", () => {
+    const item = navigationGroups({ ...member, isAdmin: true }).flatMap((group) => group.items).find((link) => link.href === "/gwl");
+    expect(item?.logo).toBe("/images/gwl.png");
+    expect(readdirSync(join(process.cwd(), "public", "images"))).toContain("gwl.png");
   });
   it("uses the requested role alone for news permissions", () => {
     expect(hasNewsRole([NEWS_ROLE_ID])).toBe(true);
