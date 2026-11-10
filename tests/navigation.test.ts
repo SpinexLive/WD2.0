@@ -31,8 +31,8 @@ describe("grouped navigation access", () => {
   });
   it("uses the exact case of the GWL image filename", () => {
     const item = navigationGroups({ ...member, isAdmin: true }).flatMap((group) => group.items).find((link) => link.href === "/gwl");
-    expect(item?.logo).toBe("/images/gwl.png");
-    expect(readdirSync(join(process.cwd(), "public", "images"))).toContain("gwl.png");
+    expect(item?.logo).toBe("/images/gwl-64.png");
+    expect(readdirSync(join(process.cwd(), "public", "images"))).toContain("gwl-64.png");
   });
   it("uses the requested role alone for news permissions", () => {
     expect(hasNewsRole([NEWS_ROLE_ID])).toBe(true);
