@@ -200,7 +200,7 @@ async function runTick() {
 }
 
 export async function gwlFixtureTick() {
-  await withLeagueEventLock(runTick);
+  await withLeagueEventLock(runTick, true);
 }
 
 const g = globalThis as unknown as { __gwlRaidTimer?: NodeJS.Timeout; __gwlRaidRunning?: boolean };

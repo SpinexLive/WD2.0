@@ -3,11 +3,11 @@ import type { GwlFixture } from "@/server/services/gwl";
 
 const mocks = vi.hoisted(() => ({
   query: vi.fn(), fixtures: vi.fn(), names: vi.fn(), posted: vi.fn(), scheduled: vi.fn(),
-  create: vi.fn(), raw: vi.fn(), audit: vi.fn(),
+  create: vi.fn(), raw: vi.fn(), audit: vi.fn(), lock: vi.fn(),
 }));
 vi.mock("@/lib/env", () => ({ env: () => ({ APP_URL: "https://dashboard.test", DISCORD_GUILD_ID: "1332320879073296404" }) }));
 vi.mock("@/lib/db", () => ({
-  query: mocks.query, independentQuery: mocks.query, withLeagueEventLock: async (fn: () => Promise<void>) => fn(),
+  query: mocks.query, independentQuery: mocks.query, withLeagueEventLock: mocks.lock,
 }));
 vi.mock("@/lib/audit", () => ({ audit: mocks.audit }));
 vi.mock("@/server/services/gwl", () => ({ getGwlFixtures: mocks.fixtures }));
@@ -33,6 +33,7 @@ const names = { role: "Member", voice: "Briefing", roleNames: [] };
 
 beforeEach(() => {
   vi.resetAllMocks();
+  mocks.lock.mockImplementation(async (fn: () => Promise<void>) => fn());
   mocks.names.mockResolvedValue(names);
   mocks.posted.mockResolvedValue([]);
   mocks.scheduled.mockResolvedValue([]);
@@ -96,6 +97,7 @@ describe("GWL event automation", () => {
       const row = database();
       mocks.create.mockResolvedValue({ event: { id: "schedule1" } });
       await gwlFixtureTick();
+      expect(mocks.lock).toHaveBeenCalledWith(expect.any(Function), true);
       expect(row.state).toBe("scheduled");
       expect(row.scheduled_id).toBe("schedule1");
       expect(mocks.create).toHaveBeenCalledOnce();
