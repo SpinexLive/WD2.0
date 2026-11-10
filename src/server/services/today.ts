@@ -9,7 +9,6 @@ import { getLeagueFixtures } from "./wardogsLeague";
 import { getGwlFixtures, nextGwlFixture, type GwlFixture } from "./gwl";
 import type { WdlFixture } from "@/lib/wdlFixtures";
 import { query } from "@/lib/db";
-import { WDL_EVENT_CHANNEL } from "./wdlRaidHelper";
 import { env } from "@/lib/env";
 
 const LOOKBACK_S = 2 * 3600;
@@ -58,10 +57,10 @@ export async function buildToday(discordId: string): Promise<TodayData> {
   const eventUrl = linkedEvent?.event_id && linkedEvent.event_channel_id
     ? `https://discord.com/channels/${env().DISCORD_GUILD_ID}/${encodeURIComponent(linkedEvent.event_channel_id)}/${encodeURIComponent(linkedEvent.event_id)}`
     : null;
-  const [gwlEvent] = gwl?.fixture ? await query<{ event_id: string }>(
-    "SELECT event_id FROM gwl_raid_events WHERE match_number = $1 AND state = 'posted' AND event_id IS NOT NULL", [gwl.fixture.number],
+  const [gwlEvent] = gwl?.fixture ? await query<{ event_id: string; event_channel_id: string }>(
+    "SELECT event_id, event_channel_id FROM gwl_raid_events WHERE match_number = $1 AND state = 'posted' AND event_id IS NOT NULL AND event_channel_id IS NOT NULL", [gwl.fixture.number],
   ) : [];
-  const gwlEventUrl = gwlEvent ? `https://discord.com/channels/${env().DISCORD_GUILD_ID}/${WDL_EVENT_CHANNEL}/${encodeURIComponent(gwlEvent.event_id)}` : null;
+  const gwlEventUrl = gwlEvent ? `https://discord.com/channels/${env().DISCORD_GUILD_ID}/${gwlEvent.event_channel_id}/${encodeURIComponent(gwlEvent.event_id)}` : null;
   const cutoff = Math.floor(Date.now() / 1000) - LOOKBACK_S;
   const upcoming = (events?.data ?? []).filter((e) => e.startTime !== null && e.startTime >= cutoff).sort((a, b) => a.startTime! - b.startTime!);
 

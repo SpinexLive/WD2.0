@@ -198,7 +198,7 @@ function raidUrl(path: string): string {
 }
 const raidHeaders = () => ({ Authorization: env().RAID_HELPER_API_TOKEN });
 
-export async function createWdlRaidEvent(channelId: string, body: ReturnType<typeof wdlEventBody>) {
+async function createRaidEvent(channelId: string, body: ReturnType<typeof wdlEventBody>) {
   if (channelId !== WDL_EVENT_CHANNEL) throw new HttpError(400, "Invalid Raid Helper event channel.", "invalid_channel");
   const { data } = await requestJson({
     provider: "raid-helper", method: "POST",
@@ -207,10 +207,31 @@ export async function createWdlRaidEvent(channelId: string, body: ReturnType<typ
   });
   const parsed = z.object({ status: z.string(), event: z.object({ id: z.string().min(1) }) }).safeParse(data);
   if (!parsed.success) throw new Error("Raid Helper returned an unrecognised event-creation response; check Discord before retrying.");
-  if (!["success", "ok"].includes(parsed.data.status.toLowerCase())) {
+  return parsed.data;
+}
+
+export async function createWdlRaidEvent(channelId: string, body: ReturnType<typeof wdlEventBody>) {
+  const parsed = await createRaidEvent(channelId, body);
+  if (!["success", "ok"].includes(parsed.status.toLowerCase())) {
     throw new Error("Raid Helper did not confirm successful creation; check Discord before retrying.");
   }
-  return parsed.data;
+  return parsed;
+}
+
+export async function createGwlRaidEvent(channelId: string, body: ReturnType<typeof wdlEventBody>) {
+  return createRaidEvent(channelId, body);
+}
+
+export async function isWdlEventChannel(channelId: string): Promise<boolean> {
+  if (channelId === WDL_EVENT_CHANNEL) return true;
+  if (!/^\d{15,22}$/.test(channelId)) throw new HttpError(400, "Invalid Raid Helper event channel.", "invalid_channel");
+  const { data } = await requestJson({
+    provider: "discord", url: `https://discord.com/api/v10/channels/${channelId}`,
+    headers: { Authorization: `Bot ${env().DISCORD_BOT_TOKEN}` }, retries: 0,
+  });
+  const channel = z.object({ id: z.string(), guild_id: z.string(), parent_id: z.string().nullable(), type: z.number() }).parse(data);
+  return channel.id === channelId && channel.guild_id === env().DISCORD_GUILD_ID &&
+    channel.parent_id === WDL_EVENT_CHANNEL && [10, 11, 12].includes(channel.type);
 }
 
 export async function getScheduledWdlEvents() {

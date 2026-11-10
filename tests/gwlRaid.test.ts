@@ -3,7 +3,7 @@ import type { GwlFixture } from "@/server/services/gwl";
 
 const mocks = vi.hoisted(() => ({
   query: vi.fn(), fixtures: vi.fn(), names: vi.fn(), posted: vi.fn(), scheduled: vi.fn(),
-  create: vi.fn(), raw: vi.fn(), audit: vi.fn(), lock: vi.fn(),
+  create: vi.fn(), raw: vi.fn(), audit: vi.fn(), lock: vi.fn(), channel: vi.fn(),
 }));
 vi.mock("@/lib/env", () => ({ env: () => ({ APP_URL: "https://dashboard.test", DISCORD_GUILD_ID: "1332320879073296404" }) }));
 vi.mock("@/lib/db", () => ({
@@ -14,7 +14,7 @@ vi.mock("@/server/services/gwl", () => ({ getGwlFixtures: mocks.fixtures }));
 vi.mock("@/server/services/wdlRaidHelper", async (original) => {
   const actual = await original<typeof import("@/server/services/wdlRaidHelper")>();
   return { ...actual, wdlEventNames: mocks.names, getPostedWdlEvents: mocks.posted,
-    getScheduledWdlEvents: mocks.scheduled, createWdlRaidEvent: mocks.create, getRawWdlEvent: mocks.raw };
+    getScheduledWdlEvents: mocks.scheduled, createGwlRaidEvent: mocks.create, getRawWdlEvent: mocks.raw, isWdlEventChannel: mocks.channel };
 });
 
 import { gwlEventBody } from "@/server/services/gwlRaidHelper";
@@ -37,6 +37,7 @@ beforeEach(() => {
   mocks.names.mockResolvedValue(names);
   mocks.posted.mockResolvedValue([]);
   mocks.scheduled.mockResolvedValue([]);
+  mocks.channel.mockResolvedValue(true);
   mocks.audit.mockResolvedValue(undefined);
   mocks.fixtures.mockResolvedValue({ stale: false, data: { upcoming: [fixture], recent: [] } });
 });
@@ -95,7 +96,11 @@ describe("GWL event automation", () => {
     vi.setSystemTime(now);
     try {
       const row = database();
-      mocks.create.mockResolvedValue({ event: { id: "schedule1" } });
+      mocks.create.mockImplementation(async (_channel, body) => {
+        mocks.scheduled.mockResolvedValue([{ id: "schedule1", channelId: "1546479425644793877",
+          title: body.title, startTime: Number(body.date), postTime: body.schedule }]);
+        return { status: "unrecognized", event: { id: "schedule1" } };
+      });
       await gwlFixtureTick();
       expect(mocks.lock).toHaveBeenCalledWith(expect.any(Function), true);
       expect(row.state).toBe("scheduled");
@@ -115,10 +120,45 @@ describe("GWL event automation", () => {
           ...side, team: { tag: side.team.tag, name: side.team.name, slug: side.team.slug },
         })),
       };
-      mocks.create.mockResolvedValue({ event: { id: "schedule1" } });
+      mocks.create.mockImplementation(async (_channel, body) => {
+        mocks.scheduled.mockResolvedValue([{ id: "schedule1", channelId: "1546479425644793877",
+          title: body.title, startTime: Number(body.date), postTime: body.schedule }]);
+        return { status: "unrecognized", event: { id: "schedule1" } };
+      });
       await gwlFixtureTick();
       expect(row.state).toBe("scheduled");
       expect(mocks.create).toHaveBeenCalledOnce();
+    } finally { vi.useRealTimers(); }
+  });
+
+  it("verifies and records an immediate forum event despite an unfamiliar response status", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(Date.parse(fixture.startsAt) - 86400_000);
+    try {
+      const row = database();
+      mocks.create.mockResolvedValue({ status: "unrecognized", event: { id: "1569727003605864530" } });
+      mocks.raw.mockResolvedValue({ id: "1569727003605864530", serverId: "1332320879073296404",
+        channelId: "1569727003605864530", templateId: "ct34",
+        title: "GWL | RMNT v PMF v TLL", startTime: Date.parse(fixture.startsAt) / 1000 - 1800 });
+      await gwlFixtureTick();
+      expect(mocks.channel).toHaveBeenCalledWith("1569727003605864530");
+      expect(row.state).toBe("posted");
+      expect(row.event_id).toBe("1569727003605864530");
+    } finally { vi.useRealTimers(); }
+  });
+
+  it("does not mark an event posted if the forum thread belongs elsewhere", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(Date.parse(fixture.startsAt) - 86400_000);
+    try {
+      const row = database();
+      mocks.create.mockResolvedValue({ status: "unrecognized", event: { id: "1569727003605864530" } });
+      mocks.raw.mockResolvedValue({ id: "1569727003605864530", serverId: "1332320879073296404",
+        channelId: "1569727003605864530", templateId: "ct34",
+        title: "GWL | RMNT v PMF v TLL", startTime: Date.parse(fixture.startsAt) / 1000 - 1800 });
+      mocks.channel.mockResolvedValue(false);
+      await expect(gwlFixtureTick()).rejects.toThrow("could not be confirmed");
+      expect(row.state).toBe("uncertain");
     } finally { vi.useRealTimers(); }
   });
 

@@ -4,11 +4,11 @@ import { env } from "@/lib/env";
 import { HttpError } from "@/lib/http";
 import { getGwlFixtures, type GwlFixture } from "./gwl";
 import { gwlEventBody } from "./gwlRaidHelper";
-import { createWdlRaidEvent, getPostedWdlEvents, getRawWdlEvent, getScheduledWdlEvents, wdlEventNames, WDL_EVENT_CHANNEL } from "./wdlRaidHelper";
+import { createGwlRaidEvent, getPostedWdlEvents, getRawWdlEvent, getScheduledWdlEvents, isWdlEventChannel, wdlEventNames, WDL_EVENT_CHANNEL } from "./wdlRaidHelper";
 
 type EventRow = {
   match_number: string; fixture: GwlFixture; state: string; scheduled_id: string | null;
-  event_id: string | null; start_time: string | null; post_at: string | null;
+  event_id: string | null; event_channel_id: string | null; start_time: string | null; post_at: string | null;
   temporary_role: string | null; member_role_name: string | null; voice_channel_name: string | null; error: string | null;
 };
 const actor = { discordId: "system:gwl", displayName: "GWL fixture worker" };
@@ -28,8 +28,8 @@ export async function gwlRaidStatus() {
     events: events.map((row) => ({
       matchNumber: row.match_number, state: row.state, error: row.error, scheduledId: row.scheduled_id,
       eventId: row.event_id,
-      eventUrl: row.state === "posted" && row.event_id
-        ? `https://discord.com/channels/${env().DISCORD_GUILD_ID}/${WDL_EVENT_CHANNEL}/${encodeURIComponent(row.event_id)}` : null,
+      eventUrl: row.state === "posted" && row.event_id && row.event_channel_id
+        ? `https://discord.com/channels/${env().DISCORD_GUILD_ID}/${row.event_channel_id}/${encodeURIComponent(row.event_id)}` : null,
     })),
   };
 }
@@ -40,13 +40,13 @@ async function reconcile(rows: EventRow[]) {
   if (!active.length) return;
   const [posted, scheduled, names] = await Promise.all([getPostedWdlEvents(), getScheduledWdlEvents(), wdlEventNames()]);
   for (const row of active) {
-    const matches = posted.filter((event) => event.scheduledId === row.scheduled_id && event.channelId === WDL_EVENT_CHANNEL);
+    const matches = posted.filter((event) => event.scheduledId === row.scheduled_id);
     if (matches.length > 1) {
       await query("UPDATE gwl_raid_events SET state = 'review', error = $2, updated_at = now() WHERE match_number = $1 AND state = 'scheduled'",
         [row.match_number, "Multiple posted events match the schedule. Review in Raid Helper."]);
     } else if (matches.length === 1) {
       const event = await getRawWdlEvent(matches[0]!.id);
-      if (event.id !== matches[0]!.id || event.serverId !== env().DISCORD_GUILD_ID || event.channelId !== WDL_EVENT_CHANNEL ||
+      if (event.id !== matches[0]!.id || event.serverId !== env().DISCORD_GUILD_ID || !(await isWdlEventChannel(event.channelId)) ||
           event.templateId !== "ct34" || event.scheduledId !== row.scheduled_id || event.startTime !== Number(row.start_time) ||
           event.title !== row.temporary_role) {
         await query("UPDATE gwl_raid_events SET state = 'review', error = $2, updated_at = now() WHERE match_number = $1 AND state = 'scheduled'",
@@ -54,11 +54,11 @@ async function reconcile(rows: EventRow[]) {
       } else {
         const changedNames = row.member_role_name !== names.role || row.voice_channel_name !== names.voice;
         const linked = await query(
-          `UPDATE gwl_raid_events SET event_id = $2,
+          `UPDATE gwl_raid_events SET event_id = $2, event_channel_id = $4,
              state = CASE WHEN state = 'scheduled' AND $3 THEN 'review' WHEN state = 'scheduled' THEN 'posted' ELSE state END,
              error = CASE WHEN state = 'scheduled' AND $3 THEN 'The member role or briefing channel was renamed; review this event.' ELSE error END,
              updated_at = now()
-           WHERE match_number = $1 AND event_id IS NULL RETURNING match_number`, [row.match_number, event.id, changedNames]);
+           WHERE match_number = $1 AND event_id IS NULL RETURNING match_number`, [row.match_number, event.id, changedNames, event.channelId]);
         if (linked.length) await audit(actor, "gwl.event_posted", "gwl_fixture", row.match_number, { scheduledId: row.scheduled_id, eventId: event.id });
       }
     } else if (row.state === "scheduled" && row.post_at && Number(row.post_at) + 300 < Date.now() / 1000 &&
@@ -127,7 +127,9 @@ async function runTick() {
     );
     const opponents = candidate.fixture.sides.filter((side) => side.team.tag?.trim().toUpperCase() !== "RMNT")
       .map((side) => side.team.tag!.trim().toUpperCase());
-    if (sameTimeWdl.length || [...posted, ...scheduled].some((event) => {
+    const sameTimePosted = await Promise.all(posted.filter((event) => Math.abs(event.startTime - briefing) < 60)
+      .map((event) => isWdlEventChannel(event.channelId)));
+    if (sameTimeWdl.length || sameTimePosted.some(Boolean) || [...posted, ...scheduled].some((event) => {
       if (event.channelId === WDL_EVENT_CHANNEL && Math.abs(event.startTime - briefing) < 60) return true;
       const tokens = new Set(event.title.toUpperCase().split(/[^A-Z0-9_-]+/).filter(Boolean));
       return Math.abs(event.startTime - (briefing + 1800)) <= 2 * 3600 &&
@@ -171,7 +173,7 @@ async function runTick() {
       body.advancedSettings.allowed_roles, body.advancedSettings.voice_channel, JSON.stringify(candidate.fixture)]);
   if (!claimed.length) return;
   try {
-    const result = await createWdlRaidEvent(WDL_EVENT_CHANNEL, body);
+    const result = await createGwlRaidEvent(WDL_EVENT_CHANNEL, body);
     const isScheduled = body.schedule !== undefined;
     try {
       const saved = await independentQuery(
@@ -182,12 +184,19 @@ async function runTick() {
       console.error("Could not record returned GWL Raid Helper ID:", { matchNumber: candidate.match_number, raidId: result.event.id, scheduled: isScheduled });
       throw error;
     }
-    if (!isScheduled) {
+    if (isScheduled) {
+      const event = (await getScheduledWdlEvents()).find((item) => item.id === result.event.id);
+      if (!event || event.channelId !== WDL_EVENT_CHANNEL || event.startTime !== Number(body.date) ||
+          event.title !== body.title || event.postTime !== body.schedule) {
+        throw new Error("The scheduled event did not match the requested GWL fixture.");
+      }
+    } else {
       const event = await getRawWdlEvent(result.event.id);
-      if (event.id !== result.event.id || event.serverId !== env().DISCORD_GUILD_ID || event.channelId !== WDL_EVENT_CHANNEL ||
+      if (event.id !== result.event.id || event.serverId !== env().DISCORD_GUILD_ID || !(await isWdlEventChannel(event.channelId)) ||
           event.templateId !== "ct34" || event.startTime !== Number(body.date) || event.title !== body.title) {
         throw new Error("The posted event did not match the requested GWL fixture.");
       }
+      await independentQuery("UPDATE gwl_raid_events SET event_channel_id = $2 WHERE match_number = $1 AND state = 'creating'", [candidate.match_number, event.channelId]);
     }
     await independentQuery("UPDATE gwl_raid_events SET state = $2, updated_at = now() WHERE match_number = $1 AND state = 'creating'",
       [candidate.match_number, isScheduled ? "scheduled" : "posted"]);

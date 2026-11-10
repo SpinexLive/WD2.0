@@ -7,7 +7,7 @@ vi.mock("@/lib/env", () => ({ env: () => ({
 }) }));
 vi.mock("@/lib/http", async (original) => ({ ...await original<typeof import("@/lib/http")>(), requestJson: request }));
 
-import { createWdlRaidEvent, deleteWdlRaidEvent, getPostedWdlEvents, updateWdlEventDescription, updatedWdlDescription, wdlEventBody, wdlEventNames } from "@/server/services/wdlRaidHelper";
+import { createGwlRaidEvent, createWdlRaidEvent, deleteWdlRaidEvent, getPostedWdlEvents, isWdlEventChannel, updateWdlEventDescription, updatedWdlDescription, wdlEventBody, wdlEventNames } from "@/server/services/wdlRaidHelper";
 import type { WdlFixture } from "@/lib/wdlFixtures";
 
 const fixture: WdlFixture = {
@@ -50,6 +50,23 @@ describe("Raid Helper fixture API", () => {
     await expect(createWdlRaidEvent("other", body)).rejects.toMatchObject({ code: "invalid_channel" });
     request.mockResolvedValue({ data: { status: "failure", event: { id: "schedule" } } });
     await expect(createWdlRaidEvent("1546479425644793877", body)).rejects.toThrow("did not confirm");
+  });
+
+  it("allows GWL to verify an unfamiliar creation response without changing WDL handling", async () => {
+    const body = wdlEventBody(fixture, { role: "Member", voice: "Briefing", roleNames: [] }, 1);
+    request.mockResolvedValue({ data: { status: "unfamiliar", event: { id: "event1" } } });
+    expect(await createGwlRaidEvent("1546479425644793877", body)).toEqual({ status: "unfamiliar", event: { id: "event1" } });
+    await expect(createWdlRaidEvent("1546479425644793877", body)).rejects.toThrow("did not confirm");
+  });
+
+  it("validates a forum thread belongs to the event channel and guild", async () => {
+    const thread = { id: "1569727003605864530", guild_id: "1332320879073296404", parent_id: "1546479425644793877", type: 11 };
+    request.mockResolvedValue({ data: thread });
+    expect(await isWdlEventChannel(thread.id)).toBe(true);
+    request.mockResolvedValue({ data: { ...thread, parent_id: "1546479425644793878" } });
+    expect(await isWdlEventChannel(thread.id)).toBe(false);
+    request.mockResolvedValue({ data: { ...thread, guild_id: "123456789012345678" } });
+    expect(await isWdlEventChannel(thread.id)).toBe(false);
   });
 
   it("reads every documented posted-event page using the Page header", async () => {

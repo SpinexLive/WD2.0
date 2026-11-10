@@ -19,7 +19,7 @@ vi.mock("@/server/services/gwl", () => ({ getGwlFixtures: mocks.fixtures }));
 vi.mock("@/server/services/wdlRaidHelper", async (original) => {
   const actual = await original<typeof import("@/server/services/wdlRaidHelper")>();
   return { ...actual, wdlEventNames: mocks.names, getPostedWdlEvents: mocks.posted,
-    getScheduledWdlEvents: mocks.scheduled, createWdlRaidEvent: mocks.create, getRawWdlEvent: mocks.raw };
+    getScheduledWdlEvents: mocks.scheduled, createGwlRaidEvent: mocks.create, getRawWdlEvent: mocks.raw };
 });
 
 import { gwlFixtureTick } from "@/server/services/gwlRaid";
@@ -37,14 +37,18 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)("GWL Raid Helper PostgreSQL inte
     vi.resetAllMocks();
     mocks.client = new pg.Client({ connectionString: process.env.TEST_DATABASE_URL });
     await mocks.client.connect();
-    for (const migration of ["034_wdl_fixtures.sql", "045_gwl_raid_events.sql"]) {
+    for (const migration of ["034_wdl_fixtures.sql", "045_gwl_raid_events.sql", "046_gwl_raid_event_channel.sql"]) {
       const sql = await readFile(resolve(process.cwd(), "migrations", migration), "utf8");
       await mocks.client.query(sql.replace(/CREATE TABLE/g, "CREATE TEMP TABLE"));
     }
     mocks.names.mockResolvedValue({ role: "Member", voice: "Briefing", roleNames: [] });
     mocks.posted.mockResolvedValue([]);
     mocks.scheduled.mockResolvedValue([]);
-    mocks.create.mockResolvedValue({ status: "success", event: { id: "schedule1" } });
+    mocks.create.mockImplementation(async (_channel, body) => {
+      mocks.scheduled.mockResolvedValue([{ id: "schedule1", channelId: "1546479425644793877",
+        title: body.title, startTime: Number(body.date), postTime: body.schedule }]);
+      return { status: "success", event: { id: "schedule1" } };
+    });
     mocks.audit.mockResolvedValue(undefined);
   });
   afterEach(async () => { await mocks.client?.end(); mocks.client = null; });
