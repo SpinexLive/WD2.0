@@ -10,8 +10,9 @@ import { selectedSquadComparisons } from "@/lib/rosterComparison";
 import { validateRoster } from "@/lib/rosterValidation";
 import type { Roster, SignupInfo, Squad } from "@/lib/rosterTypes";
 import type { GwlMemberStatus } from "@/lib/gwlMemberStatus";
-import { Avatar, Badge, ConfirmDialog, ErrorBanner, Icon, type IconName, RegDot, WarnBanner, categoryIcon, useToast } from "./ui";
+import { Avatar, Badge, ConfirmDialog, ErrorBanner, Icon, type IconName, WarnBanner, categoryIcon, useToast } from "./ui";
 import { PublishDialog } from "./PublishDialog";
+import { RosterLeagueMark } from "./RosterLeagueMark";
 
 type SortKey = "name" | "kd";
 const fmtKd = (kd: number | null) => (kd === null ? "-" : kd.toFixed(2));
@@ -80,11 +81,6 @@ function TokenChip({ token, count }: { token: RosterToken; count: number }) {
 function ResponseMark({ response }: { response?: "accepted" | "declined" }) {
   const [icon, label] = response === "accepted" ? (["accept", "Confirmed"] as const) : response === "declined" ? (["decline", "Declined"] as const) : (["pending", "Awaiting confirmation"] as const);
   return <span className="shrink-0" title={label} aria-label={label}><Icon name={icon} size={14} /></span>;
-}
-
-function GwlMark({ status }: { status: GwlMemberStatus }) {
-  const label = status === "linked" ? "GWL: Linked" : status === "not_matched" ? "GWL: Not matched (this does not mean unregistered)" : "GWL: Unknown";
-  return <span role="img" aria-label={label} title={label} className={`shrink-0 rounded border px-1 text-[10px] font-semibold ${status === "linked" ? "border-ok/40 text-ok" : "border-ink-500 text-stone/60"}`}>GWL {status === "linked" ? "✓" : status === "not_matched" ? "–" : "?"}</span>;
 }
 
 function Pool({ children }: { children: React.ReactNode }) {
@@ -325,7 +321,7 @@ export function RosterEditor({ roster, signups, assignedKd, leagueAvailable, gwl
 
       <div className="card flex flex-wrap items-center gap-x-4 gap-y-1 px-3 py-1.5 text-xs">
         <span className={`font-semibold tabular-nums ${cap !== Infinity && total > cap ? "text-blood-300" : ""}`} title="Assigned players / total positions">{squads.reduce((n, s) => n + s.slots.filter(Boolean).length, 0)}/{total} assigned{cap !== Infinity ? ` (max ${cap})` : ""}</span>
-        <span className="text-stone/60">GWL: ✓ linked · – not matched · ? unknown</span>
+        <span className="text-stone/60">League badges: green confirmed · red not matched, unregistered or unknown · amber pending</span>
         <label className="flex items-center gap-1.5"><input type="checkbox" checked={settings.warnUnregistered} onChange={(e) => edit(() => setSettings({ ...settings, warnUnregistered: e.target.checked }))} />Warn if not registered with Wardogs League</label>
         {roster.messages.length > 0 && (
           <span className="flex items-center gap-2 tabular-nums" title="Confirmations from the Discord roster post">
@@ -390,8 +386,8 @@ export function RosterEditor({ roster, signups, assignedKd, leagueAvailable, gwl
               {unassigned.map((s) => (
                 <Chip key={s.discordId} id={`p:${s.discordId}`} role={s.role} onDoubleClick={() => quickAssign({ discordId: s.discordId, displayName: s.name, avatarUrl: s.avatarUrl })} player={{ discordId: s.discordId, displayName: s.name, avatarUrl: s.avatarUrl }}>
                   <span className="min-w-0 flex-1 truncate" title={[s.role, s.status].filter(Boolean).join(" · ") || "Signed up"}>{s.name}</span>
-                  <RegDot status={s.registration} />
-                  <GwlMark status={gwlStatuses[s.discordId] ?? "unknown"} />
+                  <RosterLeagueMark league="WDL" status={s.registration} />
+                  <RosterLeagueMark league="GWL" status={gwlStatuses[s.discordId] ?? "unknown"} />
                   <span className={`w-9 text-right text-xs font-semibold tabular-nums ${kdTone(s.kd)}`} title="All-time K/D">{fmtKd(s.kd)}</span>
                 </Chip>
               ))}
@@ -431,8 +427,8 @@ export function RosterEditor({ roster, signups, assignedKd, leagueAvailable, gwl
                             ); })}
                             {!p.discordId && <button type="button" className="text-[10px] text-warn" title="Edit mercenary name" onPointerDown={(e) => e.stopPropagation()} onClick={() => { setMercName(p.displayName); setMercSlot({ squadId: sq.id, index: i }); }}>Mercenary</button>}
                             {p.discordId && roster.messages.length > 0 && <ResponseMark response={roster.responses[p.discordId]} />}
-                            {p.discordId && signupById.get(p.discordId) && <RegDot status={signupById.get(p.discordId)!.registration} />}
-                            {p.discordId && <GwlMark status={gwlStatuses[p.discordId] ?? "unknown"} />}
+                            {p.discordId && <RosterLeagueMark league="WDL" status={signupById.get(p.discordId)?.registration ?? "unknown"} />}
+                            {p.discordId && <RosterLeagueMark league="GWL" status={gwlStatuses[p.discordId] ?? "unknown"} />}
                             <button className={`shrink-0 rounded px-0.5 ${p.isLeader ? "" : "opacity-30 grayscale hover:opacity-80"}`} title={p.isLeader ? "Remove squad leader" : "Make squad leader"} onPointerDown={(e) => e.stopPropagation()} onClick={() => edit(() => setSquads((s) => setLeader(s, sq.id, playerKey(p))))}><Icon name="leader" size={16} /></button>
                             <button className="px-0.5 text-xs text-stone/50 hover:text-blood-300" title={p.discordId ? "Return to Available" : "Remove mercenary"} onPointerDown={(e) => e.stopPropagation()} onClick={() => edit(() => setSquads((s) => movePlayer(s, p, { kind: "pool" })))}>✕</button>
                           </Chip>
