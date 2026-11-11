@@ -23,7 +23,7 @@ const sideSchema = z.object({
   placement: z.number().nullable(), eloDelta: z.number().nullable(),
 });
 export const gwlFixtureSchema = z.object({
-  number: text.min(1).max(128), status: text, map: text, layer: text.nullable(), startsAt: z.string().datetime({ offset: true }),
+  number: text.min(1).max(128), status: text, map: text, layer: text.nullable(), weather: text.nullable().optional(), startsAt: z.string().datetime({ offset: true }),
   region: text, sides: z.array(sideSchema),
   concludedAt: z.string().datetime({ offset: true }).nullable().optional(),
   season: text.optional(),
@@ -44,7 +44,7 @@ export const gwlFixturesSchema = z.object({
   return new Set(numbers).size === numbers.length;
 }, "Duplicate GWL match numbers");
 const slotsSchema = z.object({ slots: z.array(z.object({
-  id: text, startsAt: text, region: text, map: text, layer: text.nullable(),
+  id: text, startsAt: text, region: text, map: text, layer: text.nullable(), weather: text.nullable().optional(),
   seatsFilled: z.number(), host: text,
 })) });
 const eloSchema = z.object({ eloRating: z.number(), ratedMatches: z.number(), changeLast5: z.number(), history: z.array(z.number()) });

@@ -2,9 +2,10 @@ import { audit } from "@/lib/audit";
 import { independentQuery, query, withLeagueEventLock } from "@/lib/db";
 import { env } from "@/lib/env";
 import { HttpError } from "@/lib/http";
+import { z } from "zod";
 import { getGwlFixtures, type GwlFixture } from "./gwl";
-import { gwlEventBody } from "./gwlRaidHelper";
-import { createGwlRaidEvent, getPostedWdlEvents, getRawWdlEvent, getScheduledWdlEvents, isWdlEventChannel, wdlEventNames, WDL_EVENT_CHANNEL } from "./wdlRaidHelper";
+import { gwlEventBody, updatedGwlWeatherDescription } from "./gwlRaidHelper";
+import { createGwlRaidEvent, getPostedWdlEvents, getRawWdlEvent, getScheduledWdlEvents, isWdlEventChannel, updateWdlEventDescription, wdlEventNames, WDL_EVENT_CHANNEL } from "./wdlRaidHelper";
 
 type EventRow = {
   match_number: string; fixture: GwlFixture; state: string; scheduled_id: string | null;
@@ -12,6 +13,7 @@ type EventRow = {
   temporary_role: string | null; member_role_name: string | null; voice_channel_name: string | null; error: string | null;
 };
 const actor = { discordId: "system:gwl", displayName: "GWL fixture worker" };
+const signupsSchema = z.array(z.object({ id: z.number(), userId: z.string() }));
 const relevant = (fixture: GwlFixture) => JSON.stringify({
   status: fixture.status.toUpperCase(), startsAt: fixture.startsAt, map: fixture.map, layer: fixture.layer, region: fixture.region,
   sides: fixture.sides.map((side) => ({
@@ -34,6 +36,74 @@ export async function gwlRaidStatus() {
   };
 }
 export type GwlRaidStatus = Awaited<ReturnType<typeof gwlRaidStatus>>;
+
+async function updatePostedWeather(row: EventRow, current: GwlFixture): Promise<void> {
+  if (relevant(row.fixture) !== relevant(current) || (current.weather === undefined && row.fixture.weather !== undefined) ||
+      current.status.trim().toUpperCase() !== "SCHEDULED" || Date.parse(current.startsAt) / 1000 - 1800 <= Date.now() / 1000) return;
+  if (!row.event_id || !row.event_channel_id || !row.temporary_role) {
+    throw new HttpError(409, "The recorded GWL event identity is incomplete.", "gwl_description_unsafe");
+  }
+  const event = await getRawWdlEvent(row.event_id);
+  if (event.id !== row.event_id || event.serverId !== env().DISCORD_GUILD_ID || event.channelId !== row.event_channel_id ||
+      !(await isWdlEventChannel(event.channelId)) || event.templateId !== "ct34" ||
+      event.startTime !== Math.floor(Date.parse(current.startsAt) / 1000) - 1800 ||
+      event.title !== row.temporary_role || typeof event.description !== "string") {
+    throw new HttpError(409, "The GWL event identity or description could not be verified.", "gwl_description_unsafe");
+  }
+  const description = updatedGwlWeatherDescription(event.description, row.fixture, current);
+  if (description === event.description) {
+    if (row.fixture.weather !== current.weather && current.weather !== undefined) {
+      await query("UPDATE gwl_raid_events SET fixture = $2, updated_at = now() WHERE match_number = $1 AND state = 'posted' AND fixture = $3::jsonb",
+        [row.match_number, JSON.stringify(current), JSON.stringify(row.fixture)]);
+    }
+    return;
+  }
+  const signups = signupsSchema.safeParse(event.signUps);
+  if (!signups.success) throw new HttpError(409, "The GWL event signups could not be verified.", "gwl_description_unsafe");
+  const latest = await getGwlFixtures(true);
+  if (latest.stale) throw new Error(latest.error ?? "GWL fixtures are stale.");
+  const fresh = latest.data.upcoming.find((fixture) => fixture.number === row.match_number);
+  if (!fresh || relevant(fresh) !== relevant(current) || fresh.weather !== current.weather) {
+    throw new HttpError(409, "The GWL fixture changed during the event update checks.", "gwl_description_unsafe");
+  }
+  const check = await getRawWdlEvent(row.event_id);
+  const latestSignups = signupsSchema.safeParse(check.signUps);
+  if (check.id !== event.id || check.serverId !== event.serverId || check.channelId !== event.channelId ||
+      check.title !== event.title || check.templateId !== event.templateId || check.startTime !== event.startTime ||
+      check.description !== event.description || !latestSignups.success ||
+      signups.data.some((signup) => !latestSignups.data.some((item) => item.id === signup.id && item.userId === signup.userId))) {
+    throw new HttpError(409, "The GWL event changed during the update checks.", "gwl_description_unsafe");
+  }
+  const claimed = await independentQuery(
+    `UPDATE gwl_raid_events SET state = 'uncertain', error = 'Description update in progress or unconfirmed; check Raid Helper and signups before retrying.', updated_at = now()
+       WHERE match_number = $1 AND state = 'posted' AND event_id = $2 AND fixture = $3::jsonb RETURNING match_number`,
+    [row.match_number, row.event_id, JSON.stringify(row.fixture)],
+  );
+  if (!claimed.length) return;
+  await audit(actor, "gwl.event_description_update_started", "gwl_fixture", row.match_number, { eventId: row.event_id });
+  try {
+    await updateWdlEventDescription(row.event_id, description);
+    const updated = await getRawWdlEvent(row.event_id);
+    const updatedSignups = signupsSchema.safeParse(updated.signUps);
+    if (updated.id !== event.id || updated.serverId !== event.serverId || updated.channelId !== event.channelId ||
+        updated.templateId !== event.templateId || updated.title !== event.title || updated.startTime !== event.startTime ||
+        updated.description !== description || !updatedSignups.success ||
+        latestSignups.data.some((signup) => !updatedSignups.data.some((item) => item.id === signup.id && item.userId === signup.userId))) {
+      throw new Error("The updated description or existing signups could not be verified.");
+    }
+    const saved = await independentQuery(
+      `UPDATE gwl_raid_events SET state = 'posted', fixture = $3, error = NULL, updated_at = now()
+        WHERE match_number = $1 AND state = 'uncertain' AND event_id = $2
+          AND error = 'Description update in progress or unconfirmed; check Raid Helper and signups before retrying.' RETURNING match_number`,
+      [row.match_number, row.event_id, JSON.stringify(current)],
+    );
+    if (!saved.length) throw new Error("The verified description update could not be recorded.");
+  } catch (error) {
+    await audit(actor, "gwl.event_description_update_uncertain", "gwl_fixture", row.match_number, { eventId: row.event_id });
+    throw new Error(`GWL event description update could not be confirmed: ${error instanceof Error ? error.message : "unknown error"}`);
+  }
+  await audit(actor, "gwl.event_description_updated", "gwl_fixture", row.match_number, { eventId: row.event_id });
+}
 
 async function reconcile(rows: EventRow[]) {
   const active = rows.filter((row) => row.scheduled_id && !row.event_id && ["scheduled", "review", "uncertain"].includes(row.state));
@@ -102,6 +172,18 @@ async function runTick() {
       ? "GWL changed this fixture. Review the linked Raid Helper event; it was not changed automatically." : state === "pending" ? null : row.error;
     await query("UPDATE gwl_raid_events SET fixture = $2, state = $3, error = $4, updated_at = now() WHERE match_number = $1 AND state = $5",
       [row.match_number, JSON.stringify(current), state, error, row.state]);
+  }
+  for (const row of rows.filter((item) => item.state === "posted")) {
+    const fixture = snapshot.data.upcoming.find((item) => item.number === row.match_number);
+    if (!fixture || relevant(row.fixture) !== relevant(fixture)) continue;
+    try {
+      await updatePostedWeather(row, fixture);
+    } catch (error) {
+      if (error instanceof HttpError && error.code === "gwl_description_unsafe") {
+        await query("UPDATE gwl_raid_events SET state = 'review', error = $2, updated_at = now() WHERE match_number = $1 AND state = 'posted'",
+          [row.match_number, `${error.message} Review the event and its signups in Raid Helper.`]);
+      } else throw error;
+    }
   }
   const [candidate] = await query<EventRow>(
     "SELECT * FROM gwl_raid_events WHERE state = 'pending' ORDER BY updated_at LIMIT 1",

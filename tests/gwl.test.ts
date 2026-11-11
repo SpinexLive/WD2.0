@@ -59,6 +59,14 @@ describe("GWL integration", () => {
     expect(snapshot.stale).toBe(true);
   });
 
+  it("preserves GWL weather while accepting historical fixtures without it", () => {
+    const data = { number: "42", status: "scheduled", map: "Map", layer: "Houses",
+      startsAt: "2026-11-15T20:00:00Z", region: "EU", sides: [] };
+    expect(gwlFixtureSchema.parse({ ...data, weather: "rain" }).weather).toBe("rain");
+    expect(gwlFixtureSchema.parse({ ...data, weather: null }).weather).toBeNull();
+    expect(gwlFixtureSchema.parse(data).weather).toBeUndefined();
+  });
+
   it("does not accept duplicate fixture numbers", async () => {
     const fixture = {
       number: "duplicate", status: "SCHEDULED", map: "Map", layer: null,

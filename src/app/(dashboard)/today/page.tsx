@@ -8,7 +8,7 @@ import { WdlParticipants } from "@/components/WdlParticipants";
 import { WdlMapDetails } from "@/components/WdlMapDetails";
 import type { TodayData } from "@/server/services/today";
 import { fixtureOpponents } from "@/lib/wdlFixtures";
-import { gwlMapLabel } from "@/lib/gwl";
+import { gwlMapLabel, gwlWeatherLabel } from "@/lib/gwl";
 
 function useCountdown(startTime: number | null) {
   const [now, setNow] = useState(() => Date.now());
@@ -126,7 +126,7 @@ export default function TodayPage() {
             {data.gwl.fixture ? <>
               <p className="font-semibold">{data.gwl.fixture.sides.map((side) => side.team.tag || side.team.name || side.team.slug).join(" v ") || "Teams TBC"}</p>
               <p className="text-sm text-stone/60">{new Date(data.gwl.fixture.startsAt).toLocaleString("en-GB")}</p>
-              <p className="text-sm text-stone/60">{gwlMapLabel(data.gwl.fixture.map)}{data.gwl.fixture.layer ? ` · ${data.gwl.fixture.layer}` : ""} · {data.gwl.fixture.status}</p>
+              <p className="text-sm text-stone/60">{gwlMapLabel(data.gwl.fixture.map)} · Zone: {data.gwl.fixture.layer ?? "TBD"} · Weather: {gwlWeatherLabel(data.gwl.fixture.weather)} · {data.gwl.fixture.status}</p>
               {data.gwl.eventUrl && <a href={data.gwl.eventUrl} target="_blank" rel="noopener noreferrer" className="text-xs text-blood-300 hover:underline">Open Raid Helper signup →</a>}
             </> : !data.gwl.error ? <p className="text-sm text-stone/55">No upcoming match returned by GWL.</p> : null}
           </section>}

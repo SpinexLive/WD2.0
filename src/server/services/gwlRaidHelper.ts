@@ -1,12 +1,41 @@
 import { env } from "@/lib/env";
 import { HttpError } from "@/lib/http";
-import { gwlMapLabel } from "@/lib/gwl";
+import { gwlMapLabel, gwlWeatherLabel } from "@/lib/gwl";
 import { FACTIONS, resolveFaction } from "@/lib/scouting";
 import type { WdlFixture } from "@/lib/wdlFixtures";
 import type { GwlFixture } from "./gwl";
 import { wdlEventBody, type wdlEventNames } from "./wdlRaidHelper";
 
 const clean = (value: string | null) => value?.replace(/@/g, "@\u200b").replace(/[\r\n]/g, " ").trim() || "TBD";
+
+export function updatedGwlWeatherDescription(description: string, previous: GwlFixture, current: GwlFixture): string {
+  if (description.includes("\r")) throw new HttpError(409, "Unexpected event description format.", "gwl_description_unsafe");
+  const lines = description.split("\n");
+  const zones = lines.flatMap((line, i) => /^\s*\*\*(?:zone|layer):\*\*/i.test(line) ? [i] : []);
+  const weathers = lines.flatMap((line, i) => /^\s*\*\*weather:\*\*/i.test(line) ? [i] : []);
+  if (zones.length !== 1 || weathers.length > 1) {
+    throw new HttpError(409, "Event zone or weather could not be identified safely.", "gwl_description_unsafe");
+  }
+  const zone = zones[0]!;
+  if (!/^\*\*(?:Zone|Layer):\*\*/.test(lines[zone]!) ||
+      (weathers.length && !lines[weathers[0]!]!.startsWith("**Weather:**"))) {
+    throw new HttpError(409, "Event zone or weather formatting was edited; review it manually.", "gwl_description_unsafe");
+  }
+  const currentZone = lines[zone]!.replace(/^\*\*(?:Zone|Layer):\*\*/, "").trim();
+  if (currentZone !== clean(previous.layer)) throw new HttpError(409, "Event zone was edited; review it manually.", "gwl_description_unsafe");
+  const weather = `**Weather:** ${clean(gwlWeatherLabel(current.weather))}`;
+  if (weathers.length) {
+    const old = lines[weathers[0]!]!;
+    if (old !== weather && old !== `**Weather:** ${clean(gwlWeatherLabel(previous.weather))}`) {
+      throw new HttpError(409, "Event weather was edited; review it manually.", "gwl_description_unsafe");
+    }
+    lines[weathers[0]!] = weather;
+  } else {
+    lines.splice(zone + 1, 0, weather);
+  }
+  lines[zone] = `**Zone:** ${currentZone}`;
+  return lines.join("\n");
+}
 
 export function gwlEventBody(fixture: GwlFixture, names: Awaited<ReturnType<typeof wdlEventNames>>, now: number) {
   const sides = fixture.sides.map((side) => ({ ...side, tag: side.team.tag?.trim() ?? "" }));
@@ -52,7 +81,8 @@ export function gwlEventBody(fixture: GwlFixture, names: Awaited<ReturnType<type
       "", "**Competition:** GWL",
       `**Match:** #${clean(fixture.number)}`,
       "", `**Map:** ${clean(gwlMapLabel(fixture.map))}`,
-      `**Layer:** ${clean(fixture.layer)}`,
+      `**Zone:** ${clean(fixture.layer)}`,
+      `**Weather:** ${clean(gwlWeatherLabel(fixture.weather))}`,
       "", ...lines,
     ].join("\n"),
     advancedSettings: { ...body.advancedSettings, temp_role: title, image: new URL("/images/gwl.png", baseUrl).toString() },
