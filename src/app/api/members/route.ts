@@ -5,6 +5,8 @@ import type { Snapshot } from "@/lib/cache";
 import { getPlayerStats } from "@/server/services/wardogsRcon";
 import { resolveLinks } from "@/server/services/links";
 import { kickMatchSync } from "@/server/services/matchHistory";
+import { getGwlMembers } from "@/server/services/gwl";
+import { gwlMemberMatcher } from "@/lib/gwlMemberStatus";
 
 export const dynamic = "force-dynamic";
 
@@ -26,11 +28,12 @@ async function settle<T>(p: Promise<Snapshot<T>>): Promise<{ snap: Snapshot<T> |
 export const GET = protectedRoute(async ({ req, session }) => {
   const force = req.nextUrl.searchParams.get("refresh") === "1";
   kickMatchSync(force);
-  const [clan, league, apps, links] = await Promise.all([getClanMembers(force), settle(getLeagueMembers(force)), settle(getLeagueApplications(force)), resolveLinks()]);
+  const [clan, league, apps, links, gwl] = await Promise.all([getClanMembers(force), settle(getLeagueMembers(force)), settle(getLeagueApplications(force)), resolveLinks(), settle(getGwlMembers(force))]);
 
   // Stale league data is never treated as confirmed: statuses fall back to "unknown".
   const leagueMembers = league.snap && !league.snap.stale ? league.snap.data : null;
   const leagueApps = apps.snap && !apps.snap.stale ? apps.snap.data : null;
+  const gwlMatcher = gwlMemberMatcher(gwl.snap);
 
   const steamOf = (id: string) => links.steamIds.get(id) ?? null;
 
@@ -58,6 +61,7 @@ export const GET = protectedRoute(async ({ req, session }) => {
       displayName: m.displayName,
       avatarUrl: m.avatarUrl,
       registration: registrationStatus(m.id, leagueMembers, leagueApps),
+      gwlStatus: gwlMatcher.status(m.id),
       steamId: steamOf(m.id),
       kd: stats?.kd ?? null,
       kills: stats?.kills ?? null,
@@ -92,6 +96,7 @@ export const GET = protectedRoute(async ({ req, session }) => {
       discord: meta(clan),
       leagueMembers: meta(league.snap, league.error),
       leagueApplications: meta(apps.snap, apps.error),
+      gwlMembers: { ...meta(gwl.snap, gwl.error), missingScope: gwlMatcher.missingScope },
       links: links.source,
       statsFailed,
       statsPending,

@@ -11,6 +11,7 @@ const teamSchema = z.object({
 });
 const memberSchema = z.object({
   name: text, role: text, playerId: text.optional(), discordName: text.optional(),
+  discordId: z.string().regex(/^\d{15,22}$/).nullable().optional(),
 });
 const applicationSchema = z.object({
   id: text, name: text, note: text.nullable(), appliedAt: text, deadline: text,

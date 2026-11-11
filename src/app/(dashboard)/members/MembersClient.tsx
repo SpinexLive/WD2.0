@@ -3,13 +3,14 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useApi } from "@/lib/client";
 import Link from "next/link";
-import { Avatar, ErrorBanner, REG_LABEL, RegBadge, Skeleton, WarnBanner } from "@/components/ui";
+import { Avatar, Badge, ErrorBanner, REG_LABEL, RegBadge, Skeleton, WarnBanner } from "@/components/ui";
 import MemberProfile from "@/components/MemberProfile";
+import type { GwlMemberStatus } from "@/lib/gwlMemberStatus";
 import "@/components/members.css";
 
 type Reg = keyof typeof REG_LABEL;
 interface Source { fetchedAt: string | null; stale: boolean; error: string | null; available?: boolean }
-interface Member { id: string; displayName: string; avatarUrl: string; registration: Reg; steamId: string | null; kd: number | null; kills: number | null; deaths: number | null; matches: number | null }
+interface Member { id: string; displayName: string; avatarUrl: string; registration: Reg; gwlStatus: GwlMemberStatus; steamId: string | null; kd: number | null; kills: number | null; deaths: number | null; matches: number | null }
 interface Application { id: string; discordId: string | null; name: string | null; displayName: string | null; avatarUrl: string | null }
 interface LeagueOnly { discordId: string; name: string | null; role: string | null; joinedAt: string | null }
 interface Data {
@@ -17,10 +18,11 @@ interface Data {
   leagueOnly: LeagueOnly[] | null;
   applications: Application[] | null;
   summary: { total: number; registered: number; unregistered: number; unknown: number; pendingApplications: number | null };
-  sources: { discord: Source; leagueMembers: Source; leagueApplications: Source; links: Source; statsFailed: number; statsPending?: boolean };
+  sources: { discord: Source; leagueMembers: Source; leagueApplications: Source; gwlMembers: Source & { missingScope: boolean }; links: Source; statsFailed: number; statsPending?: boolean };
 }
 
-type SortKey = "name" | "status" | "steam" | "kd" | "matches";
+type SortKey = "name" | "status" | "gwl" | "steam" | "kd" | "matches";
+const GWL_LABEL: Record<GwlMemberStatus, string> = { linked: "Linked", not_matched: "Not matched", unknown: "Unknown" };
 
 const SCALE: [number, number, number][] = [[196, 73, 90], [212, 176, 106], [143, 181, 155]];
 
@@ -40,6 +42,7 @@ export default function MembersClient({ canManage, canExport }: { canManage: boo
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState<"all" | Reg>("all");
+  const [gwlFilter, setGwlFilter] = useState<"all" | GwlMemberStatus>("all");
   const [sort, setSort] = useState<{ key: SortKey; dir: 1 | -1 }>({ key: "name", dir: 1 });
   const toggleSort = (key: SortKey) => setSort((s) => (s.key === key ? { key, dir: s.dir === 1 ? -1 : 1 } : { key, dir: key === "kd" || key === "matches" ? -1 : 1 }));
   const [dismissed, setDismissed] = useState(false);
@@ -97,7 +100,7 @@ export default function MembersClient({ canManage, canExport }: { canManage: boo
 
   const rows = useMemo(() => {
     const q = search.trim().toLowerCase();
-    const list = (data?.members ?? []).filter((m) => (filter === "all" || m.registration === filter) && (!q || m.displayName.toLowerCase().includes(q) || m.id.includes(q)));
+    const list = (data?.members ?? []).filter((m) => (filter === "all" || m.registration === filter) && (gwlFilter === "all" || m.gwlStatus === gwlFilter) && (!q || m.displayName.toLowerCase().includes(q) || m.id.includes(q)));
     const { key, dir } = sort;
     const byName = (a: Member, b: Member) => a.displayName.localeCompare(b.displayName);
     // Empty values always sit at the bottom, whichever direction is chosen.
@@ -105,12 +108,13 @@ export default function MembersClient({ canManage, canExport }: { canManage: boo
     return list.sort((a, b) => {
       if (key === "name") return byName(a, b) * dir;
       if (key === "status") return (a.registration.localeCompare(b.registration) * dir) || byName(a, b);
+      if (key === "gwl") return (a.gwlStatus.localeCompare(b.gwlStatus) * dir) || byName(a, b);
       if (key === "steam") return (a.steamId === null && b.steamId === null ? 0 : a.steamId === null ? 1 : b.steamId === null ? -1 : a.steamId.localeCompare(b.steamId) * dir) || byName(a, b);
       if (key === "kd") return num(a.kd, b.kd) || byName(a, b);
       if (key === "matches") return num(a.matches, b.matches) || byName(a, b);
       return 0;
     });
-  }, [data, search, filter, sort]);
+  }, [data, search, filter, gwlFilter, sort]);
 
   // Each K/D is coloured by its rank among every member that has one; tied values share a colour.
   const kdColor = useMemo(() => {
@@ -171,6 +175,9 @@ export default function MembersClient({ canManage, canExport }: { canManage: boo
           {(!data.sources.leagueMembers.available || data.sources.leagueMembers.stale || !data.sources.leagueApplications.available || data.sources.leagueApplications.stale) && (
             <WarnBanner>Wardogs League data is unavailable or outdated, so registration statuses are shown as Unknown rather than guessed.</WarnBanner>
           )}
+          {(!data.sources.gwlMembers.available || data.sources.gwlMembers.stale || data.sources.gwlMembers.missingScope) && (
+            <WarnBanner>GWL member data is unavailable, outdated or missing Discord ID access{data.sources.gwlMembers.error ? ` (${data.sources.gwlMembers.error})` : ""}. Unconfirmed links are shown as Unknown; check GWL_API_KEY and the members.discord_id scope.</WarnBanner>
+          )}
           {(!data.sources.links.available || data.sources.links.stale) && (
             <WarnBanner>Steam links could not be loaded from the Wardogs API{data.sources.links.error ? ` (${data.sources.links.error})` : ""}, so Steam IDs{data.sources.links.available ? " may be out of date" : " are not shown"}.</WarnBanner>
           )}
@@ -184,10 +191,14 @@ export default function MembersClient({ canManage, canExport }: { canManage: boo
             <option value="all">WDL Registration</option>
             {(Object.keys(REG_LABEL) as Reg[]).filter((r) => r !== "unknown").map((r) => <option key={r} value={r}>{REG_LABEL[r]}</option>)}
           </select>
+          <select className="input w-auto" aria-label="Filter by GWL link" value={gwlFilter} onChange={(e) => setGwlFilter(e.target.value as typeof gwlFilter)}>
+            <option value="all">GWL links</option>
+            {(Object.keys(GWL_LABEL) as GwlMemberStatus[]).map((status) => <option key={status} value={status}>{GWL_LABEL[status]}</option>)}
+          </select>
         </div>
         <div className="max-h-[70vh] min-h-0 flex-1 overflow-auto md:max-h-none">
-          <table className="m-table w-full min-w-[720px]">
-            <thead className="sticky top-0 z-10 bg-ink-850"><tr className="border-b border-ink-700">{(["name:Member", "status:Wardogs League", "steam:Steam ID", "kd:K/D", "matches:Matches"] as const).map((c) => {
+          <table className="m-table w-full min-w-[820px]">
+            <thead className="sticky top-0 z-10 bg-ink-850"><tr className="border-b border-ink-700">{(["name:Member", "status:Wardogs League", "gwl:GWL", "steam:Steam ID", "kd:K/D", "matches:Matches"] as const).map((c) => {
               const [key, label] = c.split(":") as [SortKey, string];
               if (key === "status" || key === "steam") return <th key={key} className="th">{label}</th>;
               const active = sort.key === key;
@@ -201,17 +212,18 @@ export default function MembersClient({ canManage, canExport }: { canManage: boo
             })}</tr></thead>
             <tbody>
               {loading && !data
-                ? Array.from({ length: 6 }, (_, i) => <tr key={i}><td colSpan={5} className="p-3"><Skeleton className="h-6" /></td></tr>)
+                ? Array.from({ length: 6 }, (_, i) => <tr key={i}><td colSpan={6} className="p-3"><Skeleton className="h-6" /></td></tr>)
                 : rows.map((m, i) => (
                     <tr key={m.id} className="m-row cursor-pointer border-b border-ink-800 hover:bg-ink-800/60" style={{ "--i": i } as React.CSSProperties} onClick={() => setSelected(m)}>
                       <td className="px-3 py-1.5"><button type="button" className="flex items-center gap-2.5 text-left hover:text-blood-300 focus-visible:outline focus-visible:outline-1 focus-visible:outline-blood-500" aria-label={`Open profile for ${m.displayName}`} onClick={(e) => { e.stopPropagation(); setSelected(m); }}><Avatar src={m.avatarUrl} size={24} /><span className="text-sm">{m.displayName}</span></button></td>
                       <td className="px-3 py-1.5"><RegBadge status={m.registration} /></td>
+                      <td className="px-3 py-1.5"><Badge tone={m.gwlStatus === "linked" ? "green" : "grey"} title={m.gwlStatus === "linked" ? "Discord ID matches a GWL team member" : m.gwlStatus === "not_matched" ? "No Discord ID match; this does not prove the member is unregistered." : "GWL data is unavailable or the Discord ID match is unreliable."}>{GWL_LABEL[m.gwlStatus]}</Badge></td>
                       <td className="px-3 py-1.5 text-xs text-stone/75">{m.steamId ?? <span className="text-stone/40">-</span>}</td>
                       <td className="px-3 py-1.5 text-sm font-semibold tabular-nums" style={m.kd !== null ? { color: kdColor(m.kd) } : undefined} title={m.kills !== null ? `${m.kills} kills / ${m.deaths} deaths` : undefined}>{m.kd !== null ? m.kd.toFixed(2) : <span className="font-normal text-stone/40">-</span>}</td>
                       <td className="px-3 py-1.5 text-sm tabular-nums">{m.matches !== null ? m.matches : <span className="text-stone/40">-</span>}</td>
                     </tr>
                   ))}
-              {!loading && rows.length === 0 && <tr><td colSpan={5} className="p-6 text-center text-sm text-stone/60">No members match.</td></tr>}
+              {!loading && rows.length === 0 && <tr><td colSpan={6} className="p-6 text-center text-sm text-stone/60">No members match.</td></tr>}
             </tbody>
           </table>
         </div>

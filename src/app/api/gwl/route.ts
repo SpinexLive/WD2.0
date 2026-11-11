@@ -11,5 +11,5 @@ export const GET = protectedRoute(async ({ req }) => {
   ]);
   if (!fixtures.stale) await archiveGwlFixtures(fixtures.data);
   const [archivedResults, raid] = await Promise.all([getArchivedGwlResults(), gwlRaidStatus()]);
-  return { team, members, applications, fixtures, elo, slots, archivedResults, raid };
+  return { team, members: { ...members, data: { members: members.data.members.map(({ discordId: _discordId, ...member }) => member) } }, applications, fixtures, elo, slots, archivedResults, raid };
 });

@@ -37,6 +37,17 @@ describe("GWL integration", () => {
     expect((await getGwlMembers(true)).data.members[0]).toEqual({ name: "Player", role: "member" });
   });
 
+  it("retains scoped Discord IDs without exposing Steam IDs", async () => {
+    mocks.request.mockResolvedValue({ data: { members: [
+      { name: "Player", role: "member", discordId: "123456789012345678", steamId: "76561198000000000" },
+      { name: "Unlinked", role: "member", discordId: null },
+    ] } });
+    expect((await getGwlMembers(true)).data.members).toEqual([
+      { name: "Player", role: "member", discordId: "123456789012345678" },
+      { name: "Unlinked", role: "member", discordId: null },
+    ]);
+  });
+
   it("validates the documented fixture shape and refuses malformed data", async () => {
     mocks.request.mockResolvedValueOnce({ data: { upcoming: [{
       number: "42", status: "SCHEDULED", map: "Map", layer: null, startsAt: "2026-11-15T20:00:00Z",
