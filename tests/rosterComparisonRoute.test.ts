@@ -1,10 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
 
-const mocks = vi.hoisted(() => ({ session: vi.fn(), limit: vi.fn(), event: vi.fn(), roster: vi.fn(), templates: vi.fn(), enrich: vi.fn(), stats: vi.fn() }));
+const mocks = vi.hoisted(() => ({ session: vi.fn(), limit: vi.fn(), event: vi.fn(), roster: vi.fn(), templates: vi.fn(), enrich: vi.fn(), stats: vi.fn(), gwl: vi.fn() }));
 vi.mock("@/lib/session", () => ({ getSession: mocks.session }));
 vi.mock("@/lib/ratelimit", () => ({ rateLimit: mocks.limit }));
 vi.mock("@/server/services/raidHelper", () => ({ getEventDetail: mocks.event }));
+vi.mock("@/server/services/gwl", () => ({ getGwlMembers: mocks.gwl }));
 vi.mock("@/server/services/rosterPublish", () => ({ enrichSignups: mocks.enrich, rosterStatsFor: mocks.stats }));
 vi.mock("@/server/services/rosters", async (original) => {
   const actual = await original<typeof import("@/server/services/rosters")>();
@@ -27,6 +28,7 @@ beforeEach(() => {
   mocks.templates.mockResolvedValue([]);
   mocks.enrich.mockResolvedValue({ signups: [{ discordId: signed, kd: 1.5 }], leagueAvailable: true });
   mocks.stats.mockResolvedValue(new Map([[removed, { kd: 0, deaths: 1 }]]));
+  mocks.gwl.mockResolvedValue({ data: { members: [{ discordId: signed }] }, stale: false, fetchedAt: "2026-01-01" });
 });
 
 describe("roster comparison stats", () => {
@@ -37,6 +39,9 @@ describe("roster comparison stats", () => {
     const data = await response.json();
     expect(data.assignedKd).toEqual({ [removed]: 0 });
     expect(data.signups).toEqual([{ discordId: signed, kd: 1.5 }]);
+    expect(mocks.gwl).toHaveBeenCalledWith(true);
+    expect(data.gwlStatuses).toEqual({ [signed]: "linked", [removed]: "not_matched" });
+    expect(data.gwlSource).toEqual({ available: true, stale: false, missingScope: false, error: null });
   });
 
   it("still obtains assigned-player stats when Raid Helper is unavailable", async () => {
@@ -48,5 +53,31 @@ describe("roster comparison stats", () => {
     expect(data.eventError).toContain("Raid Helper unavailable");
     expect(data.assignedKd).toEqual({ [removed]: 0 });
     expect(mocks.enrich).not.toHaveBeenCalled();
+    expect(data.gwlStatuses).toEqual({ [signed]: "linked", [removed]: "not_matched" });
+  });
+
+  it("reports unknown statuses when GWL fails or is stale", async () => {
+    mocks.gwl.mockRejectedValueOnce(new Error("GWL unavailable"));
+    let data = await (await GET(request(), context)).json();
+    expect(data.gwlStatuses).toEqual({ [signed]: "unknown", [removed]: "unknown" });
+    expect(data.gwlSource).toMatchObject({ available: false, error: "GWL unavailable" });
+    mocks.gwl.mockResolvedValueOnce({ data: { members: [{ discordId: signed }] }, stale: true, error: "GWL stale" });
+    data = await (await GET(request(), context)).json();
+    expect(data.gwlStatuses).toEqual({ [signed]: "unknown", [removed]: "unknown" });
+    expect(data.gwlSource).toMatchObject({ available: true, stale: true, error: "GWL stale" });
+  });
+
+  it("handles missing scopes and duplicate Discord IDs conservatively", async () => {
+    mocks.gwl.mockResolvedValueOnce({ data: { members: [{ discordId: signed }, { discordId: signed }, {}] }, stale: false });
+    const data = await (await GET(request(), context)).json();
+    expect(data.gwlStatuses).toEqual({ [signed]: "unknown", [removed]: "unknown" });
+    expect(data.gwlSource.missingScope).toBe(true);
+  });
+
+  it("does not fetch GWL data for an unauthorised user", async () => {
+    mocks.session.mockResolvedValue(null);
+    const response = await GET(request(), context);
+    expect(response.status).toBe(401);
+    expect(mocks.gwl).not.toHaveBeenCalled();
   });
 });

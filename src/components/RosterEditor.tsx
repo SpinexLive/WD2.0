@@ -9,6 +9,7 @@ import { COMPETITIVE_PLAYER_CAP } from "@/lib/rosterTypes";
 import { selectedSquadComparisons } from "@/lib/rosterComparison";
 import { validateRoster } from "@/lib/rosterValidation";
 import type { Roster, SignupInfo, Squad } from "@/lib/rosterTypes";
+import type { GwlMemberStatus } from "@/lib/gwlMemberStatus";
 import { Avatar, Badge, ConfirmDialog, ErrorBanner, Icon, type IconName, RegDot, WarnBanner, categoryIcon, useToast } from "./ui";
 import { PublishDialog } from "./PublishDialog";
 
@@ -21,6 +22,8 @@ interface Props {
   signups: SignupInfo[] | null;
   assignedKd: Record<string, number | null>;
   leagueAvailable: boolean;
+  gwlStatuses: Record<string, GwlMemberStatus>;
+  gwlSource: { available: boolean; stale: boolean; missingScope: boolean; error: string | null };
   eventTitle: string;
   onReload: () => Promise<void>;
 }
@@ -79,12 +82,17 @@ function ResponseMark({ response }: { response?: "accepted" | "declined" }) {
   return <span className="shrink-0" title={label} aria-label={label}><Icon name={icon} size={14} /></span>;
 }
 
+function GwlMark({ status }: { status: GwlMemberStatus }) {
+  const label = status === "linked" ? "GWL: Linked" : status === "not_matched" ? "GWL: Not matched (this does not mean unregistered)" : "GWL: Unknown";
+  return <span role="img" aria-label={label} title={label} className={`shrink-0 rounded border px-1 text-[10px] font-semibold ${status === "linked" ? "border-ok/40 text-ok" : "border-ink-500 text-stone/60"}`}>GWL {status === "linked" ? "✓" : status === "not_matched" ? "–" : "?"}</span>;
+}
+
 function Pool({ children }: { children: React.ReactNode }) {
   const { setNodeRef, isOver } = useDroppable({ id: "pool" });
   return <div ref={setNodeRef} className={`min-h-0 flex-1 space-y-1 overflow-y-auto rounded p-0.5 ${isOver ? "bg-blood-700/20" : ""}`}>{children}</div>;
 }
 
-export function RosterEditor({ roster, signups, assignedKd, leagueAvailable, eventTitle, onReload }: Props) {
+export function RosterEditor({ roster, signups, assignedKd, leagueAvailable, gwlStatuses, gwlSource, eventTitle, onReload }: Props) {
   const api = useApi();
   const { toast, node } = useToast();
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 4 } }), useSensor(KeyboardSensor));
@@ -313,9 +321,11 @@ export function RosterEditor({ roster, signups, assignedKd, leagueAvailable, eve
       {conflict && <WarnBanner>Someone else saved this roster. Reloading discards your unsaved edits and shows their version.</WarnBanner>}
       {signups === null && <WarnBanner>Raid Helper sign-ups could not be loaded; sign-up warnings are paused and the Available list is unavailable.</WarnBanner>}
       {signups !== null && !leagueAvailable && settings.warnUnregistered && <WarnBanner>Wardogs League data is unavailable or outdated; registration is shown as Unknown.</WarnBanner>}
+      {(!gwlSource.available || gwlSource.stale || gwlSource.missingScope) && <WarnBanner>GWL member data is unavailable, outdated or missing Discord ID access{gwlSource.error ? ` (${gwlSource.error})` : ""}. Unconfirmed links are shown as Unknown.</WarnBanner>}
 
       <div className="card flex flex-wrap items-center gap-x-4 gap-y-1 px-3 py-1.5 text-xs">
         <span className={`font-semibold tabular-nums ${cap !== Infinity && total > cap ? "text-blood-300" : ""}`} title="Assigned players / total positions">{squads.reduce((n, s) => n + s.slots.filter(Boolean).length, 0)}/{total} assigned{cap !== Infinity ? ` (max ${cap})` : ""}</span>
+        <span className="text-stone/60">GWL: ✓ linked · – not matched · ? unknown</span>
         <label className="flex items-center gap-1.5"><input type="checkbox" checked={settings.warnUnregistered} onChange={(e) => edit(() => setSettings({ ...settings, warnUnregistered: e.target.checked }))} />Warn if not registered with Wardogs League</label>
         {roster.messages.length > 0 && (
           <span className="flex items-center gap-2 tabular-nums" title="Confirmations from the Discord roster post">
@@ -381,6 +391,7 @@ export function RosterEditor({ roster, signups, assignedKd, leagueAvailable, eve
                 <Chip key={s.discordId} id={`p:${s.discordId}`} role={s.role} onDoubleClick={() => quickAssign({ discordId: s.discordId, displayName: s.name, avatarUrl: s.avatarUrl })} player={{ discordId: s.discordId, displayName: s.name, avatarUrl: s.avatarUrl }}>
                   <span className="min-w-0 flex-1 truncate" title={[s.role, s.status].filter(Boolean).join(" · ") || "Signed up"}>{s.name}</span>
                   <RegDot status={s.registration} />
+                  <GwlMark status={gwlStatuses[s.discordId] ?? "unknown"} />
                   <span className={`w-9 text-right text-xs font-semibold tabular-nums ${kdTone(s.kd)}`} title="All-time K/D">{fmtKd(s.kd)}</span>
                 </Chip>
               ))}
@@ -421,6 +432,7 @@ export function RosterEditor({ roster, signups, assignedKd, leagueAvailable, eve
                             {!p.discordId && <button type="button" className="text-[10px] text-warn" title="Edit mercenary name" onPointerDown={(e) => e.stopPropagation()} onClick={() => { setMercName(p.displayName); setMercSlot({ squadId: sq.id, index: i }); }}>Mercenary</button>}
                             {p.discordId && roster.messages.length > 0 && <ResponseMark response={roster.responses[p.discordId]} />}
                             {p.discordId && signupById.get(p.discordId) && <RegDot status={signupById.get(p.discordId)!.registration} />}
+                            {p.discordId && <GwlMark status={gwlStatuses[p.discordId] ?? "unknown"} />}
                             <button className={`shrink-0 rounded px-0.5 ${p.isLeader ? "" : "opacity-30 grayscale hover:opacity-80"}`} title={p.isLeader ? "Remove squad leader" : "Make squad leader"} onPointerDown={(e) => e.stopPropagation()} onClick={() => edit(() => setSquads((s) => setLeader(s, sq.id, playerKey(p))))}><Icon name="leader" size={16} /></button>
                             <button className="px-0.5 text-xs text-stone/50 hover:text-blood-300" title={p.discordId ? "Return to Available" : "Remove mercenary"} onPointerDown={(e) => e.stopPropagation()} onClick={() => edit(() => setSquads((s) => movePlayer(s, p, { kind: "pool" })))}>✕</button>
                           </Chip>

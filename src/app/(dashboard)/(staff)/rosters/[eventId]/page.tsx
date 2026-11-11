@@ -6,6 +6,7 @@ import { useApi, useApp, useLive, type ApiError } from "@/lib/client";
 import { ErrorBanner, Skeleton } from "@/components/ui";
 import { RosterEditor } from "@/components/RosterEditor";
 import type { Roster, RosterTemplate, SignupInfo } from "@/lib/rosterTypes";
+import type { GwlMemberStatus } from "@/lib/gwlMemberStatus";
 
 interface Data {
   event: { id: string; title: string; startTime: number | null } | null;
@@ -14,6 +15,8 @@ interface Data {
   signups: SignupInfo[] | null;
   assignedKd: Record<string, number | null>;
   leagueAvailable: boolean;
+  gwlStatuses: Record<string, GwlMemberStatus>;
+  gwlSource: { available: boolean; stale: boolean; missingScope: boolean; error: string | null };
   roster: Roster | null;
   templates: RosterTemplate[];
 }
@@ -48,7 +51,7 @@ export default function RosterPage({ params }: { params: Promise<{ eventId: stri
       const next = await api<Data>(`/api/rosters/${encodeURIComponent(eventId)}`);
       setData((prev) => {
         if (!prev?.roster || !next.roster) return prev;
-        if (prev.roster.version === next.roster.version) return { ...prev, roster: { ...prev.roster, responses: next.roster.responses } };
+        if (prev.roster.version === next.roster.version) return { ...prev, gwlStatuses: next.gwlStatuses, gwlSource: next.gwlSource, roster: { ...prev.roster, responses: next.roster.responses } };
         if (next.roster.lastEditorId !== user.id) setElsewhere(true);
         return prev;
       });
@@ -99,7 +102,7 @@ export default function RosterPage({ params }: { params: Promise<{ eventId: stri
         </div>
       )}
       {data.roster ? (
-        <RosterEditor key={`${data.roster.id}:${data.roster.version}`} roster={data.roster} signups={data.signups} assignedKd={data.assignedKd} leagueAvailable={data.leagueAvailable} eventTitle={title} onReload={() => load(true)} />
+        <RosterEditor key={`${data.roster.id}:${data.roster.version}`} roster={data.roster} signups={data.signups} assignedKd={data.assignedKd} leagueAvailable={data.leagueAvailable} gwlStatuses={data.gwlStatuses} gwlSource={data.gwlSource} eventTitle={title} onReload={() => load(true)} />
       ) : (
         <div className="card max-w-lg space-y-4 p-5">
           <h1 className="page-title">{title}</h1>
