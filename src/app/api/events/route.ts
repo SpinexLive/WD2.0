@@ -17,4 +17,4 @@ export const GET = protectedRoute(async ({ req }) => {
     templates: templates.map((t) => ({ key: t.key, name: t.name, eventType: t.eventType, positions: t.squads.reduce((n, s) => n + s.size, 0) })),
     source: { fetchedAt: snap.fetchedAt, stale: snap.stale, error: snap.error ?? null },
   };
-});
+}, { rosterAccess: true });

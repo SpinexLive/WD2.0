@@ -27,6 +27,8 @@ export interface GuardOptions {
   reviewerOrStaff?: boolean;
   /** Staff and the dedicated Members viewer role may read this route; viewers cannot mutate it. */
   membersViewerOnly?: boolean;
+  /** Staff and the dedicated roster role may manage rosters and their editor dependencies. */
+  rosterAccess?: boolean;
 }
 
 export function errorResponse(err: unknown): NextResponse {
@@ -67,6 +69,8 @@ export function protectedRoute<P = Record<string, string>>(handler: Handler<P>, 
       } else if (options.membersViewerOnly) {
         const readOnly = req.method === "GET" || req.method === "HEAD";
         if (!session.isAdmin && !(readOnly && session.canViewMembers)) throw new HttpError(403, "This area is for REMNANT staff or Members viewers only", "forbidden");
+      } else if (options.rosterAccess) {
+        if (!session.isAdmin && !session.canManageRosters) throw new HttpError(403, "Roster access is limited to staff and roster managers", "forbidden");
       } else if (!session.isAdmin && !options.allowMember) throw new HttpError(403, "This area is for REMNANT staff only", "forbidden");
 
       const mutating = req.method !== "GET" && req.method !== "HEAD";

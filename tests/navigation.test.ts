@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { matchesNav, navigationGroups, type NavAccess } from "@/lib/navigation";
 import { hasNewsRole, NEWS_ROLE_ID } from "@/lib/permissions";
 
-const member: NavAccess = { isAdmin: false, canViewMembers: false, isReviewer: false, isOwner: false, canManageNews: false };
+const member: NavAccess = { isAdmin: false, canViewMembers: false, canManageRosters: false, isReviewer: false, isOwner: false, canManageNews: false };
 const links = (access: NavAccess) => navigationGroups(access).flatMap((g) => g.items.map((n) => n.href));
 
 describe("grouped navigation access", () => {
@@ -20,6 +20,12 @@ describe("grouped navigation access", () => {
     expect(links(viewer).sort()).toEqual(["/members", "/observe", "/me", "/leaderboard"].sort());
     expect(links(viewer)).not.toContain("/rosters");
     expect(links(viewer)).not.toContain("/admin");
+  });
+  it("adds roster access without other staff tools and combines it with Members access", () => {
+    const roster = { ...member, canManageRosters: true };
+    expect(links(roster).sort()).toEqual(["/rosters", "/observe", "/me", "/leaderboard"].sort());
+    expect(links({ ...roster, canViewMembers: true })).toContain("/members");
+    expect(links(roster)).not.toContain("/briefing");
   });
   it("gives staff all operational links but restricts News and Admin independently", () => {
     const staff = { ...member, isAdmin: true };

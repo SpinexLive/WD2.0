@@ -18,4 +18,4 @@ export const GET = protectedRoute<{ eventId: string }>(async ({ params }) => {
     messages: roster.messages,
     destination,
   };
-});
+}, { rosterAccess: true });

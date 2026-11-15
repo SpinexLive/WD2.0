@@ -11,4 +11,4 @@ export const POST = protectedRoute<{ eventId: string }>(async ({ req, session, p
   const roster = await resetRoster(eventId, version, session.discordId);
   await audit(session, "roster.reset", "roster", roster.id, { eventId });
   return { roster };
-});
+}, { rosterAccess: true });

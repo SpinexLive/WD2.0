@@ -46,7 +46,7 @@ export const GET = protectedRoute<P>(async ({ req, params }) => {
     roster,
     templates,
   };
-});
+}, { rosterAccess: true });
 
 const createSchema = z.object({ templateKey: z.string().min(1).max(64) }).strict();
 
@@ -56,7 +56,7 @@ export const POST = protectedRoute<P>(async ({ req, session, params }) => {
   const roster = await createRoster(eventId, templateKey, session.discordId);
   await audit(session, "roster.create", "roster", roster.id, { eventId, templateKey });
   return { roster };
-});
+}, { rosterAccess: true });
 
 export const DELETE = protectedRoute<P>(async ({ req, session, params }) => {
   const eventId = eventIdSchema.parse(params.eventId);
@@ -64,7 +64,7 @@ export const DELETE = protectedRoute<P>(async ({ req, session, params }) => {
   const roster = await deleteRoster(eventId, version);
   await audit(session, "roster.delete", "roster", roster.id, { eventId });
   return { deleted: true };
-});
+}, { rosterAccess: true });
 
 export const PUT = protectedRoute<P>(async ({ req, session, params }) => {
   const eventId = eventIdSchema.parse(params.eventId);
@@ -72,4 +72,4 @@ export const PUT = protectedRoute<P>(async ({ req, session, params }) => {
   const roster = await saveRoster(eventId, input, session.discordId);
   await audit(session, "roster.save", "roster", roster.id, { eventId, version: roster.version });
   return { roster };
-});
+}, { rosterAccess: true });

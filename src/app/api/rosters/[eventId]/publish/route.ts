@@ -7,4 +7,4 @@ export const dynamic = "force-dynamic";
 export const POST = protectedRoute<{ eventId: string }>(async ({ req, session, params }) => {
   const input = publishSchema.parse(await req.json().catch(() => null));
   return publishRoster(eventIdSchema.parse(params.eventId), input, session);
-});
+}, { rosterAccess: true });

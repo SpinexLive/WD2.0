@@ -2,7 +2,7 @@ import { createHmac, randomBytes } from "node:crypto";
 import { cookies } from "next/headers";
 import { query } from "./db";
 import { env, isProduction } from "./env";
-import { fetchGuildMember, getAllClanMembers, hasAuthorisedRole, hasMemberRole, hasMembersViewerRole, type DiscordMember } from "@/server/services/discord";
+import { fetchGuildMember, getAllClanMembers, hasAuthorisedRole, hasMemberRole, hasMembersViewerRole, hasRosterRole, type DiscordMember } from "@/server/services/discord";
 import { ProviderError } from "./http";
 import { hasNewsRole } from "./permissions";
 
@@ -26,6 +26,8 @@ export interface Session {
   isAdmin: boolean;
   /** Can view the Members dashboard page without general staff access. */
   canViewMembers: boolean;
+  /** Can manage rosters without general staff access. */
+  canManageRosters: boolean;
   /** Holds the scouting reviewer role. */
   isReviewer: boolean;
   /** News management requires the Prime role specifically. */
@@ -78,7 +80,7 @@ async function getRealSession(): Promise<Session | null> {
   if (row.stale_ms > REVALIDATE_MS) {
     try {
       const member = await fetchGuildMember(row.discord_id);
-      if (!member || !(hasAuthorisedRole(member.roles) || hasMemberRole(member.roles) || hasMembersViewerRole(member.roles))) {
+      if (!member || !(hasAuthorisedRole(member.roles) || hasMemberRole(member.roles) || hasMembersViewerRole(member.roles) || hasRosterRole(member.roles))) {
         await query("DELETE FROM sessions WHERE discord_id = $1", [row.discord_id]);
         return null;
       }
@@ -91,7 +93,7 @@ async function getRealSession(): Promise<Session | null> {
     }
   }
 
-  return { id, discordId: row.discord_id, username: row.username, displayName: row.display_name, avatarUrl: row.avatar_url, csrfToken: row.csrf_token, isAdmin: hasAuthorisedRole(row.roles ?? []), canViewMembers: hasMembersViewerRole(row.roles ?? []), isReviewer: (row.roles ?? []).includes(env().DISCORD_REVIEWER_ROLE_ID), canManageNews: hasNewsRole(row.roles ?? []) };
+  return { id, discordId: row.discord_id, username: row.username, displayName: row.display_name, avatarUrl: row.avatar_url, csrfToken: row.csrf_token, isAdmin: hasAuthorisedRole(row.roles ?? []), canViewMembers: hasMembersViewerRole(row.roles ?? []), canManageRosters: hasRosterRole(row.roles ?? []), isReviewer: (row.roles ?? []).includes(env().DISCORD_REVIEWER_ROLE_ID), canManageNews: hasNewsRole(row.roles ?? []) };
 }
 
 /**
@@ -106,7 +108,7 @@ export async function getSession(): Promise<Session | null> {
   const members = await getAllClanMembers().then((s) => s.data, () => []);
   const m = members.find((x) => x.id === target);
   if (!m) return real;
-  return { ...real, discordId: m.id, username: m.username, displayName: m.displayName, avatarUrl: m.avatarUrl, isAdmin: false, canViewMembers: false, isReviewer: false, canManageNews: false, viewingAs: { adminId: real.discordId, adminName: real.displayName } };
+  return { ...real, discordId: m.id, username: m.username, displayName: m.displayName, avatarUrl: m.avatarUrl, isAdmin: false, canViewMembers: false, canManageRosters: false, isReviewer: false, canManageNews: false, viewingAs: { adminId: real.discordId, adminName: real.displayName } };
 }
 
 /** The signed-in person regardless of any "view as" choice. */

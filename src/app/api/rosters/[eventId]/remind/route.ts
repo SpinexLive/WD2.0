@@ -6,4 +6,4 @@ export const dynamic = "force-dynamic";
 
 export const POST = protectedRoute<{ eventId: string }>(async ({ session, params }) => {
   return remindPending(eventIdSchema.parse(params.eventId), session);
-});
+}, { rosterAccess: true });

@@ -11,4 +11,4 @@ export const GET = protectedRoute(async () => {
   const eligible: Record<string, string[]> = {};
   for (const r of rows) (eligible[r.discord_id] ??= []).push(byItem.get(r.item_key)!);
   return { eligible };
-});
+}, { rosterAccess: true });

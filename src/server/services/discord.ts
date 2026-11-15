@@ -63,6 +63,10 @@ export function hasMembersViewerRole(roles: string[]): boolean {
   return roles.includes(env().DISCORD_MEMBERS_VIEWER_ROLE_ID);
 }
 
+export function hasRosterRole(roles: string[]): boolean {
+  return roles.includes(env().DISCORD_ROSTER_ROLE_ID);
+}
+
 // ---- OAuth2 (user token is used only during login and never stored) ----
 
 export function authorizeUrl(state: string): string {
