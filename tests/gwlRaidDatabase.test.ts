@@ -6,7 +6,7 @@ import type { GwlFixture } from "@/server/services/gwl";
 
 const mocks = vi.hoisted(() => ({
   client: null as pg.Client | null, fixtures: vi.fn(), names: vi.fn(), posted: vi.fn(), scheduled: vi.fn(),
-  create: vi.fn(), raw: vi.fn(), audit: vi.fn(),
+  create: vi.fn(), raw: vi.fn(), audit: vi.fn(), channel: vi.fn(), delete: vi.fn(),
 }));
 vi.mock("@/lib/env", () => ({ env: () => ({ APP_URL: "https://dashboard.test", DISCORD_GUILD_ID: "1332320879073296404" }) }));
 vi.mock("@/lib/db", () => ({
@@ -19,10 +19,12 @@ vi.mock("@/server/services/gwl", () => ({ getGwlFixtures: mocks.fixtures }));
 vi.mock("@/server/services/wdlRaidHelper", async (original) => {
   const actual = await original<typeof import("@/server/services/wdlRaidHelper")>();
   return { ...actual, wdlEventNames: mocks.names, getPostedWdlEvents: mocks.posted,
-    getScheduledWdlEvents: mocks.scheduled, createGwlRaidEvent: mocks.create, getRawWdlEvent: mocks.raw };
+    getScheduledWdlEvents: mocks.scheduled, createGwlRaidEvent: mocks.create, getRawWdlEvent: mocks.raw,
+    isWdlEventChannel: mocks.channel, deleteWdlRaidEvent: mocks.delete };
 });
 
 import { gwlFixtureTick } from "@/server/services/gwlRaid";
+import { ProviderError } from "@/lib/http";
 
 const makeFixture = (): GwlFixture => ({
   number: "2901", status: "scheduled", startsAt: new Date(Date.now() + 20 * 86400_000).toISOString(),
@@ -37,7 +39,7 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)("GWL Raid Helper PostgreSQL inte
     vi.resetAllMocks();
     mocks.client = new pg.Client({ connectionString: process.env.TEST_DATABASE_URL });
     await mocks.client.connect();
-    for (const migration of ["034_wdl_fixtures.sql", "045_gwl_raid_events.sql", "046_gwl_raid_event_channel.sql"]) {
+    for (const migration of ["034_wdl_fixtures.sql", "045_gwl_raid_events.sql", "046_gwl_raid_event_channel.sql", "047_gwl_raid_cancelled.sql"]) {
       const sql = await readFile(resolve(process.cwd(), "migrations", migration), "utf8");
       await mocks.client.query(sql.replace(/CREATE TABLE/g, "CREATE TEMP TABLE"));
     }
@@ -50,6 +52,7 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)("GWL Raid Helper PostgreSQL inte
       return { status: "success", event: { id: "schedule1" } };
     });
     mocks.audit.mockResolvedValue(undefined);
+    mocks.channel.mockResolvedValue(true);
   });
   afterEach(async () => { await mocks.client?.end(); mocks.client = null; });
 
@@ -73,5 +76,26 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)("GWL Raid Helper PostgreSQL inte
     await gwlFixtureTick();
     expect(mocks.create).not.toHaveBeenCalled();
     expect((await mocks.client!.query("SELECT state FROM gwl_raid_events")).rows[0].state).toBe("review");
+  });
+
+  it("durably claims and records a deleted previously reviewed event", async () => {
+    const fixture = makeFixture();
+    const start = Math.floor(Date.parse(fixture.startsAt) / 1000) - 1800;
+    await mocks.client!.query(
+      `INSERT INTO gwl_raid_events (match_number, fixture, state, event_id, event_channel_id, temporary_role, start_time, error)
+       VALUES ($1, $2, 'review', 'event1', 'thread1', 'GWL | RMNT v PMF v TLL', $3, $4)`,
+      [fixture.number, JSON.stringify(fixture), start, "The future fixture is no longer visible in GWL. Review it and any linked event."],
+    );
+    const event = { id: "event1", serverId: "1332320879073296404", channelId: "thread1", templateId: "ct34",
+      title: "GWL | RMNT v PMF v TLL", startTime: start, description: "**Competition:** GWL\n**Match:** #2901" };
+    mocks.fixtures.mockResolvedValue({ stale: false, data: { upcoming: [], recent: [] } });
+    mocks.raw.mockResolvedValueOnce(event).mockResolvedValueOnce(event)
+      .mockRejectedValueOnce(new ProviderError("raid-helper", "Not found", 404));
+    mocks.delete.mockResolvedValue(undefined);
+    await gwlFixtureTick();
+    expect((await mocks.client!.query("SELECT state, error FROM gwl_raid_events WHERE match_number = $1", [fixture.number])).rows[0])
+      .toEqual({ state: "cancelled", error: null });
+    await gwlFixtureTick();
+    expect(mocks.delete).toHaveBeenCalledOnce();
   });
 });

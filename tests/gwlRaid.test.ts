@@ -3,7 +3,7 @@ import type { GwlFixture } from "@/server/services/gwl";
 
 const mocks = vi.hoisted(() => ({
   query: vi.fn(), fixtures: vi.fn(), names: vi.fn(), posted: vi.fn(), scheduled: vi.fn(),
-  create: vi.fn(), raw: vi.fn(), audit: vi.fn(), lock: vi.fn(), channel: vi.fn(), update: vi.fn(),
+  create: vi.fn(), raw: vi.fn(), audit: vi.fn(), lock: vi.fn(), channel: vi.fn(), update: vi.fn(), delete: vi.fn(),
 }));
 vi.mock("@/lib/env", () => ({ env: () => ({ APP_URL: "https://dashboard.test", DISCORD_GUILD_ID: "1332320879073296404" }) }));
 vi.mock("@/lib/db", () => ({
@@ -15,11 +15,12 @@ vi.mock("@/server/services/wdlRaidHelper", async (original) => {
   const actual = await original<typeof import("@/server/services/wdlRaidHelper")>();
   return { ...actual, wdlEventNames: mocks.names, getPostedWdlEvents: mocks.posted,
     getScheduledWdlEvents: mocks.scheduled, createGwlRaidEvent: mocks.create, getRawWdlEvent: mocks.raw, isWdlEventChannel: mocks.channel,
-    updateWdlEventDescription: mocks.update };
+    updateWdlEventDescription: mocks.update, deleteWdlRaidEvent: mocks.delete };
 });
 
 import { gwlEventBody, updatedGwlWeatherDescription } from "@/server/services/gwlRaidHelper";
 import { gwlFixtureTick } from "@/server/services/gwlRaid";
+import { ProviderError } from "@/lib/http";
 
 const now = Date.parse("2030-01-01T00:00:00Z");
 const fixture: GwlFixture = {
@@ -41,6 +42,152 @@ beforeEach(() => {
   mocks.channel.mockResolvedValue(true);
   mocks.audit.mockResolvedValue(undefined);
   mocks.fixtures.mockResolvedValue({ stale: false, data: { upcoming: [fixture], recent: [] } });
+});
+
+describe("GWL missing fixture event deletion", () => {
+  const missingError = "The future fixture is no longer visible in GWL. Review it and any linked event.";
+  const record = () => ({ match_number: fixture.number, fixture, state: "posted", event_id: "event1" as string | null,
+    event_channel_id: "thread1", temporary_role: "GWL | RMNT v PMF v TLL", scheduled_id: null as string | null,
+    start_time: String(Date.parse(fixture.startsAt) / 1000 - 1800), post_at: null,
+    member_role_name: "Member", voice_channel_name: "Briefing", error: null as string | null });
+  const event = () => ({ id: "event1", serverId: "1332320879073296404", channelId: "thread1",
+    title: "GWL | RMNT v PMF v TLL", templateId: "ct34", startTime: Date.parse(fixture.startsAt) / 1000 - 1800,
+    description: "**Competition:** GWL\n**Match:** #2901" });
+  const empty = { stale: false, data: { upcoming: [], recent: [] } };
+
+  function setup() {
+    const row = record();
+    mocks.fixtures.mockResolvedValue(empty);
+    mocks.raw.mockResolvedValue(event());
+    mocks.query.mockImplementation(async (sql: string, values: unknown[] = []) => {
+      if (sql === "SELECT * FROM gwl_raid_events") return [row];
+      if (sql.includes("SET state = 'uncertain', error = $4")) {
+        row.state = "uncertain"; row.error = values[3] as string; return [{ match_number: fixture.number }];
+      }
+      if (sql.includes("SET state = 'cancelled', error = NULL")) {
+        row.state = "cancelled"; row.error = null; return [{ match_number: fixture.number }];
+      }
+      if (sql.includes("SET state = 'review', error = $2")) {
+        row.state = "review"; row.error = values[1] as string; return [];
+      }
+      return [];
+    });
+    return row;
+  }
+
+  it.each(["posted", "review"])("deletes a verified %s event and records confirmed absence", async (state) => {
+    vi.useFakeTimers(); vi.setSystemTime(now);
+    try {
+      const row = setup(); row.state = state; row.error = state === "review" ? missingError : null;
+      mocks.delete.mockResolvedValue(undefined);
+      mocks.raw.mockResolvedValueOnce(event()).mockResolvedValueOnce(event())
+        .mockRejectedValueOnce(new ProviderError("raid-helper", "Not found", 404));
+      await gwlFixtureTick();
+      expect(mocks.delete).toHaveBeenCalledWith("event1");
+      expect(row.state).toBe("cancelled");
+      expect(mocks.audit).toHaveBeenCalledWith(expect.anything(), "gwl.event_deleted", "gwl_fixture", fixture.number, { eventId: "event1", responseConfirmed: true });
+      await gwlFixtureTick();
+      expect(mocks.delete).toHaveBeenCalledOnce();
+    } finally { vi.useRealTimers(); }
+  });
+
+  it("does not delete if the fixture reappears during checks or the snapshot is stale", async () => {
+    vi.useFakeTimers(); vi.setSystemTime(now);
+    try {
+      const row = setup();
+      mocks.fixtures.mockResolvedValueOnce(empty).mockResolvedValueOnce({ stale: false, data: { upcoming: [fixture], recent: [] } });
+      await gwlFixtureTick();
+      expect(row.state).toBe("posted");
+      expect(mocks.delete).not.toHaveBeenCalled();
+      mocks.fixtures.mockResolvedValueOnce({ ...empty, stale: true, error: "GWL unavailable" });
+      await expect(gwlFixtureTick()).rejects.toThrow("GWL unavailable");
+      expect(mocks.delete).not.toHaveBeenCalled();
+    } finally { vi.useRealTimers(); }
+  });
+
+  it("flags mismatched event identity and leaves other review reasons alone", async () => {
+    vi.useFakeTimers(); vi.setSystemTime(now);
+    try {
+      const row = setup();
+      mocks.raw.mockResolvedValue({ ...event(), description: "**Competition:** GWL\n**Match:** #999" });
+      await gwlFixtureTick();
+      expect(row.state).toBe("review");
+      expect(mocks.delete).not.toHaveBeenCalled();
+      await gwlFixtureTick();
+      expect(mocks.delete).not.toHaveBeenCalled();
+    } finally { vi.useRealTimers(); }
+  });
+
+  it("does not delete an event edited during preflight", async () => {
+    vi.useFakeTimers(); vi.setSystemTime(now);
+    try {
+      const row = setup();
+      mocks.raw.mockResolvedValueOnce(event()).mockResolvedValueOnce({ ...event(), description: `${event().description}\nStaff note` });
+      await gwlFixtureTick();
+      expect(row.state).toBe("review");
+      expect(mocks.delete).not.toHaveBeenCalled();
+    } finally { vi.useRealTimers(); }
+  });
+
+  it("never retries an uncertain deletion", async () => {
+    vi.useFakeTimers(); vi.setSystemTime(now);
+    try {
+      const row = setup();
+      mocks.delete.mockRejectedValue(new Error("timeout"));
+      await expect(gwlFixtureTick()).rejects.toThrow("deletion could not be confirmed");
+      expect(row.state).toBe("uncertain");
+      await gwlFixtureTick();
+      expect(mocks.delete).toHaveBeenCalledOnce();
+    } finally { vi.useRealTimers(); }
+  });
+
+  it("confirms deletion by readback even if the DELETE response is unrecognized", async () => {
+    vi.useFakeTimers(); vi.setSystemTime(now);
+    try {
+      const row = setup();
+      mocks.delete.mockRejectedValue(new Error("unrecognized response"));
+      mocks.raw.mockResolvedValueOnce(event()).mockResolvedValueOnce(event())
+        .mockRejectedValueOnce(new ProviderError("raid-helper", "Not found", 404));
+      await gwlFixtureTick();
+      expect(row.state).toBe("cancelled");
+      expect(mocks.audit).toHaveBeenCalledWith(expect.anything(), "gwl.event_deleted", "gwl_fixture", fixture.number, { eventId: "event1", responseConfirmed: false });
+    } finally { vi.useRealTimers(); }
+  });
+
+  it("keeps the write uncertain if Raid Helper still returns the event after deletion", async () => {
+    vi.useFakeTimers(); vi.setSystemTime(now);
+    try {
+      const row = setup();
+      mocks.delete.mockResolvedValue(undefined);
+      await expect(gwlFixtureTick()).rejects.toThrow("still returns the event");
+      expect(row.state).toBe("uncertain");
+      await gwlFixtureTick();
+      expect(mocks.delete).toHaveBeenCalledOnce();
+    } finally { vi.useRealTimers(); }
+  });
+
+  it("flags a removed fixture that later reappears rather than recreating it", async () => {
+    vi.useFakeTimers(); vi.setSystemTime(now);
+    try {
+      const row = setup(); row.state = "cancelled";
+      mocks.fixtures.mockResolvedValue({ stale: false, data: { upcoming: [fixture], recent: [] } });
+      await gwlFixtureTick();
+      expect(row.state).toBe("review");
+      expect(row.error).toContain("visible in GWL again");
+      expect(mocks.create).not.toHaveBeenCalled();
+    } finally { vi.useRealTimers(); }
+  });
+  it("leaves unverified scheduled events for manual removal", async () => {
+    vi.useFakeTimers(); vi.setSystemTime(now);
+    try {
+      const row = setup();
+      row.state = "scheduled"; row.event_id = null; row.scheduled_id = "schedule1";
+      await gwlFixtureTick();
+      expect(row.state).toBe("review");
+      expect(row.error).toContain("scheduled Raid Helper event manually");
+      expect(mocks.delete).not.toHaveBeenCalled();
+    } finally { vi.useRealTimers(); }
+  });
 });
 
 describe("GWL Raid Helper payload", () => {

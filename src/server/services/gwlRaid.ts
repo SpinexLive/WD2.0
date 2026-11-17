@@ -1,11 +1,11 @@
 import { audit } from "@/lib/audit";
 import { independentQuery, query, withLeagueEventLock } from "@/lib/db";
 import { env } from "@/lib/env";
-import { HttpError } from "@/lib/http";
+import { HttpError, ProviderError } from "@/lib/http";
 import { z } from "zod";
 import { getGwlFixtures, type GwlFixture } from "./gwl";
 import { gwlEventBody, updatedGwlWeatherDescription } from "./gwlRaidHelper";
-import { createGwlRaidEvent, getPostedWdlEvents, getRawWdlEvent, getScheduledWdlEvents, isWdlEventChannel, updateWdlEventDescription, wdlEventNames, WDL_EVENT_CHANNEL } from "./wdlRaidHelper";
+import { createGwlRaidEvent, deleteWdlRaidEvent, getPostedWdlEvents, getRawWdlEvent, getScheduledWdlEvents, isWdlEventChannel, updateWdlEventDescription, wdlEventNames, WDL_EVENT_CHANNEL } from "./wdlRaidHelper";
 
 type EventRow = {
   match_number: string; fixture: GwlFixture; state: string; scheduled_id: string | null;
@@ -13,6 +13,8 @@ type EventRow = {
   temporary_role: string | null; member_role_name: string | null; voice_channel_name: string | null; error: string | null;
 };
 const actor = { discordId: "system:gwl", displayName: "GWL fixture worker" };
+const missingFixtureError = "The future fixture is no longer visible in GWL. Review it and any linked event.";
+const deletionInProgress = "Automatic deletion in progress or unconfirmed. Check Raid Helper before taking action.";
 const signupsSchema = z.array(z.object({ id: z.number(), userId: z.string() }));
 const relevant = (fixture: GwlFixture) => JSON.stringify({
   status: fixture.status.toUpperCase(), startsAt: fixture.startsAt, map: fixture.map, layer: fixture.layer, region: fixture.region,
@@ -36,6 +38,65 @@ export async function gwlRaidStatus() {
   };
 }
 export type GwlRaidStatus = Awaited<ReturnType<typeof gwlRaidStatus>>;
+
+async function removeMissingPostedEvent(row: EventRow): Promise<void> {
+  if (!row.event_id || !row.event_channel_id || !row.temporary_role || !row.start_time) {
+    throw new HttpError(409, "The recorded event identity is incomplete.", "gwl_delete_unsafe");
+  }
+  const event = await getRawWdlEvent(row.event_id);
+  const description = typeof event.description === "string" ? event.description.split(/\r?\n/) : [];
+  if (event.id !== row.event_id || event.serverId !== env().DISCORD_GUILD_ID || event.channelId !== row.event_channel_id ||
+      !(await isWdlEventChannel(event.channelId)) || event.templateId !== "ct34" || event.title !== row.temporary_role ||
+      event.startTime !== Number(row.start_time) || event.startTime !== Math.floor(Date.parse(row.fixture.startsAt) / 1000) - 1800 ||
+      description.filter((line) => line === "**Competition:** GWL").length !== 1 ||
+      description.filter((line) => line === `**Match:** #${row.match_number}`).length !== 1) {
+    throw new HttpError(409, "The linked Raid Helper event could not be verified.", "gwl_delete_unsafe");
+  }
+  const latest = await getGwlFixtures(true);
+  if (latest.stale) throw new Error(latest.error ?? "GWL fixtures are stale.");
+  if ([...latest.data.upcoming, ...latest.data.recent].some((fixture) => fixture.number === row.match_number)) return;
+  const check = await getRawWdlEvent(row.event_id);
+  if (check.id !== event.id || check.serverId !== event.serverId || check.channelId !== event.channelId ||
+      check.title !== event.title || check.templateId !== event.templateId || check.startTime !== event.startTime ||
+      check.description !== event.description) {
+    throw new HttpError(409, "The event changed during deletion checks.", "gwl_delete_unsafe");
+  }
+  if (Date.parse(row.fixture.startsAt) <= Date.now()) return;
+  const claimed = await independentQuery(
+    `UPDATE gwl_raid_events SET state = 'uncertain', error = $4, updated_at = now()
+       WHERE match_number = $1 AND state = $2 AND event_id = $3 AND fixture = $5::jsonb
+         AND ($2 <> 'review' OR error = $6) AND event_channel_id = $7 AND temporary_role = $8 AND start_time = $9
+         AND (fixture->>'startsAt')::timestamptz > now() RETURNING match_number`,
+    [row.match_number, row.state, row.event_id, deletionInProgress, JSON.stringify(row.fixture), missingFixtureError,
+      row.event_channel_id, row.temporary_role, row.start_time],
+  );
+  if (!claimed.length) return;
+  await audit(actor, "gwl.event_deletion_started", "gwl_fixture", row.match_number, { eventId: row.event_id });
+  let deletionError: unknown;
+  try {
+    try {
+      await deleteWdlRaidEvent(row.event_id);
+    } catch (error) {
+      deletionError = error;
+    }
+    try {
+      await getRawWdlEvent(row.event_id);
+      throw new Error(deletionError instanceof Error ? `Deletion was not confirmed: ${deletionError.message}` : "Raid Helper still returns the event.");
+    } catch (error) {
+      if (!(error instanceof ProviderError && error.provider === "raid-helper" && error.status === 404)) throw error;
+    }
+    const saved = await independentQuery(
+      `UPDATE gwl_raid_events SET state = 'cancelled', error = NULL, updated_at = now()
+       WHERE match_number = $1 AND state = 'uncertain' AND event_id = $2 AND error = $3 RETURNING match_number`,
+      [row.match_number, row.event_id, deletionInProgress],
+    );
+    if (!saved.length) throw new Error("The confirmed event deletion could not be recorded.");
+  } catch (error) {
+    await audit(actor, "gwl.event_deletion_uncertain", "gwl_fixture", row.match_number, { eventId: row.event_id });
+    throw new Error(`GWL event deletion could not be confirmed: ${error instanceof Error ? error.message : "unknown error"}`);
+  }
+  await audit(actor, "gwl.event_deleted", "gwl_fixture", row.match_number, { eventId: row.event_id, responseConfirmed: deletionError === undefined });
+}
 
 async function updatePostedWeather(row: EventRow, current: GwlFixture): Promise<void> {
   if (relevant(row.fixture) !== relevant(current) || (current.weather === undefined && row.fixture.weather !== undefined) ||
@@ -146,8 +207,9 @@ async function runTick() {
   await query(`UPDATE gwl_raid_events SET state = 'uncertain',
     error = 'Event creation was interrupted. Check Raid Helper and Discord before taking action.', updated_at = now()
     WHERE state = 'creating' AND updated_at < now() - interval '1 minute'`);
+  const beforeReconcile = await query<EventRow>("SELECT * FROM gwl_raid_events");
+  await reconcile(beforeReconcile);
   const rows = await query<EventRow>("SELECT * FROM gwl_raid_events");
-  await reconcile(rows);
   const snapshot = await getGwlFixtures(true);
   if (snapshot.stale) throw new Error(snapshot.error ?? "GWL fixtures are stale.");
   const all = [...snapshot.data.upcoming, ...snapshot.data.recent];
@@ -158,10 +220,28 @@ async function runTick() {
   for (const row of rows) {
     const current = all.find((fixture) => fixture.number === row.match_number);
     if (!current) {
-      if (["pending", "waiting", "scheduled", "posted"].includes(row.state) && Date.parse(row.fixture.startsAt) > Date.now()) {
+      if (Date.parse(row.fixture.startsAt) <= Date.now()) continue;
+      if (row.state === "posted" || (row.state === "review" && row.error === missingFixtureError && row.event_id)) {
+        try {
+          await removeMissingPostedEvent(row);
+        } catch (error) {
+          if (error instanceof HttpError && error.code === "gwl_delete_unsafe") {
+            await query("UPDATE gwl_raid_events SET state = 'review', error = $2, updated_at = now() WHERE match_number = $1 AND state = $3",
+              [row.match_number, `${error.message} Check the event in Raid Helper.`, row.state]);
+          } else throw error;
+        }
+      } else if (["pending", "waiting"].includes(row.state) && !row.event_id && !row.scheduled_id) {
+        await query("UPDATE gwl_raid_events SET state = 'cancelled', error = NULL, updated_at = now() WHERE match_number = $1 AND state = $2",
+          [row.match_number, row.state]);
+      } else if (row.state === "scheduled" || (row.state === "review" && row.error === missingFixtureError && row.scheduled_id && !row.event_id)) {
         await query("UPDATE gwl_raid_events SET state = 'review', error = $2, updated_at = now() WHERE match_number = $1 AND state = $3",
-          [row.match_number, "The future fixture is no longer visible in GWL. Review it and any linked event.", row.state]);
+          [row.match_number, "The GWL fixture disappeared. Remove the scheduled Raid Helper event manually; automatic schedule deletion is not verified.", row.state]);
       }
+      continue;
+    }
+    if (row.state === "cancelled") {
+      await query("UPDATE gwl_raid_events SET state = 'review', error = $2, updated_at = now() WHERE match_number = $1 AND state = 'cancelled'",
+        [row.match_number, "This removed fixture is visible in GWL again. Review before creating another event."]);
       continue;
     }
     if (relevant(row.fixture) === relevant(current)) continue;
