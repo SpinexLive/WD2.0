@@ -35,7 +35,7 @@ describe("league event worker lock", () => {
     expect(mocks.release).toHaveBeenCalledOnce();
   });
 
-  it("preserves nonblocking behavior for WDL", async () => {
+  it("preserves nonblocking behavior when the lock is held", async () => {
     mocks.query.mockImplementation(async (sql: string) => ({
       rows: sql.includes("pg_try_advisory_xact_lock") ? [{ acquired: false }] : [],
     }));

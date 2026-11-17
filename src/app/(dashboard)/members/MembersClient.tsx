@@ -2,26 +2,20 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useApi } from "@/lib/client";
-import Link from "next/link";
-import { Avatar, Badge, ErrorBanner, REG_LABEL, RegBadge, Skeleton, WarnBanner } from "@/components/ui";
+import { Avatar, Badge, ErrorBanner, Skeleton, WarnBanner } from "@/components/ui";
 import MemberProfile from "@/components/MemberProfile";
 import type { GwlMemberStatus } from "@/lib/gwlMemberStatus";
 import "@/components/members.css";
 
-type Reg = keyof typeof REG_LABEL;
 interface Source { fetchedAt: string | null; stale: boolean; error: string | null; available?: boolean }
-interface Member { id: string; displayName: string; avatarUrl: string; registration: Reg; gwlStatus: GwlMemberStatus; steamId: string | null; kd: number | null; kills: number | null; deaths: number | null; matches: number | null }
-interface Application { id: string; discordId: string | null; name: string | null; displayName: string | null; avatarUrl: string | null }
-interface LeagueOnly { discordId: string; name: string | null; role: string | null; joinedAt: string | null }
+interface Member { id: string; displayName: string; avatarUrl: string; gwlStatus: GwlMemberStatus; steamId: string | null; kd: number | null; kills: number | null; deaths: number | null; matches: number | null }
 interface Data {
   members: Member[];
-  leagueOnly: LeagueOnly[] | null;
-  applications: Application[] | null;
-  summary: { total: number; registered: number; unregistered: number; unknown: number; pendingApplications: number | null };
-  sources: { discord: Source; leagueMembers: Source; leagueApplications: Source; gwlMembers: Source & { missingScope: boolean }; links: Source; statsFailed: number; statsPending?: boolean };
+  summary: { total: number; gwlLinked: number; gwlUnmatched: number; gwlUnknown: number };
+  sources: { discord: Source; gwlMembers: Source & { missingScope: boolean }; links: Source; statsFailed: number; statsPending?: boolean };
 }
 
-type SortKey = "name" | "status" | "gwl" | "steam" | "kd" | "matches";
+type SortKey = "name" | "gwl" | "steam" | "kd" | "matches";
 const GWL_LABEL: Record<GwlMemberStatus, string> = { linked: "Linked", not_matched: "Not matched", unknown: "Unknown" };
 
 const SCALE: [number, number, number][] = [[196, 73, 90], [212, 176, 106], [143, 181, 155]];
@@ -35,17 +29,15 @@ function scaleColor(t: number): string {
   return `rgb(${[0, 1, 2].map((k) => Math.round(a[k]! + (b[k]! - a[k]!) * f)).join(",")})`;
 }
 
-export default function MembersClient({ canManage, canExport }: { canManage: boolean; canExport: boolean }) {
+export default function MembersClient({ canExport }: { canExport: boolean }) {
   const api = useApi();
   const [data, setData] = useState<Data | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
-  const [filter, setFilter] = useState<"all" | Reg>("all");
   const [gwlFilter, setGwlFilter] = useState<"all" | GwlMemberStatus>("all");
   const [sort, setSort] = useState<{ key: SortKey; dir: 1 | -1 }>({ key: "name", dir: 1 });
   const toggleSort = (key: SortKey) => setSort((s) => (s.key === key ? { key, dir: s.dir === 1 ? -1 : 1 } : { key, dir: key === "kd" || key === "matches" ? -1 : 1 }));
-  const [dismissed, setDismissed] = useState(false);
   const [selected, setSelected] = useState<Member | null>(null);
   const [exporting, setExporting] = useState(false);
   const [exportError, setExportError] = useState<string | null>(null);
@@ -100,21 +92,20 @@ export default function MembersClient({ canManage, canExport }: { canManage: boo
 
   const rows = useMemo(() => {
     const q = search.trim().toLowerCase();
-    const list = (data?.members ?? []).filter((m) => (filter === "all" || m.registration === filter) && (gwlFilter === "all" || m.gwlStatus === gwlFilter) && (!q || m.displayName.toLowerCase().includes(q) || m.id.includes(q)));
+    const list = (data?.members ?? []).filter((m) => (gwlFilter === "all" || m.gwlStatus === gwlFilter) && (!q || m.displayName.toLowerCase().includes(q) || m.id.includes(q)));
     const { key, dir } = sort;
     const byName = (a: Member, b: Member) => a.displayName.localeCompare(b.displayName);
     // Empty values always sit at the bottom, whichever direction is chosen.
     const num = (a: number | null, b: number | null) => (a === null && b === null ? 0 : a === null ? 1 : b === null ? -1 : (a - b) * dir);
     return list.sort((a, b) => {
       if (key === "name") return byName(a, b) * dir;
-      if (key === "status") return (a.registration.localeCompare(b.registration) * dir) || byName(a, b);
       if (key === "gwl") return (a.gwlStatus.localeCompare(b.gwlStatus) * dir) || byName(a, b);
       if (key === "steam") return (a.steamId === null && b.steamId === null ? 0 : a.steamId === null ? 1 : b.steamId === null ? -1 : a.steamId.localeCompare(b.steamId) * dir) || byName(a, b);
       if (key === "kd") return num(a.kd, b.kd) || byName(a, b);
       if (key === "matches") return num(a.matches, b.matches) || byName(a, b);
       return 0;
     });
-  }, [data, search, filter, gwlFilter, sort]);
+  }, [data, search, gwlFilter, sort]);
 
   // Each K/D is coloured by its rank among every member that has one; tied values share a colour.
   const kdColor = useMemo(() => {
@@ -130,9 +121,9 @@ export default function MembersClient({ canManage, canExport }: { canManage: boo
   const s = data?.summary;
   const cards = [
     ["Total clan members", s?.total],
-    ["Registered (Wardogs League)", s?.registered],
-    ["Unregistered", s?.unregistered],
-    ["Pending applications", s?.pendingApplications],
+    ["GWL linked", s?.gwlLinked],
+    ["GWL not matched", s?.gwlUnmatched],
+    ["GWL unknown", s?.gwlUnknown],
   ] as const;
 
   return (
@@ -145,18 +136,6 @@ export default function MembersClient({ canManage, canExport }: { canManage: boo
         </div>
       </div>
 
-      {canManage && data?.leagueOnly && data.leagueOnly.length > 0 && !dismissed && (
-        <div role="alert" className="flex flex-wrap items-center justify-between gap-4 rounded-lg border border-blood-500 bg-blood-700/30 shadow-glow p-5">
-          <div>
-            <div className="text-lg font-bold">Action needed: {data.leagueOnly.length} Wardogs League member{data.leagueOnly.length === 1 ? "" : "s"} to remove</div>
-            <p className="mt-1 text-sm text-stone/85">These players are on the Wardogs League team but do not have the clan member role. Review them on the Wardogs League page and remove them on wardogsleague.net.</p>
-          </div>
-          <div className="flex gap-2">
-            <Link href="/wdl" className="btn-primary">View list</Link>
-            <button className="btn-ghost" onClick={() => setDismissed(true)}>Dismiss</button>
-          </div>
-        </div>
-      )}
       {error && <ErrorBanner message={error} onRetry={() => load()} />}
       {exportError && <ErrorBanner message={exportError} onRetry={exportMembers} />}
 
@@ -172,9 +151,6 @@ export default function MembersClient({ canManage, canExport }: { canManage: boo
 
       {data && (
         <div className="flex flex-col gap-1">
-          {(!data.sources.leagueMembers.available || data.sources.leagueMembers.stale || !data.sources.leagueApplications.available || data.sources.leagueApplications.stale) && (
-            <WarnBanner>Wardogs League data is unavailable or outdated, so registration statuses are shown as Unknown rather than guessed.</WarnBanner>
-          )}
           {(!data.sources.gwlMembers.available || data.sources.gwlMembers.stale || data.sources.gwlMembers.missingScope) && (
             <WarnBanner>GWL member data is unavailable, outdated or missing Discord ID access{data.sources.gwlMembers.error ? ` (${data.sources.gwlMembers.error})` : ""}. Unconfirmed links are shown as Unknown; check GWL_API_KEY and the members.discord_id scope.</WarnBanner>
           )}
@@ -187,10 +163,6 @@ export default function MembersClient({ canManage, canExport }: { canManage: boo
       <section className="card flex min-h-72 flex-1 flex-col">
         <div className="flex flex-wrap gap-2 border-b border-ink-700 p-3">
           <input className="input m-search max-w-xs" placeholder="Search name or Discord ID" aria-label="Search members" value={search} onChange={(e) => setSearch(e.target.value)} />
-          <select className="input w-auto" aria-label="Filter by status" value={filter} onChange={(e) => setFilter(e.target.value as typeof filter)}>
-            <option value="all">WDL Registration</option>
-            {(Object.keys(REG_LABEL) as Reg[]).filter((r) => r !== "unknown").map((r) => <option key={r} value={r}>{REG_LABEL[r]}</option>)}
-          </select>
           <select className="input w-auto" aria-label="Filter by GWL link" value={gwlFilter} onChange={(e) => setGwlFilter(e.target.value as typeof gwlFilter)}>
             <option value="all">GWL links</option>
             {(Object.keys(GWL_LABEL) as GwlMemberStatus[]).map((status) => <option key={status} value={status}>{GWL_LABEL[status]}</option>)}
@@ -198,9 +170,9 @@ export default function MembersClient({ canManage, canExport }: { canManage: boo
         </div>
         <div className="max-h-[70vh] min-h-0 flex-1 overflow-auto md:max-h-none">
           <table className="m-table w-full min-w-[820px]">
-            <thead className="sticky top-0 z-10 bg-ink-850"><tr className="border-b border-ink-700">{(["name:Member", "status:Wardogs League", "gwl:GWL", "steam:Steam ID", "kd:K/D", "matches:Matches"] as const).map((c) => {
+            <thead className="sticky top-0 z-10 bg-ink-850"><tr className="border-b border-ink-700">{(["name:Member", "gwl:GWL", "steam:Steam ID", "kd:K/D", "matches:Matches"] as const).map((c) => {
               const [key, label] = c.split(":") as [SortKey, string];
-              if (key === "status" || key === "steam") return <th key={key} className="th">{label}</th>;
+              if (key === "steam") return <th key={key} className="th">{label}</th>;
               const active = sort.key === key;
               return (
                 <th key={key} className="th" aria-sort={active ? (sort.dir === 1 ? "ascending" : "descending") : "none"}>
@@ -212,23 +184,22 @@ export default function MembersClient({ canManage, canExport }: { canManage: boo
             })}</tr></thead>
             <tbody>
               {loading && !data
-                ? Array.from({ length: 6 }, (_, i) => <tr key={i}><td colSpan={6} className="p-3"><Skeleton className="h-6" /></td></tr>)
+                ? Array.from({ length: 6 }, (_, i) => <tr key={i}><td colSpan={5} className="p-3"><Skeleton className="h-6" /></td></tr>)
                 : rows.map((m, i) => (
                     <tr key={m.id} className="m-row cursor-pointer border-b border-ink-800 hover:bg-ink-800/60" style={{ "--i": i } as React.CSSProperties} onClick={() => setSelected(m)}>
                       <td className="px-3 py-1.5"><button type="button" className="flex items-center gap-2.5 text-left hover:text-blood-300 focus-visible:outline focus-visible:outline-1 focus-visible:outline-blood-500" aria-label={`Open profile for ${m.displayName}`} onClick={(e) => { e.stopPropagation(); setSelected(m); }}><Avatar src={m.avatarUrl} size={24} /><span className="text-sm">{m.displayName}</span></button></td>
-                      <td className="px-3 py-1.5"><RegBadge status={m.registration} /></td>
                       <td className="px-3 py-1.5"><Badge tone={m.gwlStatus === "linked" ? "green" : "grey"} title={m.gwlStatus === "linked" ? "Discord ID matches a GWL team member" : m.gwlStatus === "not_matched" ? "No Discord ID match; this does not prove the member is unregistered." : "GWL data is unavailable or the Discord ID match is unreliable."}>{GWL_LABEL[m.gwlStatus]}</Badge></td>
                       <td className="px-3 py-1.5 text-xs text-stone/75">{m.steamId ?? <span className="text-stone/40">-</span>}</td>
                       <td className="px-3 py-1.5 text-sm font-semibold tabular-nums" style={m.kd !== null ? { color: kdColor(m.kd) } : undefined} title={m.kills !== null ? `${m.kills} kills / ${m.deaths} deaths` : undefined}>{m.kd !== null ? m.kd.toFixed(2) : <span className="font-normal text-stone/40">-</span>}</td>
                       <td className="px-3 py-1.5 text-sm tabular-nums">{m.matches !== null ? m.matches : <span className="text-stone/40">-</span>}</td>
                     </tr>
                   ))}
-              {!loading && rows.length === 0 && <tr><td colSpan={6} className="p-6 text-center text-sm text-stone/60">No members match.</td></tr>}
+              {!loading && rows.length === 0 && <tr><td colSpan={5} className="p-6 text-center text-sm text-stone/60">No members match.</td></tr>}
             </tbody>
           </table>
         </div>
       </section>
-      {selected && <MemberProfile member={selected} registration={selected.registration} onClose={() => setSelected(null)} />}
+      {selected && <MemberProfile member={selected} onClose={() => setSelected(null)} />}
     </div>
   );
 }

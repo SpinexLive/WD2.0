@@ -34,7 +34,7 @@ describe("roster tokens", () => {
 
   it("accepts MAAWs alongside the existing icons and shows only its emoji in the roster", () => {
     const assigned = toggleToken(squads(["defib", "sniper", "rockets", "havoc"]), "111111111111111111", "maaws", true);
-    expect(saveSchema.safeParse({ version: 1, settings: { warnUnregistered: true }, squads: assigned }).success).toBe(true);
+    expect(saveSchema.safeParse({ version: 1, settings: {}, squads: assigned }).success).toBe(true);
     const messages = buildRosterMessages({ eventTitle: "T", startTime: null, eventType: "weekly", eventUrl: null, squads: assigned });
     const playerLine = messages[0]!.embed.fields[0]!.value;
     expect(playerLine).toContain("Alpha <:Defibrillator:1566378189054410933><:sniper:1388568893206958172><:AH6RRockets:1566378098096734318><:Havoc:1566378102135984260><:MAAWs:1566378198751518791>");

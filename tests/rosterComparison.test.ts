@@ -44,7 +44,7 @@ describe("squad K/D comparison", () => {
   });
 
   it("accepts saved comparison flags and remains compatible with existing clients", () => {
-    const input = { version: 1, settings: { warnUnregistered: true }, squads: [squad("Alpha", [null])] };
+    const input = { version: 1, settings: {}, squads: [squad("Alpha", [null])] };
     expect(saveSchema.parse(input).squads[0]!.compareKd).toBe(true);
     const { compareKd: _compareKd, ...oldSquad } = input.squads[0]!;
     expect(saveSchema.safeParse({ ...input, squads: [oldSquad] }).success).toBe(true);

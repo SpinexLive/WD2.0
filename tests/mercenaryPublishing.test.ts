@@ -17,7 +17,7 @@ const memberId = "100000000000000001";
 const merc = { discordId: null, mercenaryId: "c1ecdb8d-58b2-40d2-8a69-b69a2c291b17", displayName: "Guest", avatarUrl: null, isLeader: false };
 const roster = (includeMember: boolean): Roster => ({
   id: `test-${includeMember}`, eventId: "event", eventType: "weekly", templateKey: null,
-  settings: { warnUnregistered: true }, status: "published", version: 1, lastEditorId: actor.discordId, updatedAt: new Date().toISOString(),
+  settings: {}, status: "published", version: 1, lastEditorId: actor.discordId, updatedAt: new Date().toISOString(),
   squads: [{ id: "squad", name: "Squad", category: "INFANTRY", size: 2, leaderRequired: false,
     slots: [merc, includeMember ? { discordId: memberId, displayName: "Old name", avatarUrl: null, isLeader: false } : null] }],
   responses: {}, messages: [{ partIndex: 0, channelId: "channel", messageId: "message", publishedAt: new Date().toISOString(), updatedAt: null }],

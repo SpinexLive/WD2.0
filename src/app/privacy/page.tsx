@@ -28,7 +28,7 @@ export default function PrivacyPage() {
       </section>
       <section>
         <h2>Third parties</h2>
-        <p>We use Discord (sign-in and server data), Raid Helper (event sign-ups), Wardogs League and Wardogs RCON (tournament and game server data). Each has its own privacy policy. We do not sell your data or use advertising or analytics trackers.</p>
+        <p>We use Discord (sign-in and server data), Raid Helper (event sign-ups), Global Wardogs League and Wardogs RCON (tournament and game server data). Each has its own privacy policy. We do not sell your data or use advertising or analytics trackers.</p>
       </section>
       <section>
         <h2>Your choices</h2>

@@ -22,7 +22,6 @@ const schema = z.object({
   DISCORD_CLAN_ROLE_ID: snowflake.default("1433399320903815188"),
   RAID_HELPER_API_TOKEN: z.string().min(1),
   WARDOGS_API_KEY: z.string().min(1),
-  TOURNAMENT_API_KEY: z.string().min(1),
   GWL_API_KEY: z.string().min(1).optional().or(z.literal("").transform(() => undefined)),
   DATABASE_URL: z.string().min(1),
   SESSION_SECRET: z.string().min(32, "must be at least 32 characters"),

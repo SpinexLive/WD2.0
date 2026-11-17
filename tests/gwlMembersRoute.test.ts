@@ -2,15 +2,12 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
 
 const mocks = vi.hoisted(() => ({
-  session: vi.fn(), limit: vi.fn(), clan: vi.fn(), league: vi.fn(), apps: vi.fn(),
+  session: vi.fn(), limit: vi.fn(), clan: vi.fn(),
   links: vi.fn(), stats: vi.fn(), gwl: vi.fn(), sync: vi.fn(),
 }));
 vi.mock("@/lib/session", () => ({ getSession: mocks.session }));
 vi.mock("@/lib/ratelimit", () => ({ rateLimit: mocks.limit }));
 vi.mock("@/server/services/discord", () => ({ getClanMembers: mocks.clan }));
-vi.mock("@/server/services/wardogsLeague", () => ({
-  getLeagueMembers: mocks.league, getLeagueApplications: mocks.apps, registrationStatus: () => "unknown",
-}));
 vi.mock("@/server/services/links", () => ({ resolveLinks: mocks.links }));
 vi.mock("@/server/services/wardogsRcon", () => ({ getPlayerStats: mocks.stats }));
 vi.mock("@/server/services/gwl", () => ({ getGwlMembers: mocks.gwl }));
@@ -30,8 +27,6 @@ beforeEach(() => {
     { id: "123456789012345678", displayName: "Linked", avatarUrl: null },
     { id: "123456789012345679", displayName: "Other", avatarUrl: null },
   ]));
-  mocks.league.mockResolvedValue(snap([]));
-  mocks.apps.mockResolvedValue(snap([]));
   mocks.links.mockResolvedValue({ steamIds: new Map(), source: { available: true } });
   mocks.gwl.mockResolvedValue(snap({ members: [{ name: "Player", role: "member", discordId: "123456789012345678" }] }));
 });
@@ -67,6 +62,6 @@ describe("Members GWL status API", () => {
     mocks.session.mockResolvedValue({ discordId: "viewer", isAdmin: false, canViewMembers: true });
     const body = await (await GET(request(), ctx)).json();
     expect(body.members[0].gwlStatus).toBe("linked");
-    expect(body.applications).toBeNull();
+    expect(body.applications).toBeUndefined();
   });
 });

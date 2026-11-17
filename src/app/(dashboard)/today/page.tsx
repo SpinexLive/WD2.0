@@ -4,10 +4,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { useApi, useLive } from "@/lib/client";
 import { EmptyState, ErrorBanner, Skeleton, useToast } from "@/components/ui";
-import { WdlParticipants } from "@/components/WdlParticipants";
-import { WdlMapDetails } from "@/components/WdlMapDetails";
 import type { TodayData } from "@/server/services/today";
-import { fixtureOpponents } from "@/lib/wdlFixtures";
 import { gwlMapLabel, gwlWeatherLabel } from "@/lib/gwl";
 
 function useCountdown(startTime: number | null) {
@@ -105,20 +102,6 @@ export default function TodayPage() {
           ) : (
             <EmptyState title="No upcoming events" hint="Nothing is scheduled right now. Check back soon." />
           )}
-
-          <section className="card space-y-1 p-4">
-            <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-stone/60">Next WDL match</div>
-            {data.league.error && <p className="text-xs text-warn">WDL fixture data is {data.league.stale ? "outdated" : "unavailable"}: {data.league.error}</p>}
-            {data.league.fixture ? (
-              <>
-                <p className="font-semibold">RMNT v {fixtureOpponents(data.league.fixture)?.join(" v ") ?? "Teams TBC"}</p>
-                <p className="text-sm text-stone/60">{data.league.fixture.scheduledAt ? new Date(data.league.fixture.scheduledAt).toLocaleString("en-GB") : "Time TBC"}</p>
-                <p className="text-sm text-stone/60"><WdlMapDetails value={data.league.fixture.map} /></p>
-                <WdlParticipants participants={data.league.fixture.participants} />
-                {data.league.eventUrl && <a href={data.league.eventUrl} target="_blank" rel="noopener noreferrer" className="text-xs text-blood-300 hover:underline">Open Raid Helper signup →</a>}
-              </>
-            ) : !data.league.error ? <p className="text-sm text-stone/55">No upcoming League fixture returned by WDL.</p> : null}
-          </section>
 
           {data.gwl && <section className="card space-y-1 p-4">
             <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-stone/60">Next GWL match</div>

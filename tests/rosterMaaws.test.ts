@@ -12,7 +12,7 @@ import { saveRoster, saveSchema } from "@/server/services/rosters";
 const playerId = "111111111111111111";
 const input = saveSchema.parse({
   version: 1,
-  settings: { warnUnregistered: true },
+  settings: {},
   squads: [{
     id: "s1", name: "Infantry", category: "INFANTRY", size: 1, leaderRequired: false,
     slots: [{ discordId: playerId, displayName: "Alpha", avatarUrl: null, isLeader: false, tokens: ["maaws"] }],

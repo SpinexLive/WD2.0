@@ -1,5 +1,5 @@
 import { playerKey } from "./rosterOps";
-import type { RegistrationStatus, Roster, RosterWarning, SignupInfo } from "./rosterTypes";
+import type { Roster, RosterWarning, SignupInfo } from "./rosterTypes";
 
 /**
  * Shared by the editor (live warnings) and the server (publish validation).
@@ -50,14 +50,6 @@ export function validateRoster(roster: Pick<Roster, "squads" | "settings" | "eve
           out.push({ type: "not_signed_up", severity: "warning", squadId: squad.id, discordId: p!.discordId ?? undefined, message: `${p!.displayName} is no longer signed up in Raid Helper` });
         } else {
           if (s.absent) out.push({ type: "absent", severity: "warning", squadId: squad.id, discordId: p!.discordId ?? undefined, message: `${p!.displayName} is marked absent in Raid Helper` });
-          const reg: RegistrationStatus = s.registration;
-          if (roster.settings.warnUnregistered) {
-            if (reg === "not_registered" || reg === "pending") {
-              out.push({ type: "unregistered", severity: "warning", squadId: squad.id, discordId: p!.discordId ?? undefined, message: `${p!.displayName} is ${reg === "pending" ? "pending" : "not registered"} with Wardogs League` });
-            } else if (reg === "unknown") {
-              out.push({ type: "registration_unknown", severity: "warning", squadId: squad.id, discordId: p!.discordId ?? undefined, message: `${p!.displayName}: Wardogs League registration could not be confirmed` });
-            }
-          }
         }
       }
     }

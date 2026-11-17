@@ -59,22 +59,6 @@ export const Badge = ({ tone, children, title, icon }: { tone: keyof typeof badg
   </span>
 );
 
-export const REG_LABEL = { registered: "Registered", pending: "Pending", not_registered: "Not Registered", unknown: "Unknown" } as const;
-const REG_TONE = { registered: "green", pending: "amber", not_registered: "red", unknown: "grey" } as const;
-const REG_ICON = { registered: "accept", pending: "pending", not_registered: "decline", unknown: undefined } as const;
-const REG_DOT = { registered: "bg-ok", pending: "bg-warn", not_registered: "bg-blood-500", unknown: "bg-stone/30" } as const;
-
-export const RegBadge = ({ status }: { status: keyof typeof REG_LABEL }) => (
-  <Badge tone={REG_TONE[status]} icon={REG_ICON[status]} title={status === "unknown" ? "Wardogs League data unavailable or unreliable" : undefined}>
-    {REG_LABEL[status]}
-  </Badge>
-);
-
-/** Compact registration indicator: green registered, red not registered, amber pending, grey unknown. */
-export const RegDot = ({ status }: { status: keyof typeof REG_LABEL }) => (
-  <span role="img" aria-label={REG_LABEL[status]} title={REG_LABEL[status]} className={`inline-block h-2.5 w-2.5 shrink-0 rounded-full ${REG_DOT[status]}`} />
-);
-
 export const ErrorBanner = ({ message, onRetry }: { message: string; onRetry?: () => void }) => (
   <div role="alert" className="flex items-start justify-between gap-3 rounded-lg border border-blood-600/70 bg-blood-700/15 p-3 text-sm shadow-sm">
     <span>{message}</span>

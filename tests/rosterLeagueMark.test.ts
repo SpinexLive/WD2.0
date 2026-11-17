@@ -16,11 +16,4 @@ describe("roster league indicators", () => {
     expect(renderToStaticMarkup(createElement(RosterLeagueMark, { league: "GWL", status: "unknown" }))).toContain("text-blood-300");
   });
 
-  it("shows WDL registration with the same badge style and preserves pending status", () => {
-    expect(renderToStaticMarkup(createElement(RosterLeagueMark, { league: "WDL", status: "registered" }))).toContain("text-ok");
-    expect(renderToStaticMarkup(createElement(RosterLeagueMark, { league: "WDL", status: "not_registered" }))).toContain("text-blood-300");
-    expect(renderToStaticMarkup(createElement(RosterLeagueMark, { league: "WDL", status: "unknown" }))).toContain("WDL: Unknown");
-    expect(renderToStaticMarkup(createElement(RosterLeagueMark, { league: "WDL", status: "unknown" }))).toContain("text-blood-300");
-    expect(renderToStaticMarkup(createElement(RosterLeagueMark, { league: "WDL", status: "pending" }))).toContain("text-warn");
-  });
 });

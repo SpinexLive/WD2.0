@@ -44,7 +44,7 @@ export const squadSchema = z
 export const saveSchema = z
   .object({
     version: z.number().int().min(1),
-    settings: z.object({ warnUnregistered: z.boolean() }),
+    settings: z.object({}),
     squads: z.array(squadSchema).min(1).max(40),
   })
   .strict();
@@ -126,7 +126,7 @@ export async function getRoster(eventId: string): Promise<Roster | null> {
     eventId: r.raid_helper_event_id,
     eventType: r.event_type,
     templateKey: r.template_key,
-    settings: { warnUnregistered: r.settings?.warnUnregistered ?? true },
+    settings: {},
     status: r.status,
     version: r.version,
     lastEditorId: r.last_editor_id,
@@ -216,8 +216,7 @@ function sameRosterContent(previous: Roster, input: SaveInput): boolean {
       tokens: [...new Set(player.tokens ?? [])],
     } : null),
   }));
-  return previous.settings.warnUnregistered === input.settings.warnUnregistered
-    && JSON.stringify(normalize(previous.squads)) === JSON.stringify(normalize(input.squads));
+  return JSON.stringify(normalize(previous.squads)) === JSON.stringify(normalize(input.squads));
 }
 
 /** Replaces squads and assignments if `version` is still current; otherwise reports a conflict instead of overwriting. */

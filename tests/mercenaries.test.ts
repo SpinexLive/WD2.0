@@ -8,7 +8,7 @@ import type { SlotPlayer, Squad } from "@/lib/rosterTypes";
 const merc: SlotPlayer = { discordId: null, mercenaryId: "c1ecdb8d-58b2-40d2-8a69-b69a2c291b17", displayName: "Guest *One*", avatarUrl: null, isLeader: false };
 const member: SlotPlayer = { discordId: "100000000000000001", displayName: "Member", avatarUrl: null, isLeader: false };
 const squad = (id: string, slots: Squad["slots"]): Squad => ({ id, name: id, category: "INFANTRY", size: slots.length, leaderRequired: false, slots });
-const settings = { warnUnregistered: true };
+const settings = {};
 
 describe("named mercenaries", () => {
   it("accepts a name without a Discord ID and rejects blank names or ambiguous identities", () => {

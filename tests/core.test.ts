@@ -2,7 +2,6 @@ import { describe, expect, it, beforeAll } from "vitest";
 import { buildRosterEmbeds, buildRosterMessages, embedSize, mentionContent, STATUS_ICON } from "@/server/embed";
 import { movePlayer, resizeSquad, setLeader, findPlayer } from "@/lib/rosterOps";
 import { validateRoster } from "@/lib/rosterValidation";
-import { parseApplications, parseMembers, registrationStatus } from "@/server/services/wardogsLeague";
 import { botCanPost, hasAuthorisedRole, hasMemberRole } from "@/server/services/discord";
 import { parseEvent, parseSignups, formatTitle } from "@/server/services/raidHelper";
 import { saveSchema } from "@/server/services/rosters";
@@ -13,7 +12,7 @@ beforeAll(() => {
   Object.assign(process.env, {
     DISCORD_CLIENT_ID: "1", DISCORD_CLIENT_SECRET: "s", DISCORD_BOT_TOKEN: "t", DISCORD_GUILD_ID: "1332320879073296404",
     DISCORD_ALLOWED_ROLE_IDS: "1349704360816414762,1546188874986950758", DISCORD_MEMBER_ROLE_ID: "1546184733174669424",
-    RAID_HELPER_API_TOKEN: "r", WARDOGS_API_KEY: "w", TOURNAMENT_API_KEY: "k", DATABASE_URL: "postgres://x",
+    RAID_HELPER_API_TOKEN: "r", WARDOGS_API_KEY: "w", DATABASE_URL: "postgres://x",
     SESSION_SECRET: "x".repeat(40), APP_URL: "http://localhost:3000",
   });
 });
@@ -45,25 +44,6 @@ describe("bot channel permissions", () => {
   });
   it("administrator bypasses overwrites", () => {
     expect(botCanPost({ ...base, rolePerms: new Map([["5", 1n << 3n]]), overwrites: [{ id: "1", type: 0, allow: "0", deny: String(need) }] })).toBe(true);
-  });
-});
-
-describe("Wardogs League matching", () => {
-  it("matches by Discord ID only and reports unknown when data is unavailable", () => {
-    const members = [{ discordId: id(1), name: "A", role: null, joinedAt: null }];
-    const apps = [{ id: "1", discordId: id(2), name: "B", role: null, joinedAt: null }];
-    expect(registrationStatus(id(1), members, apps)).toBe("registered");
-    expect(registrationStatus(id(2), members, apps)).toBe("pending");
-    expect(registrationStatus(id(3), members, apps)).toBe("not_registered");
-    expect(registrationStatus(id(3), null, apps)).toBe("unknown");
-    expect(registrationStatus(id(3), members, null)).toBe("unknown");
-    expect(registrationStatus(id(3), members, [{ id: "2", discordId: null, name: "x" }])).toBe("unknown");
-  });
-  it("rejects numeric Discord IDs and unrecognised shapes", () => {
-    expect(() => parseMembers({ members: [{ discordId: 123456789012345678 }] })).toThrow();
-    expect(() => parseMembers({ nope: 1 })).toThrow();
-    expect(parseMembers({ members: [{ discord_id: id(1), name: "A" }] })[0]?.discordId).toBe(id(1));
-    expect(parseApplications([{ id: 4, discordId: id(1), status: "accepted" }, { id: 5, discordId: id(2) }]).map((a) => a.id)).toEqual(["5"]);
   });
 });
 
@@ -124,20 +104,20 @@ describe("roster operations", () => {
 });
 
 describe("roster validation", () => {
-  const settings = { warnUnregistered: true };
-  it("flags missing leader, empty, unregistered and removed sign-ups", () => {
+  const settings = {};
+  it("flags missing leader, empty and removed sign-ups", () => {
     let s = [squad("a", 2)];
     s = movePlayer(s, ref(1), { kind: "slot", squadId: "a", index: 0 });
     const signups = [{ discordId: id(1), name: "P1", role: null, status: null, absent: false, registration: "not_registered" as const, avatarUrl: null, kd: null, deaths: null }];
     const types = validateRoster({ squads: s, settings, eventType: "competitive" }, signups).map((w) => w.type);
-    expect(types).toEqual(expect.arrayContaining(["empty_position", "missing_leader", "unregistered"]));
+    expect(types).toEqual(expect.arrayContaining(["empty_position", "missing_leader"]));
     const gone = validateRoster({ squads: s, settings, eventType: "competitive" }, []).map((w) => w.type);
     expect(gone).toContain("not_signed_up");
   });
-  it("makes registration warnings configurable and skips sign-up checks without Raid Helper data", () => {
+  it("skips sign-up checks without Raid Helper data", () => {
     const s = movePlayer([squad("a", 1, { leaderRequired: false })], ref(1), { kind: "slot", squadId: "a", index: 0 });
     const signups = [{ discordId: id(1), name: "P1", role: null, status: null, absent: false, registration: "not_registered" as const, avatarUrl: null, kd: null, deaths: null }];
-    expect(validateRoster({ squads: s, settings: { ...settings, warnUnregistered: false }, eventType: "weekly" }, signups)).toHaveLength(0);
+    expect(validateRoster({ squads: s, settings, eventType: "weekly" }, signups)).toHaveLength(0);
     expect(validateRoster({ squads: s, settings, eventType: "weekly" }, null)).toHaveLength(0);
   });
   it("reports duplicate assignments as errors", () => {
@@ -151,6 +131,7 @@ describe("save input validation", () => {
   const base = { version: 1, settings: { warnUnregistered: true }, squads: [{ id: "x", name: "S", category: "INFANTRY", size: 1, leaderRequired: false, slots: [null] }] };
   it("accepts incomplete rosters and rejects bad IDs / avatar hosts", () => {
     expect(saveSchema.safeParse(base).success).toBe(true);
+    expect(saveSchema.parse(base).settings).toEqual({});
     const bad = structuredClone(base) as unknown as { squads: { slots: unknown[] }[] };
     bad.squads[0]!.slots = [{ discordId: "abc", displayName: "x", avatarUrl: null, isLeader: false }];
     expect(saveSchema.safeParse(bad).success).toBe(false);

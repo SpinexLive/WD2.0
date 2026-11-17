@@ -1,7 +1,6 @@
 export type EventType = "competitive" | "weekly";
 /** Competitive rosters are limited to this many positions in total. */
 export const COMPETITIVE_PLAYER_CAP = 32;
-export type RegistrationStatus = "registered" | "pending" | "not_registered" | "unknown";
 
 export interface SlotPlayer {
   /** Null for a named mercenary who has no Discord confirmation workflow. */
@@ -25,9 +24,7 @@ export interface Squad {
   slots: (SlotPlayer | null)[];
 }
 
-export interface RosterSettings {
-  warnUnregistered: boolean;
-}
+export type RosterSettings = Record<string, never>;
 
 export type RosterResponse = "accepted" | "declined";
 
@@ -77,13 +74,12 @@ export interface SignupInfo {
   role: string | null;
   status: string | null;
   absent: boolean;
-  registration: RegistrationStatus;
   avatarUrl: string | null;
   kd: number | null;
   deaths: number | null;
 }
 
-export type WarningType = "unregistered" | "registration_unknown" | "missing_leader" | "empty_position" | "not_signed_up" | "absent" | "duplicate" | "invalid";
+export type WarningType = "missing_leader" | "empty_position" | "not_signed_up" | "absent" | "duplicate" | "invalid";
 
 export interface RosterWarning {
   type: WarningType;

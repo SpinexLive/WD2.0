@@ -9,5 +9,5 @@ export default async function MembersPage() {
   const session = await getSession();
   if (!session) redirect("/login");
   if (!session.isAdmin && !session.canViewMembers) redirect("/today");
-  return <MembersClient canManage={session.isAdmin} canExport={session.isAdmin && isOwner(session)} />;
+  return <MembersClient canExport={session.isAdmin && isOwner(session)} />;
 }

@@ -2,9 +2,8 @@ import { env } from "@/lib/env";
 import { HttpError } from "@/lib/http";
 import { gwlMapLabel, gwlWeatherLabel } from "@/lib/gwl";
 import { FACTIONS, resolveFaction } from "@/lib/scouting";
-import type { WdlFixture } from "@/lib/wdlFixtures";
 import type { GwlFixture } from "./gwl";
-import { wdlEventBody, type wdlEventNames } from "./wdlRaidHelper";
+import { type leagueEventNames } from "./leagueRaidHelper";
 
 const clean = (value: string | null) => value?.replace(/@/g, "@\u200b").replace(/[\r\n]/g, " ").trim() || "TBD";
 
@@ -37,7 +36,7 @@ export function updatedGwlWeatherDescription(description: string, previous: GwlF
   return lines.join("\n");
 }
 
-export function gwlEventBody(fixture: GwlFixture, names: Awaited<ReturnType<typeof wdlEventNames>>, now: number) {
+export function gwlEventBody(fixture: GwlFixture, names: Awaited<ReturnType<typeof leagueEventNames>>, now: number) {
   const sides = fixture.sides.map((side) => ({ ...side, tag: side.team.tag?.trim() ?? "" }));
   const ours = sides.filter((side) => side.tag.toUpperCase() === "RMNT");
   const opponents = sides.filter((side) => side.tag.toUpperCase() !== "RMNT");
@@ -54,25 +53,19 @@ export function gwlEventBody(fixture: GwlFixture, names: Awaited<ReturnType<type
   if (baseUrl.protocol !== "https:" || ["localhost", "127.0.0.1", "::1"].includes(baseUrl.hostname)) {
     throw new HttpError(503, "APP_URL must be a public HTTPS URL for the GWL event image.", "gwl_image_url");
   }
-  const adapted: WdlFixture = {
-    id: fixture.number, number: null, status: "SCHEDULED", scheduledAt: fixture.startsAt,
-    map: null, gameMode: null, competition: null,
-    participants: sides.map((side) => ({
-      team: { code: side.tag, name: side.team.name }, faction: side.faction,
-      finishingPosition: null, points: null, noShow: null,
-    })),
-  };
-  // The GWL role is league-prefixed; do not let an unrelated WDL role affect its construction.
-  const body = wdlEventBody(adapted, { ...names, roleNames: [] }, now);
   const matchTime = Math.floor(Date.parse(fixture.startsAt) / 1000);
+  if (matchTime - 1800 <= now) throw new HttpError(409, "Briefing has already started; review this fixture manually.", "gwl_fixture_late");
   const postAt = matchTime - 12 * 24 * 60 * 60;
   const lines = [...opponents, ...ours].map((side) => {
     const faction = resolveFaction(side.faction);
     return faction ? `<:${faction}:${FACTIONS[faction].emojiId}> ${side.tag}` : `${side.tag} (${clean(side.faction)})`;
   });
-  const { schedule: _wdlSchedule, ...common } = body;
   return {
-    ...common,
+    leaderId: "839225558806167582",
+    coLeaders: ["343806666699046933"],
+    templateId: "ct34",
+    date: String(matchTime - 1800),
+    time: String(matchTime - 1800),
     ...(postAt > now ? { schedule: postAt } : {}),
     title,
     description: [
@@ -85,6 +78,13 @@ export function gwlEventBody(fixture: GwlFixture, names: Awaited<ReturnType<type
       `**Weather:** ${clean(gwlWeatherLabel(fixture.weather))}`,
       "", ...lines,
     ].join("\n"),
-    advancedSettings: { ...body.advancedSettings, temp_role: title, image: new URL("/images/gwl.png", baseUrl).toString() },
+    advancedSettings: {
+      deadline: 0, lock_at_limit: false, limit_per_user: 1, allow_duplicate: false,
+      apply_unregister: true, opt_out: "none", mentions: names.role, allowed_roles: names.role,
+      voice_channel: names.voice, temp_voicechannel: "false", temp_role: title, tr_include: "signed+tentative",
+      response: "none", vacuum: false, deletion: false, pin_message: false, create_discordevent: false,
+      create_thread: false, show_countdown: false, reminder: 60, color: "#9E303C",
+      image: new URL("/images/gwl.png", baseUrl).toString(), header_image: "default",
+    },
   };
 }

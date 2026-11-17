@@ -9,7 +9,6 @@ import { validateRoster } from "@/lib/rosterValidation";
 import { buildRosterMessages, mentionContent, type DiscordEmbed, type RosterMessage } from "@/server/embed";
 import { deleteMessage, DiscordMessageMissing, editMessage, getGuildMembers, getClanMembers, getPostableChannels, postMessage, type DiscordMessagePayload } from "./discord";
 import { getEventDetail, type RaidHelperEventDetail, type RaidHelperSignup } from "./raidHelper";
-import { getLeagueApplications, getLeagueMembers, registrationStatus } from "./wardogsLeague";
 import { getRoster } from "./rosters";
 import { publish } from "./bus";
 import { resolveLinks } from "./links";
@@ -92,28 +91,21 @@ export async function rosterStatsFor(discordIds: string[], force: boolean): Prom
   return new Map(out);
 }
 
-export async function enrichSignups(raw: RaidHelperSignup[], force = false, withStats = false): Promise<{ signups: SignupInfo[]; leagueAvailable: boolean }> {
-  const [members, apps, clan, stats] = await Promise.all([
-    getLeagueMembers(force).then((s) => s, () => null),
-    getLeagueApplications(force).then((s) => s, () => null),
+export async function enrichSignups(raw: RaidHelperSignup[], force = false, withStats = false): Promise<{ signups: SignupInfo[] }> {
+  const [clan, stats] = await Promise.all([
     getClanMembers().then((s) => s, () => null),
     withStats ? rosterStatsFor(raw.map((s) => s.discordId), force) : Promise.resolve(new Map<string, { kd: number | null; deaths: number }>()),
   ]);
-  // Stale tournament data is never treated as confirmed.
-  const m = members && !members.stale ? members.data : null;
-  const a = apps && !apps.stale ? apps.data : null;
   const avatars = new Map((clan?.data ?? []).map((x) => [x.id, x.avatarUrl]));
   const nicknames = new Map((clan?.data ?? []).map((x) => [x.id, x.displayName]));
   return {
     signups: raw.map((s) => ({
       ...s,
       name: nicknames.get(s.discordId) || s.name,
-      registration: registrationStatus(s.discordId, m, a),
       avatarUrl: avatars.get(s.discordId) ?? null,
       kd: stats.get(s.discordId)?.kd ?? null,
       deaths: stats.get(s.discordId)?.deaths ?? null,
     })),
-    leagueAvailable: m !== null && a !== null,
   };
 }
 

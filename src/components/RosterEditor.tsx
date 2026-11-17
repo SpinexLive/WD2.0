@@ -22,7 +22,6 @@ interface Props {
   roster: Roster;
   signups: SignupInfo[] | null;
   assignedKd: Record<string, number | null>;
-  leagueAvailable: boolean;
   gwlStatuses: Record<string, GwlMemberStatus>;
   gwlSource: { available: boolean; stale: boolean; missingScope: boolean; error: string | null };
   eventTitle: string;
@@ -88,7 +87,7 @@ function Pool({ children }: { children: React.ReactNode }) {
   return <div ref={setNodeRef} className={`min-h-0 flex-1 space-y-1 overflow-y-auto rounded p-0.5 ${isOver ? "bg-blood-700/20" : ""}`}>{children}</div>;
 }
 
-export function RosterEditor({ roster, signups, assignedKd, leagueAvailable, gwlStatuses, gwlSource, eventTitle, onReload }: Props) {
+export function RosterEditor({ roster, signups, assignedKd, gwlStatuses, gwlSource, eventTitle, onReload }: Props) {
   const api = useApi();
   const { toast, node } = useToast();
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 4 } }), useSensor(KeyboardSensor));
@@ -316,13 +315,11 @@ export function RosterEditor({ roster, signups, assignedKd, leagueAvailable, gwl
       {error && <ErrorBanner message={error} onRetry={conflict ? () => onReload() : undefined} />}
       {conflict && <WarnBanner>Someone else saved this roster. Reloading discards your unsaved edits and shows their version.</WarnBanner>}
       {signups === null && <WarnBanner>Raid Helper sign-ups could not be loaded; sign-up warnings are paused and the Available list is unavailable.</WarnBanner>}
-      {signups !== null && !leagueAvailable && settings.warnUnregistered && <WarnBanner>Wardogs League data is unavailable or outdated; registration is shown as Unknown.</WarnBanner>}
       {(!gwlSource.available || gwlSource.stale || gwlSource.missingScope) && <WarnBanner>GWL member data is unavailable, outdated or missing Discord ID access{gwlSource.error ? ` (${gwlSource.error})` : ""}. Unconfirmed links are shown as Unknown.</WarnBanner>}
 
       <div className="card flex flex-wrap items-center gap-x-4 gap-y-1 px-3 py-1.5 text-xs">
         <span className={`font-semibold tabular-nums ${cap !== Infinity && total > cap ? "text-blood-300" : ""}`} title="Assigned players / total positions">{squads.reduce((n, s) => n + s.slots.filter(Boolean).length, 0)}/{total} assigned{cap !== Infinity ? ` (max ${cap})` : ""}</span>
-        <span className="text-stone/60">League badges: green confirmed · red not matched, unregistered or unknown · amber pending</span>
-        <label className="flex items-center gap-1.5"><input type="checkbox" checked={settings.warnUnregistered} onChange={(e) => edit(() => setSettings({ ...settings, warnUnregistered: e.target.checked }))} />Warn if not registered with Wardogs League</label>
+        <span className="text-stone/60">GWL badges: green linked · red not matched or unknown</span>
         {roster.messages.length > 0 && (
           <span className="flex items-center gap-2 tabular-nums" title="Confirmations from the Discord roster post">
             <span className="inline-flex items-center gap-1 text-green-400"><Icon name="accept" size={14} />{counts.accepted} confirmed</span>
@@ -386,9 +383,8 @@ export function RosterEditor({ roster, signups, assignedKd, leagueAvailable, gwl
               {unassigned.map((s) => (
                 <Chip key={s.discordId} id={`p:${s.discordId}`} role={s.role} onDoubleClick={() => quickAssign({ discordId: s.discordId, displayName: s.name, avatarUrl: s.avatarUrl })} player={{ discordId: s.discordId, displayName: s.name, avatarUrl: s.avatarUrl }}>
                   <span className="min-w-0 flex-1 truncate" title={[s.role, s.status].filter(Boolean).join(" · ") || "Signed up"}>{s.name}</span>
-                  <RosterLeagueMark league="WDL" status={s.registration} />
                   <RosterLeagueMark league="GWL" status={gwlStatuses[s.discordId] ?? "unknown"} />
-                  <span className={`w-9 text-right text-xs font-semibold tabular-nums ${kdTone(s.kd)}`} title="All-time K/D">{fmtKd(s.kd)}</span>
+                  <span className={`w-9 text-right text-xs font-semibold tabular-nums ${kdTone(s.kd)}`} title="All-time K/D">{fmtKd(s.kd)}</span>
                 </Chip>
               ))}
               {signups !== null && unassigned.length === 0 && <p className="p-2 text-xs text-stone/40">Everyone is assigned (or no sign-ups match).</p>}
@@ -427,7 +423,6 @@ export function RosterEditor({ roster, signups, assignedKd, leagueAvailable, gwl
                             ); })}
                             {!p.discordId && <button type="button" className="text-[10px] text-warn" title="Edit mercenary name" onPointerDown={(e) => e.stopPropagation()} onClick={() => { setMercName(p.displayName); setMercSlot({ squadId: sq.id, index: i }); }}>Mercenary</button>}
                             {p.discordId && roster.messages.length > 0 && <ResponseMark response={roster.responses[p.discordId]} />}
-                            {p.discordId && <RosterLeagueMark league="WDL" status={signupById.get(p.discordId)?.registration ?? "unknown"} />}
                             {p.discordId && <RosterLeagueMark league="GWL" status={gwlStatuses[p.discordId] ?? "unknown"} />}
                             <button className={`shrink-0 rounded px-0.5 ${p.isLeader ? "" : "opacity-30 grayscale hover:opacity-80"}`} title={p.isLeader ? "Remove squad leader" : "Make squad leader"} onPointerDown={(e) => e.stopPropagation()} onClick={() => edit(() => setSquads((s) => setLeader(s, sq.id, playerKey(p))))}><Icon name="leader" size={16} /></button>
                             <button className="px-0.5 text-xs text-stone/50 hover:text-blood-300" title={p.discordId ? "Return to Available" : "Remove mercenary"} onPointerDown={(e) => e.stopPropagation()} onClick={() => edit(() => setSquads((s) => movePlayer(s, p, { kind: "pool" })))}>✕</button>

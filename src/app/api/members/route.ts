@@ -1,6 +1,5 @@
 import { protectedRoute } from "@/lib/apiGuard";
 import { getClanMembers } from "@/server/services/discord";
-import { getLeagueApplications, getLeagueMembers, registrationStatus } from "@/server/services/wardogsLeague";
 import type { Snapshot } from "@/lib/cache";
 import { getPlayerStats } from "@/server/services/wardogsRcon";
 import { resolveLinks } from "@/server/services/links";
@@ -25,14 +24,10 @@ async function settle<T>(p: Promise<Snapshot<T>>): Promise<{ snap: Snapshot<T> |
   }
 }
 
-export const GET = protectedRoute(async ({ req, session }) => {
+export const GET = protectedRoute(async ({ req }) => {
   const force = req.nextUrl.searchParams.get("refresh") === "1";
   kickMatchSync(force);
-  const [clan, league, apps, links, gwl] = await Promise.all([getClanMembers(force), settle(getLeagueMembers(force)), settle(getLeagueApplications(force)), resolveLinks(), settle(getGwlMembers(force))]);
-
-  // Stale league data is never treated as confirmed: statuses fall back to "unknown".
-  const leagueMembers = league.snap && !league.snap.stale ? league.snap.data : null;
-  const leagueApps = apps.snap && !apps.snap.stale ? apps.snap.data : null;
+  const [clan, links, gwl] = await Promise.all([getClanMembers(force), resolveLinks(), settle(getGwlMembers(force))]);
   const gwlMatcher = gwlMemberMatcher(gwl.snap);
 
   const steamOf = (id: string) => links.steamIds.get(id) ?? null;
@@ -60,7 +55,6 @@ export const GET = protectedRoute(async ({ req, session }) => {
       id: m.id,
       displayName: m.displayName,
       avatarUrl: m.avatarUrl,
-      registration: registrationStatus(m.id, leagueMembers, leagueApps),
       gwlStatus: gwlMatcher.status(m.id),
       steamId: steamOf(m.id),
       kd: stats?.kd ?? null,
@@ -70,32 +64,16 @@ export const GET = protectedRoute(async ({ req, session }) => {
     };
   });
 
-  const byId = new Map(clan.data.map((m) => [m.id, m]));
-  const applications = (leagueApps ?? []).map((a) => {
-    const d = a.discordId ? byId.get(a.discordId) : undefined;
-    return { id: a.id, discordId: a.discordId, name: a.name, displayName: d?.displayName ?? a.name, avatarUrl: d?.avatarUrl ?? null };
-  });
-
-  // Only trustworthy when the League member list is fresh; otherwise null rather than guessing.
-  const leagueOnly = leagueMembers
-    ? leagueMembers.filter((l) => !byId.has(l.discordId)).map((l) => ({ discordId: l.discordId, name: l.name, role: l.role, joinedAt: l.joinedAt }))
-    : null;
-
   return {
     members,
-    leagueOnly: session.isAdmin ? leagueOnly : null,
-    applications: session.isAdmin && leagueApps ? applications : null,
     summary: {
       total: members.length,
-      registered: members.filter((m) => m.registration === "registered").length,
-      unregistered: members.filter((m) => m.registration === "not_registered").length,
-      unknown: members.filter((m) => m.registration === "unknown").length,
-      pendingApplications: leagueApps ? applications.length : null,
+      gwlLinked: members.filter((m) => m.gwlStatus === "linked").length,
+      gwlUnmatched: members.filter((m) => m.gwlStatus === "not_matched").length,
+      gwlUnknown: members.filter((m) => m.gwlStatus === "unknown").length,
     },
     sources: {
       discord: meta(clan),
-      leagueMembers: meta(league.snap, league.error),
-      leagueApplications: meta(apps.snap, apps.error),
       gwlMembers: { ...meta(gwl.snap, gwl.error), missingScope: gwlMatcher.missingScope },
       links: links.source,
       statsFailed,

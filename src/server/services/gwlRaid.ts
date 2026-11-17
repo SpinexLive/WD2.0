@@ -5,7 +5,7 @@ import { HttpError, ProviderError } from "@/lib/http";
 import { z } from "zod";
 import { getGwlFixtures, type GwlFixture } from "./gwl";
 import { gwlEventBody, updatedGwlWeatherDescription } from "./gwlRaidHelper";
-import { createGwlRaidEvent, deleteWdlRaidEvent, getPostedWdlEvents, getRawWdlEvent, getScheduledWdlEvents, isWdlEventChannel, updateWdlEventDescription, wdlEventNames, WDL_EVENT_CHANNEL } from "./wdlRaidHelper";
+import { createGwlRaidEvent, deleteLeagueRaidEvent, getPostedLeagueEvents, getRawLeagueEvent, getScheduledLeagueEvents, isLeagueEventChannel, updateLeagueEventDescription, leagueEventNames, LEAGUE_EVENT_CHANNEL } from "./leagueRaidHelper";
 
 type EventRow = {
   match_number: string; fixture: GwlFixture; state: string; scheduled_id: string | null;
@@ -44,10 +44,10 @@ async function removeMissingPostedEvent(row: EventRow): Promise<void> {
   if (!row.event_id || !row.event_channel_id || !row.temporary_role || !row.start_time) {
     throw new HttpError(409, "The recorded event identity is incomplete.", "gwl_delete_unsafe");
   }
-  const event = await getRawWdlEvent(row.event_id);
+  const event = await getRawLeagueEvent(row.event_id);
   const description = typeof event.description === "string" ? event.description.split(/\r?\n/) : [];
   if (event.id !== row.event_id || event.serverId !== env().DISCORD_GUILD_ID || event.channelId !== row.event_channel_id ||
-      !(await isWdlEventChannel(event.channelId)) || event.templateId !== "ct34" || event.title !== row.temporary_role ||
+      !(await isLeagueEventChannel(event.channelId)) || event.templateId !== "ct34" || event.title !== row.temporary_role ||
       event.startTime !== Number(row.start_time) || event.startTime !== Math.floor(Date.parse(row.fixture.startsAt) / 1000) - 1800 ||
       description.filter((line) => line === "**Competition:** GWL").length !== 1 ||
       description.filter((line) => line === `**Match:** #${row.match_number}`).length !== 1) {
@@ -56,7 +56,7 @@ async function removeMissingPostedEvent(row: EventRow): Promise<void> {
   const latest = await getGwlFixtures(true);
   if (latest.stale) throw new Error(latest.error ?? "GWL fixtures are stale.");
   if ([...latest.data.upcoming, ...latest.data.recent].some((fixture) => fixture.number === row.match_number)) return;
-  const check = await getRawWdlEvent(row.event_id);
+  const check = await getRawLeagueEvent(row.event_id);
   if (check.id !== event.id || check.serverId !== event.serverId || check.channelId !== event.channelId ||
       check.title !== event.title || check.templateId !== event.templateId || check.startTime !== event.startTime ||
       check.description !== event.description) {
@@ -76,12 +76,12 @@ async function removeMissingPostedEvent(row: EventRow): Promise<void> {
   let deletionError: unknown;
   try {
     try {
-      await deleteWdlRaidEvent(row.event_id);
+      await deleteLeagueRaidEvent(row.event_id);
     } catch (error) {
       deletionError = error;
     }
     try {
-      await getRawWdlEvent(row.event_id);
+      await getRawLeagueEvent(row.event_id);
       throw new Error(deletionError instanceof Error ? `Deletion was not confirmed: ${deletionError.message}` : "Raid Helper still returns the event.");
     } catch (error) {
       if (!(error instanceof ProviderError && error.provider === "raid-helper" && error.status === 404)) throw error;
@@ -105,9 +105,9 @@ async function updatePostedWeather(row: EventRow, current: GwlFixture): Promise<
   if (!row.event_id || !row.event_channel_id || !row.temporary_role) {
     throw new HttpError(409, "The recorded GWL event identity is incomplete.", "gwl_description_unsafe");
   }
-  const event = await getRawWdlEvent(row.event_id);
+  const event = await getRawLeagueEvent(row.event_id);
   if (event.id !== row.event_id || event.serverId !== env().DISCORD_GUILD_ID || event.channelId !== row.event_channel_id ||
-      !(await isWdlEventChannel(event.channelId)) || event.templateId !== "ct34" ||
+      !(await isLeagueEventChannel(event.channelId)) || event.templateId !== "ct34" ||
       event.startTime !== Math.floor(Date.parse(current.startsAt) / 1000) - 1800 ||
       event.title !== row.temporary_role || typeof event.description !== "string") {
     throw new HttpError(409, "The GWL event identity or description could not be verified.", "gwl_description_unsafe");
@@ -128,7 +128,7 @@ async function updatePostedWeather(row: EventRow, current: GwlFixture): Promise<
   if (!fresh || relevant(fresh) !== relevant(current) || fresh.weather !== current.weather) {
     throw new HttpError(409, "The GWL fixture changed during the event update checks.", "gwl_description_unsafe");
   }
-  const check = await getRawWdlEvent(row.event_id);
+  const check = await getRawLeagueEvent(row.event_id);
   const latestSignups = signupsSchema.safeParse(check.signUps);
   if (check.id !== event.id || check.serverId !== event.serverId || check.channelId !== event.channelId ||
       check.title !== event.title || check.templateId !== event.templateId || check.startTime !== event.startTime ||
@@ -144,8 +144,8 @@ async function updatePostedWeather(row: EventRow, current: GwlFixture): Promise<
   if (!claimed.length) return;
   await audit(actor, "gwl.event_description_update_started", "gwl_fixture", row.match_number, { eventId: row.event_id });
   try {
-    await updateWdlEventDescription(row.event_id, description);
-    const updated = await getRawWdlEvent(row.event_id);
+    await updateLeagueEventDescription(row.event_id, description);
+    const updated = await getRawLeagueEvent(row.event_id);
     const updatedSignups = signupsSchema.safeParse(updated.signUps);
     if (updated.id !== event.id || updated.serverId !== event.serverId || updated.channelId !== event.channelId ||
         updated.templateId !== event.templateId || updated.title !== event.title || updated.startTime !== event.startTime ||
@@ -170,15 +170,15 @@ async function updatePostedWeather(row: EventRow, current: GwlFixture): Promise<
 async function reconcile(rows: EventRow[]) {
   const active = rows.filter((row) => row.scheduled_id && !row.event_id && ["scheduled", "review", "uncertain"].includes(row.state));
   if (!active.length) return;
-  const [posted, scheduled, names] = await Promise.all([getPostedWdlEvents(), getScheduledWdlEvents(), wdlEventNames()]);
+  const [posted, scheduled, names] = await Promise.all([getPostedLeagueEvents(), getScheduledLeagueEvents(), leagueEventNames()]);
   for (const row of active) {
     const matches = posted.filter((event) => event.scheduledId === row.scheduled_id);
     if (matches.length > 1) {
       await query("UPDATE gwl_raid_events SET state = 'review', error = $2, updated_at = now() WHERE match_number = $1 AND state = 'scheduled'",
         [row.match_number, "Multiple posted events match the schedule. Review in Raid Helper."]);
     } else if (matches.length === 1) {
-      const event = await getRawWdlEvent(matches[0]!.id);
-      if (event.id !== matches[0]!.id || event.serverId !== env().DISCORD_GUILD_ID || !(await isWdlEventChannel(event.channelId)) ||
+      const event = await getRawLeagueEvent(matches[0]!.id);
+      if (event.id !== matches[0]!.id || event.serverId !== env().DISCORD_GUILD_ID || !(await isLeagueEventChannel(event.channelId)) ||
           event.templateId !== "ct34" || event.scheduledId !== row.scheduled_id || event.startTime !== Number(row.start_time) ||
           event.title !== row.temporary_role) {
         await query("UPDATE gwl_raid_events SET state = 'review', error = $2, updated_at = now() WHERE match_number = $1 AND state = 'scheduled'",
@@ -274,27 +274,22 @@ async function runTick() {
   let body: ReturnType<typeof gwlEventBody>;
   try {
     const [names, posted, scheduled, reserved] = await Promise.all([
-      wdlEventNames(), getPostedWdlEvents(), getScheduledWdlEvents(),
+      leagueEventNames(), getPostedLeagueEvents(), getScheduledLeagueEvents(),
       query<{ temporary_role: string }>(`SELECT temporary_role FROM gwl_raid_events
         WHERE match_number <> $1 AND temporary_role IS NOT NULL AND state IN ('creating', 'scheduled', 'posted', 'review', 'uncertain')
           AND (fixture->>'startsAt')::timestamptz > now()`, [candidate.match_number]),
     ]);
     body = gwlEventBody(candidate.fixture, { ...names, roleNames: [...names.roleNames,
       ...reserved.map((row) => row.temporary_role.toLowerCase()),
-      ...scheduled.filter((event) => event.channelId === WDL_EVENT_CHANNEL).map((event) => event.title.toLowerCase()),
+      ...scheduled.filter((event) => event.channelId === LEAGUE_EVENT_CHANNEL).map((event) => event.title.toLowerCase()),
     ] }, Math.floor(Date.now() / 1000));
     const briefing = Number(body.date);
-    const sameTimeWdl = await query(
-      `SELECT fixture_id FROM wdl_fixture_events
-        WHERE state IN ('creating', 'scheduled', 'posted', 'review', 'uncertain')
-          AND start_time IS NOT NULL AND abs(start_time - $1::bigint) < 60 LIMIT 1`, [briefing],
-    );
     const opponents = candidate.fixture.sides.filter((side) => side.team.tag?.trim().toUpperCase() !== "RMNT")
       .map((side) => side.team.tag!.trim().toUpperCase());
     const sameTimePosted = await Promise.all(posted.filter((event) => Math.abs(event.startTime - briefing) < 60)
-      .map((event) => isWdlEventChannel(event.channelId)));
-    if (sameTimeWdl.length || sameTimePosted.some(Boolean) || [...posted, ...scheduled].some((event) => {
-      if (event.channelId === WDL_EVENT_CHANNEL && Math.abs(event.startTime - briefing) < 60) return true;
+      .map((event) => isLeagueEventChannel(event.channelId)));
+    if (sameTimePosted.some(Boolean) || [...posted, ...scheduled].some((event) => {
+      if (event.channelId === LEAGUE_EVENT_CHANNEL && Math.abs(event.startTime - briefing) < 60) return true;
       const tokens = new Set(event.title.toUpperCase().split(/[^A-Z0-9_-]+/).filter(Boolean));
       return Math.abs(event.startTime - (briefing + 1800)) <= 2 * 3600 &&
         (tokens.has("RMNT") || tokens.has("REMNANT")) && opponents.every((tag) => tokens.has(tag));
@@ -304,7 +299,7 @@ async function runTick() {
       return;
     }
   } catch (error) {
-    if (error instanceof HttpError && ["gwl_fixture_incomplete", "gwl_role_collision", "wdl_fixture_late"].includes(error.code ?? "")) {
+    if (error instanceof HttpError && ["gwl_fixture_incomplete", "gwl_role_collision", "gwl_fixture_late"].includes(error.code ?? "")) {
       await query("UPDATE gwl_raid_events SET state = $2, error = $3, updated_at = now() WHERE match_number = $1 AND state = 'pending'",
         [candidate.match_number, error.code === "gwl_fixture_incomplete" ? "waiting" : "review", error.message]);
       return;
@@ -337,7 +332,7 @@ async function runTick() {
       body.advancedSettings.allowed_roles, body.advancedSettings.voice_channel, JSON.stringify(candidate.fixture)]);
   if (!claimed.length) return;
   try {
-    const result = await createGwlRaidEvent(WDL_EVENT_CHANNEL, body);
+    const result = await createGwlRaidEvent(LEAGUE_EVENT_CHANNEL, body);
     const isScheduled = body.schedule !== undefined;
     try {
       const saved = await independentQuery(
@@ -349,14 +344,14 @@ async function runTick() {
       throw error;
     }
     if (isScheduled) {
-      const event = (await getScheduledWdlEvents()).find((item) => item.id === result.event.id);
-      if (!event || event.channelId !== WDL_EVENT_CHANNEL || event.startTime !== Number(body.date) ||
+      const event = (await getScheduledLeagueEvents()).find((item) => item.id === result.event.id);
+      if (!event || event.channelId !== LEAGUE_EVENT_CHANNEL || event.startTime !== Number(body.date) ||
           event.title !== body.title || event.postTime !== body.schedule) {
         throw new Error("The scheduled event did not match the requested GWL fixture.");
       }
     } else {
-      const event = await getRawWdlEvent(result.event.id);
-      if (event.id !== result.event.id || event.serverId !== env().DISCORD_GUILD_ID || !(await isWdlEventChannel(event.channelId)) ||
+      const event = await getRawLeagueEvent(result.event.id);
+      if (event.id !== result.event.id || event.serverId !== env().DISCORD_GUILD_ID || !(await isLeagueEventChannel(event.channelId)) ||
           event.templateId !== "ct34" || event.startTime !== Number(body.date) || event.title !== body.title) {
         throw new Error("The posted event did not match the requested GWL fixture.");
       }

@@ -135,7 +135,7 @@ export default function GwlPage() {
           </section>
           <section className="card p-4 lg:col-span-2">
             <h2 className="font-bold">GWL members</h2>
-            <p className="mt-1 text-xs text-stone/55">GWL does not supply Discord IDs; these members are not automatically matched to the dashboard.</p>
+            <p className="mt-1 text-xs text-stone/55">Discord links are matched when GWL supplies Discord IDs and the API key has the required scope.</p>
             <ul className="mt-2 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">{data.members.data.members.map((member, index) => <li className="text-sm" key={`${member.playerId}-${index}`}>{member.name} <span className="text-stone/50">· {member.role}</span></li>)}</ul>
           </section>
         </div>

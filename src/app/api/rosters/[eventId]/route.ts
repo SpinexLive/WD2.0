@@ -39,7 +39,6 @@ export const GET = protectedRoute<P>(async ({ req, params }) => {
     // null (not []) when Raid Helper is unreachable, so the UI never reports "no sign-ups" falsely.
     signups: enriched?.signups ?? null,
     assignedKd: Object.fromEntries([...assignedStats].map(([id, stats]) => [id, stats.kd])),
-    leagueAvailable: enriched?.leagueAvailable ?? false,
     gwlStatuses: Object.fromEntries([...playerIds].map((id) => [id, gwlMatcher.status(id)])),
     gwlSource: { available: gwl.snap !== null, stale: gwl.snap?.stale ?? false,
       missingScope: gwlMatcher.missingScope, error: gwl.snap?.error ?? gwl.error },

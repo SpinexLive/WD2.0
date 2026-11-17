@@ -3,7 +3,6 @@ import { env } from "@/lib/env";
 import { getClanMembers, postMessage } from "./discord";
 import { getEvents } from "./raidHelper";
 import { getMatches } from "./wardogsRcon";
-import { getLeagueMembers } from "./wardogsLeague";
 import { getGwlTeam } from "./gwl";
 import { kickMatchSync, matchSyncStatus } from "./matchHistory";
 import { gatewayReady } from "./rosterGateway";
@@ -50,7 +49,6 @@ export async function getHealth(force = false): Promise<Component[]> {
     ["gateway", "Discord bot connection", async () => (gatewayReady() ? { ok: true, detail: null } : { ok: false, detail: "The bot isn't connected to the Discord gateway (buttons and voice presence are affected)." })],
     ["raid-helper", "Raid Helper", async () => fromSnapshot(await getEvents())],
     ["wardogs-rcon", "Wardogs RCON API", async () => fromSnapshot(await getMatches())],
-    ["wardogs-league", "Wardogs League API", async () => fromSnapshot(await getLeagueMembers())],
     ...(env().GWL_API_KEY ? [["gwl", "Global Wardogs League API", async () => fromSnapshot(await getGwlTeam())] as [string, string, () => Promise<Result>]] : []),
     ...(env().GWL_API_KEY ? [["gwl-raid", "GWL Raid Helper events", async () => {
       const [row] = await query<{ last_error: string | null; issues: string }>(
@@ -80,36 +78,11 @@ export async function getHealth(force = false): Promise<Component[]> {
       },
     ],
     [
-      "wdl-fixtures",
-      "WDL fixture integration",
-      async () => {
-        const [row] = await query<{ enabled: boolean; activation_pending: boolean; last_error: string | null }>("SELECT enabled, activation_pending, last_error FROM wdl_raid_settings WHERE id = 1");
-        if (!row) throw new Error("WDL fixture migration has not been applied.");
-        return row.last_error ? { ok: false, detail: row.last_error } : { ok: true, detail: row.enabled ? null : row.activation_pending ? "Waiting for a fresh WDL baseline" : "Automatic event creation is off" };
-      },
-    ],
-    [
-      "wdl-results",
-      "WDL result posts",
-      async () => {
-        const [row] = await query<{ last_error: string | null; uncertain: string; review: string }>(
-          `SELECT status.last_error, (SELECT count(*)::text FROM wdl_result_posts WHERE state = 'uncertain') AS uncertain,
-                  (SELECT count(*)::text FROM wdl_result_posts WHERE state = 'review') AS review
-             FROM wdl_result_post_status AS status WHERE status.id = 1`,
-        );
-        if (!row) throw new Error("WDL result posts migration has not been applied.");
-        if (row.last_error) return { ok: false, detail: row.last_error };
-        if (Number(row.uncertain)) return { ok: false, detail: "A WDL result post has an uncertain delivery; check Admin and Discord before retrying." };
-        if (Number(row.review)) return { ok: false, detail: "A WDL result has incomplete team data; check Admin and WDL." };
-        return { ok: true, detail: null };
-      },
-    ],
-    [
       "calendar-icon",
       "Calendar server icon",
       async () => {
-        const [row] = await query<{ last_error: string | null }>("SELECT last_error FROM wdl_matchday_icon_state WHERE id = 1");
-        if (!row) throw new Error("WDL matchday icon migration has not been applied.");
+        const [row] = await query<{ last_error: string | null }>("SELECT last_error FROM calendar_icon_state WHERE id = 1");
+        if (!row) throw new Error("Calendar icon migration has not been applied.");
         return row.last_error ? { ok: false, detail: row.last_error } : { ok: true, detail: null };
       },
     ],

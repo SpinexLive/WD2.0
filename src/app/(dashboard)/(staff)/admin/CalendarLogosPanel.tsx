@@ -6,7 +6,7 @@ const holidayAssets = new Set<string>(HOLIDAY_LOGOS.map((logo) => logo.image));
 export default function CalendarLogosPanel() {
   const logos = [
     { key: "default", label: "Default", image: "/images/icon.png", dates: "Used outside scheduled logo dates" },
-    { key: "matchday", label: "Match day", image: "/images/calendar logos/matchday.png", dates: "WDL match day: 01:00 London time until one hour after the latest match start" },
+    { key: "matchday", label: "Match day", image: "/images/calendar logos/matchday.png", dates: "GWL match day: 01:00 London time until one hour after the latest match start" },
     ...HOLIDAY_LOGOS.map((logo) => ({
       key: logo.key,
       label: logo.label,

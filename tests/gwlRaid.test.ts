@@ -11,11 +11,11 @@ vi.mock("@/lib/db", () => ({
 }));
 vi.mock("@/lib/audit", () => ({ audit: mocks.audit }));
 vi.mock("@/server/services/gwl", () => ({ getGwlFixtures: mocks.fixtures }));
-vi.mock("@/server/services/wdlRaidHelper", async (original) => {
-  const actual = await original<typeof import("@/server/services/wdlRaidHelper")>();
-  return { ...actual, wdlEventNames: mocks.names, getPostedWdlEvents: mocks.posted,
-    getScheduledWdlEvents: mocks.scheduled, createGwlRaidEvent: mocks.create, getRawWdlEvent: mocks.raw, isWdlEventChannel: mocks.channel,
-    updateWdlEventDescription: mocks.update, deleteWdlRaidEvent: mocks.delete };
+vi.mock("@/server/services/leagueRaidHelper", async (original) => {
+  const actual = await original<typeof import("@/server/services/leagueRaidHelper")>();
+  return { ...actual, leagueEventNames: mocks.names, getPostedLeagueEvents: mocks.posted,
+    getScheduledLeagueEvents: mocks.scheduled, createGwlRaidEvent: mocks.create, getRawLeagueEvent: mocks.raw, isLeagueEventChannel: mocks.channel,
+    updateLeagueEventDescription: mocks.update, deleteLeagueRaidEvent: mocks.delete };
 });
 
 import { gwlEventBody, updatedGwlWeatherDescription } from "@/server/services/gwlRaidHelper";
@@ -208,6 +208,12 @@ describe("GWL Raid Helper payload", () => {
     expect(body.description).toContain("<:manticore:1564588916110270504> TLL");
     expect(body.description).toContain("<:valkyra:1564588959542157382> RMNT");
     expect(body.advancedSettings.image).toBe("https://dashboard.test/images/gwl.png");
+    expect(body).toMatchObject({
+      leaderId: "839225558806167582", coLeaders: ["343806666699046933"], templateId: "ct34",
+      time: body.date,
+      advancedSettings: { mentions: "Member", allowed_roles: "Member", voice_channel: "Briefing",
+        temp_role: body.title, tr_include: "signed+tentative", reminder: 60 },
+    });
   });
 
   it("preserves staff notes when updating old descriptions and detects unsafe edits", () => {

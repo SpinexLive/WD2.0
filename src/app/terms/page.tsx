@@ -7,7 +7,7 @@ export default function TermsPage() {
   return (
     <LegalPage title="Terms &amp; Conditions" updated="25 October 2026">
       <section>
-        <p>By using this website you agree to these terms. This is the official website of REMNANT, a gaming community, and is not affiliated with or endorsed by Discord, Raid Helper, Wardogs League, Wardogs RCON or the makers of Hell Let Loose.</p>
+        <p>By using this website you agree to these terms. This is the official website of REMNANT, a gaming community, and is not affiliated with or endorsed by Discord, Raid Helper, Global Wardogs League or Wardogs RCON.</p>
       </section>
       <section>
         <h2>Using the site</h2>

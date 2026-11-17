@@ -35,7 +35,7 @@ export async function tx<T>(fn: (client: PoolClient) => Promise<T>): Promise<T> 
   }
 }
 
-/** Serialize the two league event workers, including their external duplicate checks and writes. */
+/** Serialize league event checks and writes across dashboard processes. */
 export async function withLeagueEventLock(fn: () => Promise<void>, wait = false): Promise<void> {
   await tx(async (client) => {
     if (wait) {

@@ -3,9 +3,7 @@ import { resolve } from "node:path";
 import { env } from "@/lib/env";
 import { query } from "@/lib/db";
 import { requestJson } from "@/lib/http";
-import type { WdlFixture, WdlFixtures } from "@/lib/wdlFixtures";
 import { CALENDAR_TIME_ZONE, HOLIDAY_LOGOS, londonDate, type CalendarIconVariant } from "@/lib/calendarLogos";
-import { getLeagueFixtures } from "./wardogsLeague";
 import { getGwlFixtures, type GwlFixture } from "./gwl";
 
 const API = "https://discord.com/api/v10";
@@ -13,16 +11,6 @@ const MATCHDAY_MS = 60 * 60 * 1000;
 const CANCELLED_STATUSES = new Set(["CANCELLED", "CANCELED", "POSTPONED", "ABANDONED", "VOID"]);
 
 /** Match-day starts at 01:00 London time and lasts until one hour after each RMNT match starts. */
-export function isWdlMatchdayIconActive(fixtures: WdlFixtures, now = Date.now()): boolean {
-  const starts = [...fixtures.upcoming, ...fixtures.recent].flatMap((fixture: WdlFixture) => {
-    const scheduledAt = fixture.scheduledAt ? Date.parse(fixture.scheduledAt) : NaN;
-    if (!Number.isFinite(scheduledAt) || CANCELLED_STATUSES.has(fixture.status.toUpperCase())) return [];
-    if (!fixture.participants.some((participant) => participant.team.code?.trim().toUpperCase() === "RMNT")) return [];
-    return [scheduledAt];
-  });
-  return isMatchdayActive(starts, now);
-}
-
 export function isGwlMatchdayIconActive(fixtures: { upcoming: GwlFixture[]; recent: GwlFixture[] }, now = Date.now()): boolean {
   return isMatchdayActive([...fixtures.upcoming, ...fixtures.recent].flatMap((fixture) => {
     if (CANCELLED_STATUSES.has(fixture.status.toUpperCase())) return [];
@@ -47,10 +35,9 @@ function isMatchdayActive(times: number[], now: number): boolean {
   });
 }
 
-export function getCalendarIconVariant(fixtures: WdlFixtures, now = Date.now(), gwlMatchdayActive = false): CalendarIconVariant {
+export function getCalendarIconVariant(now = Date.now(), matchdayActive = false): CalendarIconVariant {
   const today = londonDate(now);
   const activeHoliday = HOLIDAY_LOGOS.find((logo) => today >= logo.startDate && today <= logo.endDate);
-  const matchdayActive = isWdlMatchdayIconActive(fixtures, now) || gwlMatchdayActive;
   if (activeHoliday) {
     const isSingleDay = activeHoliday.startDate === activeHoliday.endDate;
     if (isSingleDay || !matchdayActive) return activeHoliday.key;
@@ -87,20 +74,18 @@ async function updateServerIcon(variant: CalendarIconVariant): Promise<void> {
 
 async function recordError(previous: string | null, error: unknown): Promise<void> {
   const message = error instanceof Error ? error.message : "Unknown matchday icon error";
-  await query("UPDATE wdl_matchday_icon_state SET last_error = $1 WHERE id = 1", [message.slice(0, 500)]);
-  if (previous !== message) console.error("WDL matchday server icon:", message);
+  await query("UPDATE calendar_icon_state SET last_error = $1 WHERE id = 1", [message.slice(0, 500)]);
+  if (previous !== message) console.error("Calendar server icon:", message);
 }
 
-export async function syncWdlMatchdayIcon(now = Date.now()): Promise<void> {
+export async function syncCalendarIcon(now = Date.now()): Promise<void> {
   const [state] = await query<{ current_icon: CalendarIconVariant | null; last_error: string | null }>(
-    "SELECT current_icon, last_error FROM wdl_matchday_icon_state WHERE id = 1",
+    "SELECT current_icon, last_error FROM calendar_icon_state WHERE id = 1",
   );
-  if (!state) throw new Error("WDL matchday icon migration has not been applied.");
+  if (!state) throw new Error("Calendar icon migration has not been applied.");
 
-  let snapshot: Awaited<ReturnType<typeof getLeagueFixtures>>;
   let gwlMatchday = false;
   try {
-    snapshot = await getLeagueFixtures();
     if (env().GWL_API_KEY) {
       const gwl = await getGwlFixtures();
       if (gwl.stale) throw new Error(gwl.error ?? "GWL fixtures are stale.");
@@ -110,14 +95,9 @@ export async function syncWdlMatchdayIcon(now = Date.now()): Promise<void> {
     await recordError(state.last_error, error);
     return;
   }
-  if (snapshot.stale) {
-    await recordError(state.last_error, new Error(snapshot.error ?? "WDL fixtures are stale."));
-    return;
-  }
-
-  const desired = getCalendarIconVariant(snapshot.data, now, gwlMatchday);
+  const desired = getCalendarIconVariant(now, gwlMatchday);
   if (state.current_icon === desired || (desired === "default" && state.current_icon === null)) {
-    if (state.last_error) await query("UPDATE wdl_matchday_icon_state SET last_error = NULL WHERE id = 1");
+    if (state.last_error) await query("UPDATE calendar_icon_state SET last_error = NULL WHERE id = 1");
     return;
   }
 
@@ -127,15 +107,15 @@ export async function syncWdlMatchdayIcon(now = Date.now()): Promise<void> {
     await recordError(state.last_error, error);
     return;
   }
-  await query("UPDATE wdl_matchday_icon_state SET current_icon = $1, last_error = NULL, updated_at = now() WHERE id = 1", [desired]);
+  await query("UPDATE calendar_icon_state SET current_icon = $1, last_error = NULL, updated_at = now() WHERE id = 1", [desired]);
 }
 
-const g = globalThis as unknown as { __wdlMatchdayIconTimer?: NodeJS.Timeout };
+const g = globalThis as unknown as { __calendarIconTimer?: NodeJS.Timeout };
 
-export function startWdlMatchdayIconScheduler(): void {
-  if (process.env.NEXT_PHASE === "phase-production-build" || g.__wdlMatchdayIconTimer) return;
-  const run = () => void syncWdlMatchdayIcon().catch((error: Error) => console.error("WDL matchday icon:", error.message));
+export function startCalendarIconScheduler(): void {
+  if (process.env.NEXT_PHASE === "phase-production-build" || g.__calendarIconTimer) return;
+  const run = () => void syncCalendarIcon().catch((error: Error) => console.error("Calendar icon:", error.message));
   run();
-  g.__wdlMatchdayIconTimer = setInterval(run, 60_000);
-  g.__wdlMatchdayIconTimer.unref();
+  g.__calendarIconTimer = setInterval(run, 60_000);
+  g.__calendarIconTimer.unref();
 }

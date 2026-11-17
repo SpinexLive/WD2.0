@@ -16,11 +16,11 @@ vi.mock("@/lib/db", () => ({
 }));
 vi.mock("@/lib/audit", () => ({ audit: mocks.audit }));
 vi.mock("@/server/services/gwl", () => ({ getGwlFixtures: mocks.fixtures }));
-vi.mock("@/server/services/wdlRaidHelper", async (original) => {
-  const actual = await original<typeof import("@/server/services/wdlRaidHelper")>();
-  return { ...actual, wdlEventNames: mocks.names, getPostedWdlEvents: mocks.posted,
-    getScheduledWdlEvents: mocks.scheduled, createGwlRaidEvent: mocks.create, getRawWdlEvent: mocks.raw,
-    isWdlEventChannel: mocks.channel, deleteWdlRaidEvent: mocks.delete };
+vi.mock("@/server/services/leagueRaidHelper", async (original) => {
+  const actual = await original<typeof import("@/server/services/leagueRaidHelper")>();
+  return { ...actual, leagueEventNames: mocks.names, getPostedLeagueEvents: mocks.posted,
+    getScheduledLeagueEvents: mocks.scheduled, createGwlRaidEvent: mocks.create, getRawLeagueEvent: mocks.raw,
+    isLeagueEventChannel: mocks.channel, deleteLeagueRaidEvent: mocks.delete };
 });
 
 import { gwlFixtureTick } from "@/server/services/gwlRaid";
@@ -39,7 +39,7 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)("GWL Raid Helper PostgreSQL inte
     vi.resetAllMocks();
     mocks.client = new pg.Client({ connectionString: process.env.TEST_DATABASE_URL });
     await mocks.client.connect();
-    for (const migration of ["034_wdl_fixtures.sql", "045_gwl_raid_events.sql", "046_gwl_raid_event_channel.sql", "047_gwl_raid_cancelled.sql"]) {
+    for (const migration of ["045_gwl_raid_events.sql", "046_gwl_raid_event_channel.sql", "047_gwl_raid_cancelled.sql"]) {
       const sql = await readFile(resolve(process.cwd(), "migrations", migration), "utf8");
       await mocks.client.query(sql.replace(/CREATE TABLE/g, "CREATE TEMP TABLE"));
     }
@@ -66,13 +66,11 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)("GWL Raid Helper PostgreSQL inte
       .toEqual({ state: "scheduled", scheduled_id: "schedule1" });
   });
 
-  it("prevents a GWL write when WDL has reserved the briefing time", async () => {
+  it("prevents a GWL write when another event has the same briefing time", async () => {
     const fixture = makeFixture();
     mocks.fixtures.mockResolvedValue({ stale: false, data: { upcoming: [fixture], recent: [] } });
-    await mocks.client!.query(
-      "INSERT INTO wdl_fixture_events (fixture_id, fixture, state, start_time) VALUES ('wdl', '{}', 'scheduled', $1)",
-      [Math.floor(Date.parse(fixture.startsAt) / 1000) - 1800],
-    );
+    mocks.posted.mockResolvedValue([{ id: "other", channelId: "1546479425644793877",
+      title: "Existing event", startTime: Math.floor(Date.parse(fixture.startsAt) / 1000) - 1800 }]);
     await gwlFixtureTick();
     expect(mocks.create).not.toHaveBeenCalled();
     expect((await mocks.client!.query("SELECT state FROM gwl_raid_events")).rows[0].state).toBe("review");
