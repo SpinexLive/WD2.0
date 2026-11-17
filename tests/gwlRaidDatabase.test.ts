@@ -84,7 +84,7 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)("GWL Raid Helper PostgreSQL inte
     await mocks.client!.query(
       `INSERT INTO gwl_raid_events (match_number, fixture, state, event_id, event_channel_id, temporary_role, start_time, error)
        VALUES ($1, $2, 'review', 'event1', 'thread1', 'GWL | RMNT v PMF v TLL', $3, $4)`,
-      [fixture.number, JSON.stringify(fixture), start, "The future fixture is no longer visible in GWL. Review it and any linked event."],
+      [fixture.number, JSON.stringify(fixture), start, "GWL changed this fixture. Review the linked Raid Helper event; it was not changed automatically."],
     );
     const event = { id: "event1", serverId: "1332320879073296404", channelId: "thread1", templateId: "ct34",
       title: "GWL | RMNT v PMF v TLL", startTime: start, description: "**Competition:** GWL\n**Match:** #2901" };

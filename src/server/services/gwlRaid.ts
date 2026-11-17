@@ -14,6 +14,7 @@ type EventRow = {
 };
 const actor = { discordId: "system:gwl", displayName: "GWL fixture worker" };
 const missingFixtureError = "The future fixture is no longer visible in GWL. Review it and any linked event.";
+const changedFixtureError = "GWL changed this fixture. Review the linked Raid Helper event; it was not changed automatically.";
 const deletionInProgress = "Automatic deletion in progress or unconfirmed. Check Raid Helper before taking action.";
 const signupsSchema = z.array(z.object({ id: z.number(), userId: z.string() }));
 const relevant = (fixture: GwlFixture) => JSON.stringify({
@@ -65,10 +66,10 @@ async function removeMissingPostedEvent(row: EventRow): Promise<void> {
   const claimed = await independentQuery(
     `UPDATE gwl_raid_events SET state = 'uncertain', error = $4, updated_at = now()
        WHERE match_number = $1 AND state = $2 AND event_id = $3 AND fixture = $5::jsonb
-         AND ($2 <> 'review' OR error = $6) AND event_channel_id = $7 AND temporary_role = $8 AND start_time = $9
+         AND ($2 <> 'review' OR error IN ($6, $10)) AND event_channel_id = $7 AND temporary_role = $8 AND start_time = $9
          AND (fixture->>'startsAt')::timestamptz > now() RETURNING match_number`,
     [row.match_number, row.state, row.event_id, deletionInProgress, JSON.stringify(row.fixture), missingFixtureError,
-      row.event_channel_id, row.temporary_role, row.start_time],
+      row.event_channel_id, row.temporary_role, row.start_time, changedFixtureError],
   );
   if (!claimed.length) return;
   await audit(actor, "gwl.event_deletion_started", "gwl_fixture", row.match_number, { eventId: row.event_id });
@@ -221,7 +222,8 @@ async function runTick() {
     const current = all.find((fixture) => fixture.number === row.match_number);
     if (!current) {
       if (Date.parse(row.fixture.startsAt) <= Date.now()) continue;
-      if (row.state === "posted" || (row.state === "review" && row.error === missingFixtureError && row.event_id)) {
+      const fixtureReview = row.state === "review" && (row.error === missingFixtureError || row.error === changedFixtureError);
+      if (row.state === "posted" || (fixtureReview && row.event_id)) {
         try {
           await removeMissingPostedEvent(row);
         } catch (error) {
@@ -233,7 +235,7 @@ async function runTick() {
       } else if (["pending", "waiting"].includes(row.state) && !row.event_id && !row.scheduled_id) {
         await query("UPDATE gwl_raid_events SET state = 'cancelled', error = NULL, updated_at = now() WHERE match_number = $1 AND state = $2",
           [row.match_number, row.state]);
-      } else if (row.state === "scheduled" || (row.state === "review" && row.error === missingFixtureError && row.scheduled_id && !row.event_id)) {
+      } else if (row.state === "scheduled" || (fixtureReview && row.scheduled_id && !row.event_id)) {
         await query("UPDATE gwl_raid_events SET state = 'review', error = $2, updated_at = now() WHERE match_number = $1 AND state = $3",
           [row.match_number, "The GWL fixture disappeared. Remove the scheduled Raid Helper event manually; automatic schedule deletion is not verified.", row.state]);
       }
@@ -249,7 +251,7 @@ async function runTick() {
     const state = ["pending", "waiting"].includes(row.state) ? "pending"
       : (["scheduled", "posted"].includes(row.state) && !isCompleted ? "review" : row.state);
     const error = state === "review" && state !== row.state
-      ? "GWL changed this fixture. Review the linked Raid Helper event; it was not changed automatically." : state === "pending" ? null : row.error;
+      ? changedFixtureError : state === "pending" ? null : row.error;
     await query("UPDATE gwl_raid_events SET fixture = $2, state = $3, error = $4, updated_at = now() WHERE match_number = $1 AND state = $5",
       [row.match_number, JSON.stringify(current), state, error, row.state]);
   }

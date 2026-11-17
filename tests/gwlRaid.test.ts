@@ -75,10 +75,14 @@ describe("GWL missing fixture event deletion", () => {
     return row;
   }
 
-  it.each(["posted", "review"])("deletes a verified %s event and records confirmed absence", async (state) => {
+  it.each([
+    ["posted", null],
+    ["review", missingError],
+    ["review", "GWL changed this fixture. Review the linked Raid Helper event; it was not changed automatically."],
+  ])("deletes a verified %s event after the fixture disappears", async (state, error) => {
     vi.useFakeTimers(); vi.setSystemTime(now);
     try {
-      const row = setup(); row.state = state; row.error = state === "review" ? missingError : null;
+      const row = setup(); row.state = state; row.error = error;
       mocks.delete.mockResolvedValue(undefined);
       mocks.raw.mockResolvedValueOnce(event()).mockResolvedValueOnce(event())
         .mockRejectedValueOnce(new ProviderError("raid-helper", "Not found", 404));
