@@ -106,6 +106,23 @@ export async function getRawLeagueEvent(eventId: string) {
   }).passthrough().parse(data);
 }
 
+export async function getScheduledLeagueEvent(eventId: string) {
+  if (!/^[\w-]{1,64}$/.test(eventId)) throw new HttpError(400, "Invalid Raid Helper event ID.", "invalid_event");
+  const { data } = await requestJson({ provider: "raid-helper", url: raidUrl(`/api/v4/events/${encodeURIComponent(eventId)}`), headers: raidHeaders() });
+  return z.object({
+    serverId: z.string(), channelId: z.string(), title: z.string(), templateId: z.string(),
+    startTime: z.number(), postTime: z.number(), interval: z.string(), description: z.string(),
+  }).passthrough().parse(data);
+}
+
+export async function updateLeagueEvent(eventId: string, changes: { title: string; description: string }) {
+  if (!/^[\w-]{1,64}$/.test(eventId)) throw new HttpError(400, "Invalid Raid Helper event ID.", "invalid_event");
+  await requestJson({
+    provider: "raid-helper", method: "PATCH", url: raidUrl(`/api/v4/events/${encodeURIComponent(eventId)}`),
+    headers: raidHeaders(), body: changes, retries: 0, timeoutMs: 15000,
+  });
+}
+
 export async function updateLeagueEventDescription(eventId: string, description: string) {
   if (!/^[\w-]{1,64}$/.test(eventId)) throw new HttpError(400, "Invalid Raid Helper event ID.", "invalid_event");
   const { data } = await requestJson({
@@ -123,7 +140,7 @@ export async function deleteLeagueRaidEvent(eventId: string) {
   const { data } = await requestJson({ provider: "raid-helper", method: "DELETE", url: raidUrl(`/api/v4/events/${encodeURIComponent(eventId)}`),
     headers: raidHeaders(), retries: 0 });
   const result = z.object({ status: z.string() }).safeParse(data);
-  if (!result.success || !["success", "ok"].includes(result.data.status.toLowerCase())) {
+  if (!result.success || !["success", "ok", "event deleted"].includes(result.data.status.toLowerCase())) {
     throw new Error("Raid Helper did not confirm event deletion.");
   }
 }

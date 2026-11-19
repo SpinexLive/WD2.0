@@ -11,6 +11,10 @@ vi.mock("@/lib/db", () => ({
 }));
 vi.mock("@/lib/audit", () => ({ audit: mocks.audit }));
 vi.mock("@/server/services/gwl", () => ({ getGwlFixtures: mocks.fixtures }));
+vi.mock("@/server/services/gwlOpenSlots", async (original) => {
+  const actual = await original<typeof import("@/server/services/gwlOpenSlots")>();
+  return { ...actual, processOpenSlots: vi.fn().mockResolvedValue(new Set()) };
+});
 vi.mock("@/server/services/leagueRaidHelper", async (original) => {
   const actual = await original<typeof import("@/server/services/leagueRaidHelper")>();
   return { ...actual, leagueEventNames: mocks.names, getPostedLeagueEvents: mocks.posted,
@@ -20,6 +24,7 @@ vi.mock("@/server/services/leagueRaidHelper", async (original) => {
 
 import { gwlEventBody, updatedGwlWeatherDescription } from "@/server/services/gwlRaidHelper";
 import { gwlFixtureTick } from "@/server/services/gwlRaid";
+import { processOpenSlots } from "@/server/services/gwlOpenSlots";
 import { ProviderError } from "@/lib/http";
 
 const now = Date.parse("2030-01-01T00:00:00Z");
@@ -35,6 +40,7 @@ const names = { role: "Member", voice: "Briefing", roleNames: [] };
 
 beforeEach(() => {
   vi.resetAllMocks();
+  vi.mocked(processOpenSlots).mockResolvedValue(new Set());
   mocks.lock.mockImplementation(async (fn: () => Promise<void>) => fn());
   mocks.names.mockResolvedValue(names);
   mocks.posted.mockResolvedValue([]);
@@ -377,7 +383,7 @@ describe("GWL event automation", () => {
       start_time: null, post_at: null, temporary_role: null, member_role_name: null, voice_channel_name: null, error: null };
     mocks.query.mockImplementation(async (sql: string, values: unknown[] = []) => {
       if (sql === "SELECT * FROM gwl_raid_events") return [row];
-      if (sql.includes("WHERE state = 'pending' ORDER BY")) return row.state === "pending" ? [row] : [];
+      if (sql.includes("WHERE state = 'pending' AND NOT")) return row.state === "pending" && !(values[0] as string[]).includes(row.match_number) ? [row] : [];
       if (sql.includes("SELECT temporary_role FROM")) return [];
       if (sql.includes("SET state = 'creating'")) { row.state = "creating"; return [{ match_number: fixture.number }]; }
       if (sql.includes("SET scheduled_id = $2")) { row.scheduled_id = values[1] as string | null; row.event_id = values[2] as string | null; return [{ match_number: fixture.number }]; }

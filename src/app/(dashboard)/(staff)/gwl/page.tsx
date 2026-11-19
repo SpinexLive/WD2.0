@@ -103,7 +103,7 @@ export default function GwlPage() {
         {data.raid.events.some((event) => ["review", "uncertain", "waiting"].includes(event.state)) && <section className="card p-4">
           <h2 className="font-bold">Raid Helper issues</h2>
           <ul className="mt-2 space-y-2 text-sm">{data.raid.events.filter((event) => ["review", "uncertain", "waiting"].includes(event.state)).map((event) =>
-            <li key={event.matchNumber}>Match #{event.matchNumber}: {event.state}{event.error ? ` — ${event.error}` : ""}{event.scheduledId ? ` · Schedule ID ${event.scheduledId}` : ""}{event.eventId ? ` · Event ID ${event.eventId}` : ""}</li>)}</ul>
+            <li key={event.matchNumber}>{event.matchNumber.startsWith("slot:") ? `Open slot ${event.matchNumber.slice(5)}` : `Match #${event.matchNumber}`}: {event.state}{event.error ? ` — ${event.error}` : ""}{event.scheduledId ? ` · Schedule ID ${event.scheduledId}` : ""}{event.eventId ? ` · Event ID ${event.eventId}` : ""}</li>)}</ul>
         </section>}
         <div className="grid gap-3 sm:grid-cols-3">
           <div className="card p-4"><div className="text-xs text-stone/60">Team</div><div className="text-lg font-bold">{data.team.data.name} [{data.team.data.tag}]</div></div>
@@ -126,7 +126,13 @@ export default function GwlPage() {
           </section>
           <section className="card p-4">
             <h2 className="font-bold">Open slots</h2>
-            {data.slots.data.slots.length === 0 ? <p className="mt-2 text-sm text-stone/55">No open slots returned by GWL.</p> : <ul className="mt-2 divide-y divide-ink-700">{data.slots.data.slots.map((slot) => <li className="py-2 text-sm" key={slot.id}>{date(slot.startsAt)} · {gwlMapLabel(slot.map)} · Zone: {slot.layer ?? "TBD"} · Weather: {gwlWeatherLabel(slot.weather)} · {slot.region} · {slot.seatsFilled} filled</li>)}</ul>}
+            {data.slots.data.slots.length === 0 ? <p className="mt-2 text-sm text-stone/55">No open slots returned by GWL.</p> : <ul className="mt-2 divide-y divide-ink-700">{data.slots.data.slots.map((slot) => <li className="py-2 text-sm" key={slot.id}>
+              <div>{date(slot.startsAt)} · {gwlMapLabel(slot.map)} · Zone: {slot.layer ?? "TBD"} · Weather: {gwlWeatherLabel(slot.weather)} · {slot.region} · {slot.seatsFilled}/3 teams · TBD</div>
+              {data.raid.events.filter((event) => event.matchNumber === `slot:${slot.id}`).map((event) => <div key={event.matchNumber} className="text-xs text-stone/60">
+                Raid Helper: {event.state}{event.error ? ` — ${event.error}` : ""}{" "}
+                {event.eventUrl && <a className="text-blood-300 hover:underline" href={event.eventUrl} target="_blank" rel="noopener noreferrer">Open signup →</a>}
+              </div>)}
+            </li>)}</ul>}
           </section>
           <section className="card p-4 lg:col-span-2">
             <h2 className="font-bold">Elo history</h2>

@@ -2,6 +2,7 @@ import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import pg from "pg";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { processOpenSlots } from "@/server/services/gwlOpenSlots";
 import type { GwlFixture } from "@/server/services/gwl";
 
 const mocks = vi.hoisted(() => ({
@@ -16,6 +17,10 @@ vi.mock("@/lib/db", () => ({
 }));
 vi.mock("@/lib/audit", () => ({ audit: mocks.audit }));
 vi.mock("@/server/services/gwl", () => ({ getGwlFixtures: mocks.fixtures }));
+vi.mock("@/server/services/gwlOpenSlots", async (original) => {
+  const actual = await original<typeof import("@/server/services/gwlOpenSlots")>();
+  return { ...actual, processOpenSlots: vi.fn(async () => new Set<string>()) };
+});
 vi.mock("@/server/services/leagueRaidHelper", async (original) => {
   const actual = await original<typeof import("@/server/services/leagueRaidHelper")>();
   return { ...actual, leagueEventNames: mocks.names, getPostedLeagueEvents: mocks.posted,
@@ -37,6 +42,7 @@ const makeFixture = (): GwlFixture => ({
 describe.skipIf(!process.env.TEST_DATABASE_URL)("GWL Raid Helper PostgreSQL integration", () => {
   beforeEach(async () => {
     vi.resetAllMocks();
+    vi.mocked(processOpenSlots).mockResolvedValue(new Set());
     mocks.client = new pg.Client({ connectionString: process.env.TEST_DATABASE_URL });
     await mocks.client.connect();
     for (const migration of ["045_gwl_raid_events.sql", "046_gwl_raid_event_channel.sql", "047_gwl_raid_cancelled.sql"]) {

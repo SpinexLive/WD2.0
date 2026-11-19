@@ -2,7 +2,7 @@ import { env } from "@/lib/env";
 import { HttpError } from "@/lib/http";
 import { gwlMapLabel, gwlWeatherLabel } from "@/lib/gwl";
 import { FACTIONS, resolveFaction } from "@/lib/scouting";
-import type { GwlFixture } from "./gwl";
+import type { GwlFixture, GwlSlot } from "./gwl";
 import { type leagueEventNames } from "./leagueRaidHelper";
 
 const clean = (value: string | null) => value?.replace(/@/g, "@\u200b").replace(/[\r\n]/g, " ").trim() || "TBD";
@@ -45,10 +45,12 @@ export function gwlEventBody(fixture: GwlFixture, names: Awaited<ReturnType<type
       sides.some((side) => !/^[A-Za-z0-9_-]{1,30}$/.test(side.tag)) || new Set(tags).size !== tags.length) {
     throw new HttpError(409, "The GWL fixture needs one RMNT team and unique, valid team tags before creating an event.", "gwl_fixture_incomplete");
   }
+
   const title = `GWL | RMNT v ${opponents.map((side) => side.tag).join(" v ")}`;
   if (title.length > 100 || names.roleNames.includes(title.toLowerCase())) {
     throw new HttpError(409, "The GWL temporary role name is too long or already reserved.", "gwl_role_collision");
   }
+
   const baseUrl = new URL(env().APP_URL);
   if (baseUrl.protocol !== "https:" || ["localhost", "127.0.0.1", "::1"].includes(baseUrl.hostname)) {
     throw new HttpError(503, "APP_URL must be a public HTTPS URL for the GWL event image.", "gwl_image_url");
@@ -87,4 +89,44 @@ export function gwlEventBody(fixture: GwlFixture, names: Awaited<ReturnType<type
       image: new URL("/images/gwl.png", baseUrl).toString(), header_image: "default",
     },
   };
+}
+
+export type GwlOpenFixture = GwlFixture & { openSlot: GwlSlot; teamSlug: string };
+
+export function slotFingerprint(slot: GwlSlot): string {
+  const { id, startsAt, region, map, layer, weather, seatsFilled, host, joinedTeam } = slot;
+  return JSON.stringify({ id, startsAt, region, map, layer, weather: weather ?? null, seatsFilled, host, joinedTeam });
+}
+
+export function openSlotFixture(slot: GwlSlot, team: { slug: string; tag: string }): GwlOpenFixture {
+  const teams = [slot.host, ...(slot.joinedTeam ? [slot.joinedTeam] : [])];
+  if (!teams.includes(team.slug) || new Set(teams).size !== teams.length || teams.length !== slot.seatsFilled || team.tag.toUpperCase() !== "RMNT") {
+    throw new HttpError(409, "The GWL slot does not reliably identify REMNANT and its teams.", "gwl_slot_incomplete");
+  }
+  const sides: GwlFixture["sides"] = teams.map((slug) => ({
+    team: { slug, tag: slug === team.slug ? "RMNT" : slug, name: null },
+    faction: null, points: null, score: null, placement: null, eloDelta: null,
+  }));
+  for (let index = 0; index < 3 - teams.length; index++) {
+    const tag = teams.length === 1 ? `TBD${index + 1}` : "TBD";
+    sides.push({ team: { slug: `__tbd${index}__`, tag, name: null }, faction: null, points: null, score: null, placement: null, eloDelta: null });
+  }
+  return {
+    number: `slot:${slot.id}`, status: "scheduled", startsAt: slot.startsAt, region: slot.region,
+    map: slot.map, layer: slot.layer, weather: slot.weather, sides, openSlot: slot, teamSlug: team.slug,
+  };
+}
+
+export function openSlotEventBody(fixture: GwlOpenFixture, names: Awaited<ReturnType<typeof leagueEventNames>>, now: number) {
+  const body = gwlEventBody(fixture, names, now);
+  return { ...body, description: body.description.replace(`**Match:** #${fixture.number}`, `**Open slot:** ${fixture.openSlot.id}\n**Status:** TBD — awaiting teams`) };
+}
+
+export function matchesOpenSlot(slot: GwlOpenFixture, fixture: GwlFixture): boolean {
+  const slugs = new Set(fixture.sides.map((side) => side.team.slug));
+  const known = [slot.openSlot.host, ...(slot.openSlot.joinedTeam ? [slot.openSlot.joinedTeam] : [])];
+  return fixture.status.trim().toUpperCase() === "SCHEDULED"
+    && Date.parse(fixture.startsAt) === Date.parse(slot.openSlot.startsAt)
+    && fixture.region === slot.openSlot.region && fixture.sides.length === 3 && slugs.size === 3
+    && known.every((slug) => slugs.has(slug)) && slugs.has(slot.teamSlug);
 }

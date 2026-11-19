@@ -3,8 +3,9 @@ import { independentQuery, query, withLeagueEventLock } from "@/lib/db";
 import { env } from "@/lib/env";
 import { HttpError, ProviderError } from "@/lib/http";
 import { z } from "zod";
-import { getGwlFixtures, type GwlFixture } from "./gwl";
-import { gwlEventBody, updatedGwlWeatherDescription } from "./gwlRaidHelper";
+import { getGwlFixtures, getGwlSlots, type GwlFixture } from "./gwl";
+import { gwlEventBody, openSlotEventBody, slotFingerprint, updatedGwlWeatherDescription } from "./gwlRaidHelper";
+import { processOpenSlots, readOpenFixture } from "./gwlOpenSlots";
 import { createGwlRaidEvent, deleteLeagueRaidEvent, getPostedLeagueEvents, getRawLeagueEvent, getScheduledLeagueEvents, isLeagueEventChannel, updateLeagueEventDescription, leagueEventNames, LEAGUE_EVENT_CHANNEL } from "./leagueRaidHelper";
 
 type EventRow = {
@@ -210,15 +211,18 @@ async function runTick() {
     WHERE state = 'creating' AND updated_at < now() - interval '1 minute'`);
   const beforeReconcile = await query<EventRow>("SELECT * FROM gwl_raid_events");
   await reconcile(beforeReconcile);
-  const rows = await query<EventRow>("SELECT * FROM gwl_raid_events");
   const snapshot = await getGwlFixtures(true);
   if (snapshot.stale) throw new Error(snapshot.error ?? "GWL fixtures are stale.");
+  const blocked = await processOpenSlots(snapshot.data.upcoming);
+  const rows = await query<EventRow>("SELECT * FROM gwl_raid_events");
   const all = [...snapshot.data.upcoming, ...snapshot.data.recent];
   for (const fixture of snapshot.data.upcoming) {
+    if (blocked.has(fixture.number)) continue;
     await query("INSERT INTO gwl_raid_events (match_number, fixture, state) VALUES ($1, $2, 'pending') ON CONFLICT DO NOTHING",
       [fixture.number, JSON.stringify(fixture)]);
   }
   for (const row of rows) {
+    if (row.match_number.startsWith("slot:")) continue;
     const current = all.find((fixture) => fixture.number === row.match_number);
     if (!current) {
       if (Date.parse(row.fixture.startsAt) <= Date.now()) continue;
@@ -256,6 +260,7 @@ async function runTick() {
       [row.match_number, JSON.stringify(current), state, error, row.state]);
   }
   for (const row of rows.filter((item) => item.state === "posted")) {
+    if (row.match_number.startsWith("slot:")) continue;
     const fixture = snapshot.data.upcoming.find((item) => item.number === row.match_number);
     if (!fixture || relevant(row.fixture) !== relevant(fixture)) continue;
     try {
@@ -268,7 +273,8 @@ async function runTick() {
     }
   }
   const [candidate] = await query<EventRow>(
-    "SELECT * FROM gwl_raid_events WHERE state = 'pending' ORDER BY updated_at LIMIT 1",
+    "SELECT * FROM gwl_raid_events WHERE state = 'pending' AND NOT (match_number = ANY($1::text[])) ORDER BY updated_at LIMIT 1",
+    [[...blocked]],
   );
   if (!candidate) return;
   let body: ReturnType<typeof gwlEventBody>;
@@ -279,10 +285,14 @@ async function runTick() {
         WHERE match_number <> $1 AND temporary_role IS NOT NULL AND state IN ('creating', 'scheduled', 'posted', 'review', 'uncertain')
           AND (fixture->>'startsAt')::timestamptz > now()`, [candidate.match_number]),
     ]);
-    body = gwlEventBody(candidate.fixture, { ...names, roleNames: [...names.roleNames,
+    const bodyNames = { ...names, roleNames: [...names.roleNames,
       ...reserved.map((row) => row.temporary_role.toLowerCase()),
       ...scheduled.filter((event) => event.channelId === LEAGUE_EVENT_CHANNEL).map((event) => event.title.toLowerCase()),
-    ] }, Math.floor(Date.now() / 1000));
+    ] };
+    const open = readOpenFixture(candidate.fixture);
+    if (candidate.match_number.startsWith("slot:") && !open) throw new Error("Stored GWL open-slot identity is invalid.");
+    body = open ? openSlotEventBody(open, bodyNames, Math.floor(Date.now() / 1000))
+      : gwlEventBody(candidate.fixture, bodyNames, Math.floor(Date.now() / 1000));
     const briefing = Number(body.date);
     const opponents = candidate.fixture.sides.filter((side) => side.team.tag?.trim().toUpperCase() !== "RMNT")
       .map((side) => side.team.tag!.trim().toUpperCase());
@@ -308,8 +318,15 @@ async function runTick() {
   }
   const latest = await getGwlFixtures(true);
   if (latest.stale) throw new Error(latest.error ?? "GWL fixtures are stale.");
+  const openCandidate = readOpenFixture(candidate.fixture);
   const current = latest.data.upcoming.find((fixture) => fixture.number === candidate.match_number);
-  if (!current || relevant(current) !== relevant(candidate.fixture)) {
+  const currentSlots = openCandidate ? await getGwlSlots(true) : null;
+  if (currentSlots?.stale) throw new Error(currentSlots.error ?? "GWL slots are stale.");
+  const slot = currentSlots?.data.slots.find((item) => item.id === openCandidate?.openSlot.id);
+  const slotChanged = openCandidate && (!slot || slotFingerprint(slot) !== slotFingerprint(openCandidate.openSlot) ||
+    latest.data.upcoming.some((fixture) => Date.parse(fixture.startsAt) === Date.parse(openCandidate.startsAt)
+      && fixture.region === openCandidate.region && fixture.sides.some((side) => side.team.slug === openCandidate.teamSlug)));
+  if (openCandidate ? slotChanged : !current || relevant(current) !== relevant(candidate.fixture)) {
     await query("UPDATE gwl_raid_events SET state = 'review', error = $2, updated_at = now() WHERE match_number = $1 AND state = 'pending'",
       [candidate.match_number, "The GWL fixture changed or disappeared during event checks. Review before creating an event."]);
     return;

@@ -43,10 +43,14 @@ export const gwlFixturesSchema = z.object({
   const numbers = [...fixtures.upcoming, ...fixtures.recent].map((fixture) => fixture.number);
   return new Set(numbers).size === numbers.length;
 }, "Duplicate GWL match numbers");
-const slotsSchema = z.object({ slots: z.array(z.object({
-  id: text, startsAt: text, region: text, map: text, layer: text.nullable(), weather: text.nullable().optional(),
-  seatsFilled: z.number(), host: text,
-})) });
+export const gwlSlotSchema = z.object({
+  id: text.min(1).max(100).regex(/^[\w-]+$/), startsAt: z.string().datetime({ offset: true }),
+  region: text, map: text, layer: text.nullable(), weather: text.nullable().optional(),
+  seatsFilled: z.number().int().min(1).max(2), host: text.min(1), joinedTeam: text.nullable(),
+});
+export type GwlSlot = z.infer<typeof gwlSlotSchema>;
+const slotsSchema = z.object({ slots: z.array(gwlSlotSchema) }).refine((value) =>
+  new Set(value.slots.map((slot) => slot.id)).size === value.slots.length, "Duplicate GWL slots");
 const eloSchema = z.object({ eloRating: z.number(), ratedMatches: z.number(), changeLast5: z.number(), history: z.array(z.number()) });
 
 async function get<T>(path: string, schema: z.ZodType<T>, force = false) {
