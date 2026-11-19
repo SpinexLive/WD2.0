@@ -213,7 +213,7 @@ async function runTick() {
   await reconcile(beforeReconcile);
   const snapshot = await getGwlFixtures(true);
   if (snapshot.stale) throw new Error(snapshot.error ?? "GWL fixtures are stale.");
-  const blocked = await processOpenSlots(snapshot.data.upcoming);
+  const blocked = await processOpenSlots(snapshot.data.upcoming, snapshot.data.recent);
   const rows = await query<EventRow>("SELECT * FROM gwl_raid_events");
   const all = [...snapshot.data.upcoming, ...snapshot.data.recent];
   for (const fixture of snapshot.data.upcoming) {

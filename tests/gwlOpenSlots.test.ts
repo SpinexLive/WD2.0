@@ -51,6 +51,7 @@ describe("GWL open slots", () => {
       const event = openSlotEventBody(fixture, names, 0);
       expect(event.title).toContain("TBD");
       expect(event.description).toContain("**Status:** TBD");
+      expect(event.description).not.toContain("**Open slot:**");
       expect(event.templateId).toBe("ct34");
       expect(Number(event.date)).toBe(Date.parse(slot.startsAt) / 1000 - 1800);
       expect(event.schedule).toBe(Date.parse(slot.startsAt) / 1000 - 12 * 86400);
@@ -62,6 +63,40 @@ describe("GWL open slots", () => {
     expect(slotFingerprint({ ...slot })).toBe(slotFingerprint({ joinedTeam: slot.joinedTeam, host: slot.host,
       seatsFilled: slot.seatsFilled, weather: slot.weather, layer: slot.layer, map: slot.map,
       region: slot.region, startsAt: slot.startsAt, id: slot.id }));
+  });
+
+  it("uses unambiguous team tags from fixture history and updates a legacy event without losing signups", async () => {
+    const legacy = { ...open, presentationVersion: undefined };
+    const oldDescription = body.description.replace("**Status:** TBD — awaiting teams",
+      `**Open slot:** ${slot.id}\n**Status:** TBD — awaiting teams`);
+    const row = { match_number: open.number, fixture: legacy, state: "posted", scheduled_id: null, event_id: "event1",
+      event_channel_id: "thread", start_time: body.date, post_at: null, temporary_role: body.title,
+      member_role_name: "Member", voice_channel_name: "Briefing", error: null };
+    const event = { id: "event1", serverId: "guild", channelId: "thread", templateId: "ct34",
+      title: body.title, startTime: Number(body.date), description: oldDescription, signUps: [{ id: 1, userId: "player" }] };
+    mocks.slots.mockResolvedValue({ stale: false, data: { slots: [slot] } });
+    mocks.raw.mockResolvedValue(event);
+    mocks.update.mockImplementation(async (_id, changes) => { mocks.raw.mockResolvedValue({ ...event, ...changes }); });
+    mocks.query.mockImplementation(async (sql: string) => {
+      if (sql.startsWith("SELECT *")) return [row];
+      if (sql.includes("RETURNING match_number")) return [row];
+      return [];
+    });
+    await processOpenSlots([], [match]);
+    expect(mocks.update).toHaveBeenCalledWith("event1", expect.objectContaining({
+      title: "GWL | RMNT v OTH v TBD",
+      description: expect.not.stringContaining("**Open slot:**"),
+    }));
+    expect(mocks.raw).toHaveBeenCalledTimes(3);
+  });
+
+  it("does not guess between conflicting historical team tags", async () => {
+    mocks.slots.mockResolvedValue({ stale: false, data: { slots: [slot] } });
+    mocks.query.mockResolvedValue([]);
+    const changed = { ...match, sides: [side("other", "DIFF"), match.sides[1]!, match.sides[2]!] };
+    await processOpenSlots([], [match, changed]);
+    const insert = mocks.query.mock.calls.find(([sql]) => typeof sql === "string" && sql.includes("VALUES ($1, $2, 'pending')"));
+    expect(JSON.parse(insert![1][1]).sides[0].team.tag).toBe("other");
   });
 
   it("creates a pending row for an open slot and blocks overlap with a visible match", async () => {

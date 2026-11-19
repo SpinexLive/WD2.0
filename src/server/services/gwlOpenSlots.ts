@@ -49,7 +49,8 @@ async function inspect(row: Row, open: GwlOpenFixture) {
     throw new HttpError(409, "The open-slot event identity is incomplete.", "gwl_slot_unsafe");
   }
   const expected = openSlotEventBody(open, { role: row.member_role_name, voice: row.voice_channel_name, roleNames: [] }, 0);
-  const marker = `**Open slot:** ${open.openSlot.id}`;
+  const expectedDescription = open.presentationVersion === 2 ? expected.description : expected.description.replace(
+    "**Status:** TBD — awaiting teams", `**Open slot:** ${open.openSlot.id}\n**Status:** TBD — awaiting teams`);
   if (row.state === "scheduled" && row.scheduled_id && !row.event_id) {
     const [list, event] = await Promise.all([getScheduledLeagueEvents(), getScheduledLeagueEvent(row.scheduled_id)]);
     const entry = list.find((item) => item.id === row.scheduled_id);
@@ -58,7 +59,7 @@ async function inspect(row: Row, open: GwlOpenFixture) {
         event.serverId !== env().DISCORD_GUILD_ID || event.channelId !== row.scheduled_id ||
         event.title !== row.temporary_role || event.templateId !== "ct34" || event.interval !== "0 days" ||
         event.startTime !== Number(row.start_time) || event.postTime !== Number(row.post_at) ||
-        event.description !== expected.description || !event.description.split("\n").includes(marker)) {
+        event.description !== expectedDescription) {
       throw new HttpError(409, "The scheduled open-slot event could not be verified.", "gwl_slot_unsafe");
     }
     return { id: row.scheduled_id, scheduled: true, description: event.description, signups: null };
@@ -69,7 +70,7 @@ async function inspect(row: Row, open: GwlOpenFixture) {
     if (event.id !== row.event_id || event.serverId !== env().DISCORD_GUILD_ID || event.channelId !== row.event_channel_id ||
         !(await isLeagueEventChannel(event.channelId)) || event.templateId !== "ct34" ||
         event.title !== row.temporary_role || event.startTime !== Number(row.start_time) ||
-        event.description !== expected.description || !signups.success) {
+        event.description !== expectedDescription || !signups.success) {
       throw new HttpError(409, "The posted open-slot event or its signups could not be verified.", "gwl_slot_unsafe");
     }
     return { id: row.event_id, scheduled: false, description: event.description, signups: signups.data };
@@ -196,12 +197,31 @@ async function deleteOpenEvent(row: Row, open: GwlOpenFixture) {
   }
 }
 
-export async function processOpenSlots(fixtures: GwlFixture[]): Promise<Set<string>> {
+export async function processOpenSlots(fixtures: GwlFixture[], recent: GwlFixture[] = []): Promise<Set<string>> {
   const [slots, team, rows] = await Promise.all([
     getGwlSlots(true), getGwlTeam(), query<Row>("SELECT * FROM gwl_raid_events WHERE match_number LIKE 'slot:%'"),
   ]);
   if (slots.stale || team.stale) throw new Error(slots.error ?? team.error ?? "GWL slot or team data is stale.");
-  const openFixtures = slots.data.slots.map((slot) => openSlotFixture(slot, team.data));
+  const seenTags = new Map<string, Set<string>>();
+  for (const fixture of [...fixtures, ...recent]) {
+    for (const side of fixture.sides) {
+      const tag = side.team.tag?.trim();
+      if (!tag || !/^[A-Za-z0-9_-]{1,30}$/.test(tag)) continue;
+      const tags = seenTags.get(side.team.slug) ?? new Set<string>();
+      tags.add(tag.toUpperCase());
+      seenTags.set(side.team.slug, tags);
+    }
+  }
+  const tags = new Map([...seenTags].filter(([, values]) => values.size === 1).map(([slug, values]) => [slug, [...values][0]!]));
+  for (const row of rows) {
+    const stored = readOpenFixture(row.fixture);
+    if (!stored) continue;
+    for (const side of stored.sides) {
+      const { slug, tag } = side.team;
+      if (!seenTags.has(slug) && tag && tag !== slug && /^[A-Za-z0-9_-]{1,30}$/.test(tag)) tags.set(slug, tag);
+    }
+  }
+  const openFixtures = slots.data.slots.map((slot) => openSlotFixture(slot, team.data, tags));
   const blocked = new Set<string>();
   for (const row of rows) {
     const open = readOpenFixture(row.fixture);
@@ -212,7 +232,9 @@ export async function processOpenSlots(fixtures: GwlFixture[]): Promise<Set<stri
     if (current) {
       if (row.state === "cancelled") {
         await review(row, "This removed GWL slot is visible again. Review before creating another event.");
-      } else if (slotFingerprint(current.openSlot) !== slotFingerprint(open.openSlot)) {
+      } else if (slotFingerprint(current.openSlot) !== slotFingerprint(open.openSlot) ||
+          open.presentationVersion !== current.presentationVersion ||
+          current.sides.some((side, index) => side.team.tag !== open.sides[index]?.team.tag)) {
         if (row.state === "pending" || row.state === "waiting") {
           await query("UPDATE gwl_raid_events SET fixture = $2, state = 'pending', error = NULL, updated_at = now() WHERE match_number = $1 AND state = $3",
             [row.match_number, JSON.stringify(current), row.state]);

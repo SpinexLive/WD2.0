@@ -91,20 +91,20 @@ export function gwlEventBody(fixture: GwlFixture, names: Awaited<ReturnType<type
   };
 }
 
-export type GwlOpenFixture = GwlFixture & { openSlot: GwlSlot; teamSlug: string };
+export type GwlOpenFixture = GwlFixture & { openSlot: GwlSlot; teamSlug: string; presentationVersion?: number };
 
 export function slotFingerprint(slot: GwlSlot): string {
   const { id, startsAt, region, map, layer, weather, seatsFilled, host, joinedTeam } = slot;
   return JSON.stringify({ id, startsAt, region, map, layer, weather: weather ?? null, seatsFilled, host, joinedTeam });
 }
 
-export function openSlotFixture(slot: GwlSlot, team: { slug: string; tag: string }): GwlOpenFixture {
+export function openSlotFixture(slot: GwlSlot, team: { slug: string; tag: string }, tags: ReadonlyMap<string, string> = new Map()): GwlOpenFixture {
   const teams = [slot.host, ...(slot.joinedTeam ? [slot.joinedTeam] : [])];
   if (!teams.includes(team.slug) || new Set(teams).size !== teams.length || teams.length !== slot.seatsFilled || team.tag.toUpperCase() !== "RMNT") {
     throw new HttpError(409, "The GWL slot does not reliably identify REMNANT and its teams.", "gwl_slot_incomplete");
   }
   const sides: GwlFixture["sides"] = teams.map((slug) => ({
-    team: { slug, tag: slug === team.slug ? "RMNT" : slug, name: null },
+    team: { slug, tag: slug === team.slug ? "RMNT" : tags.get(slug) ?? slug, name: null },
     faction: null, points: null, score: null, placement: null, eloDelta: null,
   }));
   for (let index = 0; index < 3 - teams.length; index++) {
@@ -113,13 +113,13 @@ export function openSlotFixture(slot: GwlSlot, team: { slug: string; tag: string
   }
   return {
     number: `slot:${slot.id}`, status: "scheduled", startsAt: slot.startsAt, region: slot.region,
-    map: slot.map, layer: slot.layer, weather: slot.weather, sides, openSlot: slot, teamSlug: team.slug,
+    map: slot.map, layer: slot.layer, weather: slot.weather, sides, openSlot: slot, teamSlug: team.slug, presentationVersion: 2,
   };
 }
 
 export function openSlotEventBody(fixture: GwlOpenFixture, names: Awaited<ReturnType<typeof leagueEventNames>>, now: number) {
   const body = gwlEventBody(fixture, names, now);
-  return { ...body, description: body.description.replace(`**Match:** #${fixture.number}`, `**Open slot:** ${fixture.openSlot.id}\n**Status:** TBD — awaiting teams`) };
+  return { ...body, description: body.description.replace(`**Match:** #${fixture.number}`, "**Status:** TBD — awaiting teams") };
 }
 
 export function matchesOpenSlot(slot: GwlOpenFixture, fixture: GwlFixture): boolean {
