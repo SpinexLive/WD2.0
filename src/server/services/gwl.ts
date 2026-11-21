@@ -23,10 +23,10 @@ const sideSchema = z.object({
   placement: z.number().nullable(), eloDelta: z.number().nullable(),
 });
 export const gwlFixtureSchema = z.object({
-  number: text.min(1).max(128), status: text, map: text, layer: text.nullable(), weather: text.nullable().optional(), startsAt: z.string().datetime({ offset: true }),
+  number: text.min(1).max(128), status: text, map: text, mapName: text.optional(), layer: text.nullable(), zone: text.nullable().optional(), weather: text.nullable().optional(), startsAt: z.string().datetime({ offset: true }),
   region: text, sides: z.array(sideSchema),
   concludedAt: z.string().datetime({ offset: true }).nullable().optional(),
-  season: text.optional(),
+  season: text.nullable().optional(),
   rated: z.boolean().optional(),
   serverPosted: z.boolean().optional(),
   readyTeams: z.array(text).optional(),
@@ -45,12 +45,22 @@ export const gwlFixturesSchema = z.object({
 }, "Duplicate GWL match numbers");
 export const gwlSlotSchema = z.object({
   id: text.min(1).max(100).regex(/^[\w-]+$/), startsAt: z.string().datetime({ offset: true }),
-  region: text, map: text, layer: text.nullable(), weather: text.nullable().optional(),
+  region: text, map: text, mapName: text.optional(), layer: text.nullable(), zone: text.nullable().optional(), weather: text.nullable().optional(),
   seatsFilled: z.number().int().min(1).max(2), host: text.min(1), joinedTeam: text.nullable(),
+  seatsFree: z.number().int().min(1).max(2).optional(),
+  teams: z.array(z.object({ slug: text.min(1), name: text.nullable(), tag: text.nullable() })).optional(),
+  yours: z.boolean().optional(), private: z.boolean().optional(),
 });
 export type GwlSlot = z.infer<typeof gwlSlotSchema>;
 const slotsSchema = z.object({ slots: z.array(gwlSlotSchema) }).refine((value) =>
-  new Set(value.slots.map((slot) => slot.id)).size === value.slots.length, "Duplicate GWL slots");
+  new Set(value.slots.map((slot) => slot.id)).size === value.slots.length, "Duplicate GWL slots")
+  .refine(({ slots }) => slots.every((slot) => {
+    const slugs = [slot.host, ...(slot.joinedTeam ? [slot.joinedTeam] : [])];
+    return slot.yours !== false && slugs.length === slot.seatsFilled && new Set(slugs).size === slugs.length &&
+      (slot.seatsFree === undefined || slot.seatsFree === 3 - slot.seatsFilled) &&
+      (slot.teams === undefined || (slot.teams.length === slugs.length &&
+        slot.teams.every((team, index) => team.slug === slugs[index])));
+  }), "Inconsistent GWL open slot");
 const eloSchema = z.object({ eloRating: z.number(), ratedMatches: z.number(), changeLast5: z.number(), history: z.array(z.number()) });
 
 async function get<T>(path: string, schema: z.ZodType<T>, force = false) {

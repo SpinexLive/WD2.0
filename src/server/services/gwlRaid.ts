@@ -250,7 +250,14 @@ async function runTick() {
         [row.match_number, "This removed fixture is visible in GWL again. Review before creating another event."]);
       continue;
     }
-    if (relevant(row.fixture) === relevant(current)) continue;
+    if (relevant(row.fixture) === relevant(current)) {
+      if (["pending", "waiting"].includes(row.state) &&
+          (row.fixture.mapName !== current.mapName || row.fixture.zone !== current.zone)) {
+        await query("UPDATE gwl_raid_events SET fixture = $2, updated_at = now() WHERE match_number = $1 AND state = $3 AND fixture = $4::jsonb",
+          [row.match_number, JSON.stringify(current), row.state, JSON.stringify(row.fixture)]);
+      }
+      continue;
+    }
     const isCompleted = ["COMPLETED", "CONCLUDED", "FINISHED"].includes(current.status.toUpperCase());
     const state = ["pending", "waiting"].includes(row.state) ? "pending"
       : (["scheduled", "posted"].includes(row.state) && !isCompleted ? "review" : row.state);

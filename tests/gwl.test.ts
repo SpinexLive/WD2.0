@@ -14,7 +14,7 @@ vi.mock("@/lib/http", async (original) => {
 });
 vi.mock("@/lib/audit", () => ({ audit: mocks.audit }));
 
-import { getGwlMembers, getGwlFixtures, gwlFixtureSchema, nextGwlFixture } from "@/server/services/gwl";
+import { getGwlMembers, getGwlFixtures, getGwlSlots, gwlFixtureSchema, nextGwlFixture } from "@/server/services/gwl";
 import { POST } from "@/app/api/gwl/applications/[id]/respond/route";
 
 const context = { params: Promise.resolve({ id: "app-1" }) };
@@ -65,6 +65,27 @@ describe("GWL integration", () => {
     expect(gwlFixtureSchema.parse({ ...data, weather: "rain" }).weather).toBe("rain");
     expect(gwlFixtureSchema.parse({ ...data, weather: null }).weather).toBeNull();
     expect(gwlFixtureSchema.parse(data).weather).toBeUndefined();
+  });
+
+  it("preserves display names and accepts fixtures outside a season", () => {
+    const fixture = gwlFixtureSchema.parse({ number: "42", status: "scheduled", map: "kavkazi",
+      mapName: "Bakurani", layer: null, zone: "Random zone", season: null,
+      startsAt: "2026-11-15T20:00:00Z", region: "EU", sides: [] });
+    expect(fixture).toMatchObject({ mapName: "Bakurani", zone: "Random zone", season: null });
+  });
+
+  it("retains documented slot teams and rejects inconsistent or unrelated slots", async () => {
+    const slot = { id: "slot-1", startsAt: "2027-01-21T19:00:00.000Z", region: "EU", map: "europe",
+      mapName: "Ozeti", layer: "Church", zone: "Church", weather: null, seatsFilled: 2, seatsFree: 1,
+      host: "other", joinedTeam: "remnant", teams: [{ slug: "other", name: "Other", tag: "OTH" },
+        { slug: "remnant", name: "Remnant", tag: "RMNT" }], yours: true, private: false };
+    mocks.request.mockResolvedValueOnce({ data: { slots: [slot] } });
+    expect((await getGwlSlots(true)).data.slots[0]).toEqual(slot);
+    mocks.request.mockResolvedValueOnce({ data: { slots: [{ ...slot, yours: false }] } });
+    expect((await getGwlSlots(true)).stale).toBe(true);
+    mocks.request.mockResolvedValueOnce({ data: { slots: [{ ...slot, teams: [slot.teams[1], slot.teams[0]] }] } });
+    expect((await getGwlSlots(true)).stale).toBe(true);
+    expect(mocks.request).toHaveBeenCalledWith(expect.objectContaining({ url: "https://gwl.gg/api/v1/team/slots" }));
   });
 
   it("does not accept duplicate fixture numbers", async () => {

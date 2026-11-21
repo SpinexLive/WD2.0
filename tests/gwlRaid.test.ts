@@ -235,6 +235,14 @@ describe("GWL Raid Helper payload", () => {
       .toBe("**Zone:** Houses\n**Weather:** Any");
   });
 
+  it("uses GWL display names in new events and preserves the zone when weather changes", () => {
+    const updated = { ...fixture, mapName: "Zestafona", layer: null, zone: "Random zone" };
+    expect(gwlEventBody(updated, names, now / 1000).description).toContain("**Map:** Zestafona\n**Zone:** Random zone");
+    expect(updatedGwlWeatherDescription("**Zone:** Random zone\n**Weather:** Clear", updated, { ...updated, weather: "rain" }))
+      .toBe("**Zone:** Random zone\n**Weather:** Rain");
+    expect(() => updatedGwlWeatherDescription("**Zone:** Staff edit\n**Weather:** Clear", updated, updated)).toThrow("zone was edited");
+  });
+
   it("refuses ambiguous teams and role collisions", () => {
     expect(() => gwlEventBody({ ...fixture, sides: fixture.sides.slice(0, 1) }, names, now / 1000)).toThrow("one RMNT");
     expect(() => gwlEventBody(fixture, { ...names, roleNames: ["gwl | rmnt v pmf v tll"] }, now / 1000)).toThrow("already reserved");

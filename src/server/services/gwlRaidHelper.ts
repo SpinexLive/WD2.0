@@ -21,7 +21,9 @@ export function updatedGwlWeatherDescription(description: string, previous: GwlF
     throw new HttpError(409, "Event zone or weather formatting was edited; review it manually.", "gwl_description_unsafe");
   }
   const currentZone = lines[zone]!.replace(/^\*\*(?:Zone|Layer):\*\*/, "").trim();
-  if (currentZone !== clean(previous.layer)) throw new HttpError(409, "Event zone was edited; review it manually.", "gwl_description_unsafe");
+  if (currentZone !== clean(previous.layer) && currentZone !== clean(previous.zone ?? previous.layer)) {
+    throw new HttpError(409, "Event zone was edited; review it manually.", "gwl_description_unsafe");
+  }
   const weather = `**Weather:** ${clean(gwlWeatherLabel(current.weather))}`;
   if (weathers.length) {
     const old = lines[weathers[0]!]!;
@@ -36,7 +38,7 @@ export function updatedGwlWeatherDescription(description: string, previous: GwlF
   return lines.join("\n");
 }
 
-export function gwlEventBody(fixture: GwlFixture, names: Awaited<ReturnType<typeof leagueEventNames>>, now: number) {
+export function gwlEventBody(fixture: GwlFixture, names: Awaited<ReturnType<typeof leagueEventNames>>, now: number, useDisplayNames = true) {
   const sides = fixture.sides.map((side) => ({ ...side, tag: side.team.tag?.trim() ?? "" }));
   const ours = sides.filter((side) => side.tag.toUpperCase() === "RMNT");
   const opponents = sides.filter((side) => side.tag.toUpperCase() !== "RMNT");
@@ -75,8 +77,8 @@ export function gwlEventBody(fixture: GwlFixture, names: Awaited<ReturnType<type
       `**Match Start:** <t:${matchTime}:F>`,
       "", "**Competition:** GWL",
       `**Match:** #${clean(fixture.number)}`,
-      "", `**Map:** ${clean(gwlMapLabel(fixture.map))}`,
-      `**Zone:** ${clean(fixture.layer)}`,
+      "", `**Map:** ${clean(useDisplayNames ? fixture.mapName ?? gwlMapLabel(fixture.map) : gwlMapLabel(fixture.map))}`,
+      `**Zone:** ${clean(useDisplayNames ? fixture.zone ?? fixture.layer : fixture.layer)}`,
       `**Weather:** ${clean(gwlWeatherLabel(fixture.weather))}`,
       "", ...lines,
     ].join("\n"),
@@ -94,8 +96,10 @@ export function gwlEventBody(fixture: GwlFixture, names: Awaited<ReturnType<type
 export type GwlOpenFixture = GwlFixture & { openSlot: GwlSlot; teamSlug: string; presentationVersion?: number };
 
 export function slotFingerprint(slot: GwlSlot): string {
-  const { id, startsAt, region, map, layer, weather, seatsFilled, host, joinedTeam } = slot;
-  return JSON.stringify({ id, startsAt, region, map, layer, weather: weather ?? null, seatsFilled, host, joinedTeam });
+  const { id, startsAt, region, map, mapName, layer, zone, weather, seatsFilled, host, joinedTeam } = slot;
+  return JSON.stringify({ id, startsAt, region, map, mapName: mapName ?? null, layer, zone: zone ?? null,
+    weather: weather ?? null, seatsFilled, host, joinedTeam,
+    teams: slot.teams?.map((team) => ({ slug: team.slug, tag: team.tag })) ?? null });
 }
 
 export function openSlotFixture(slot: GwlSlot, team: { slug: string; tag: string }, tags: ReadonlyMap<string, string> = new Map()): GwlOpenFixture {
@@ -104,7 +108,7 @@ export function openSlotFixture(slot: GwlSlot, team: { slug: string; tag: string
     throw new HttpError(409, "The GWL slot does not reliably identify REMNANT and its teams.", "gwl_slot_incomplete");
   }
   const sides: GwlFixture["sides"] = teams.map((slug) => ({
-    team: { slug, tag: slug === team.slug ? "RMNT" : tags.get(slug) ?? slug, name: null },
+    team: { slug, tag: slug === team.slug ? "RMNT" : slot.teams?.find((item) => item.slug === slug)?.tag?.trim() || tags.get(slug) || slug, name: null },
     faction: null, points: null, score: null, placement: null, eloDelta: null,
   }));
   for (let index = 0; index < 3 - teams.length; index++) {
@@ -113,12 +117,12 @@ export function openSlotFixture(slot: GwlSlot, team: { slug: string; tag: string
   }
   return {
     number: `slot:${slot.id}`, status: "scheduled", startsAt: slot.startsAt, region: slot.region,
-    map: slot.map, layer: slot.layer, weather: slot.weather, sides, openSlot: slot, teamSlug: team.slug, presentationVersion: 2,
+    map: slot.map, mapName: slot.mapName, layer: slot.layer, zone: slot.zone, weather: slot.weather, sides, openSlot: slot, teamSlug: team.slug, presentationVersion: 3,
   };
 }
 
 export function openSlotEventBody(fixture: GwlOpenFixture, names: Awaited<ReturnType<typeof leagueEventNames>>, now: number) {
-  const body = gwlEventBody(fixture, names, now);
+  const body = gwlEventBody(fixture, names, now, fixture.presentationVersion === 3);
   return { ...body, description: body.description.replace(`**Match:** #${fixture.number}`, "**Status:** TBD — awaiting teams") };
 }
 

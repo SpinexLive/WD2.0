@@ -49,7 +49,7 @@ async function inspect(row: Row, open: GwlOpenFixture) {
     throw new HttpError(409, "The open-slot event identity is incomplete.", "gwl_slot_unsafe");
   }
   const expected = openSlotEventBody(open, { role: row.member_role_name, voice: row.voice_channel_name, roleNames: [] }, 0);
-  const expectedDescription = open.presentationVersion === 2 ? expected.description : expected.description.replace(
+  const expectedDescription = open.presentationVersion === 2 || open.presentationVersion === 3 ? expected.description : expected.description.replace(
     "**Status:** TBD — awaiting teams", `**Open slot:** ${open.openSlot.id}\n**Status:** TBD — awaiting teams`);
   if (row.state === "scheduled" && row.scheduled_id && !row.event_id) {
     const [list, event] = await Promise.all([getScheduledLeagueEvents(), getScheduledLeagueEvent(row.scheduled_id)]);
@@ -223,17 +223,25 @@ export async function processOpenSlots(fixtures: GwlFixture[], recent: GwlFixtur
   }
   const openFixtures = slots.data.slots.map((slot) => openSlotFixture(slot, team.data, tags));
   const blocked = new Set<string>();
-  for (const row of rows) {
+  for (let row of rows) {
     const open = readOpenFixture(row.fixture);
     if (!open) throw new Error("A stored GWL open slot has invalid identity data.");
     const candidates = possibleMatches(open, fixtures);
     for (const fixture of candidates) blocked.add(fixture.number);
     const current = openFixtures.find((item) => item.openSlot.id === open.openSlot.id);
     if (current) {
+      if (row.state === "review" && row.error === missing) {
+        const state = row.event_id ? "posted" : row.scheduled_id ? "scheduled" : "pending";
+        const restored = await query("UPDATE gwl_raid_events SET state = $2, error = NULL, updated_at = now() WHERE match_number = $1 AND state = 'review' AND error = $3 RETURNING match_number",
+          [row.match_number, state, missing]);
+        if (!restored.length) continue;
+        row = { ...row, state, error: null };
+      }
       if (row.state === "cancelled") {
         await review(row, "This removed GWL slot is visible again. Review before creating another event.");
       } else if (slotFingerprint(current.openSlot) !== slotFingerprint(open.openSlot) ||
           open.presentationVersion !== current.presentationVersion ||
+          current.mapName !== open.mapName || current.zone !== open.zone ||
           current.sides.some((side, index) => side.team.tag !== open.sides[index]?.team.tag)) {
         if (row.state === "pending" || row.state === "waiting") {
           await query("UPDATE gwl_raid_events SET fixture = $2, state = 'pending', error = NULL, updated_at = now() WHERE match_number = $1 AND state = $3",
@@ -244,9 +252,6 @@ export async function processOpenSlots(fixtures: GwlFixture[], recent: GwlFixtur
             else throw error;
           }
         }
-      } else if (row.state === "review" && row.error === missing) {
-        await query("UPDATE gwl_raid_events SET state = $2, error = NULL, updated_at = now() WHERE match_number = $1 AND state = 'review' AND error = $3",
-          [row.match_number, row.event_id ? "posted" : row.scheduled_id ? "scheduled" : "pending", missing]);
       }
       continue;
     }

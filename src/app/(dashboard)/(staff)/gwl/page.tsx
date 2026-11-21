@@ -34,7 +34,7 @@ function Fixtures({ title, fixtures, raid }: { title: string; fixtures: Fixture[
           {fixtures.map((fixture) => (
             <li className="py-2 text-sm" key={fixture.number}>
               <div className="font-semibold">{fixture.sides.map((side) => side.team.tag || side.team.name || side.team.slug).join(" v ") || "Teams TBC"}</div>
-              <div className="text-stone/60">#{fixture.number} · {date(fixture.startsAt)} · {gwlMapLabel(fixture.map)} · Zone: {fixture.layer ?? "TBD"} · Weather: {gwlWeatherLabel(fixture.weather)} · {fixture.status}</div>
+              <div className="text-stone/60">#{fixture.number} · {date(fixture.startsAt)} · {fixture.mapName ?? gwlMapLabel(fixture.map)} · Zone: {fixture.zone ?? fixture.layer ?? "TBD"} · Weather: {gwlWeatherLabel(fixture.weather)} · {fixture.status}</div>
               {raid?.events.filter((event) => event.matchNumber === fixture.number).map((event) => <div key={event.matchNumber} className="text-xs text-stone/60">
                 Raid Helper: {event.state}{event.error ? ` — ${event.error}` : ""}{" "}
                 {event.eventUrl && <a className="text-blood-300 hover:underline" href={event.eventUrl} target="_blank" rel="noopener noreferrer">Open signup →</a>}
@@ -127,7 +127,7 @@ export default function GwlPage() {
           <section className="card p-4">
             <h2 className="font-bold">Open slots</h2>
             {data.slots.data.slots.length === 0 ? <p className="mt-2 text-sm text-stone/55">No open slots returned by GWL.</p> : <ul className="mt-2 divide-y divide-ink-700">{data.slots.data.slots.map((slot) => <li className="py-2 text-sm" key={slot.id}>
-              <div>{date(slot.startsAt)} · {gwlMapLabel(slot.map)} · Zone: {slot.layer ?? "TBD"} · Weather: {gwlWeatherLabel(slot.weather)} · {slot.region} · {slot.seatsFilled}/3 teams · TBD</div>
+              <div>{slot.teams?.map((team) => team.tag || team.name || team.slug).join(" v ")}{slot.teams?.length ? " v TBD · " : ""}{date(slot.startsAt)} · {slot.mapName ?? gwlMapLabel(slot.map)} · Zone: {slot.zone ?? slot.layer ?? "TBD"} · Weather: {gwlWeatherLabel(slot.weather)} · {slot.region} · {slot.seatsFilled}/3 teams · TBD</div>
               {data.raid.events.filter((event) => event.matchNumber === `slot:${slot.id}`).map((event) => <div key={event.matchNumber} className="text-xs text-stone/60">
                 Raid Helper: {event.state}{event.error ? ` — ${event.error}` : ""}{" "}
                 {event.eventUrl && <a className="text-blood-300 hover:underline" href={event.eventUrl} target="_blank" rel="noopener noreferrer">Open signup →</a>}

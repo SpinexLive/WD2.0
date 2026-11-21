@@ -90,6 +90,72 @@ describe("GWL open slots", () => {
     expect(mocks.raw).toHaveBeenCalledTimes(3);
   });
 
+  it("uses current slot tags and display names to update a previously posted event", async () => {
+      const old = { ...open, presentationVersion: 2 };
+      const oldBody = openSlotEventBody(old, names, 0);
+      const row = { match_number: open.number, fixture: old, state: "posted", scheduled_id: null, event_id: "event1",
+        event_channel_id: "thread", start_time: oldBody.date, post_at: null, temporary_role: oldBody.title,
+        member_role_name: "Member", voice_channel_name: "Briefing", error: null };
+      const event = { id: "event1", serverId: "guild", channelId: "thread", templateId: "ct34",
+        title: oldBody.title, startTime: Number(oldBody.date), description: oldBody.description, signUps: [{ id: 1, userId: "player" }] };
+      const current = { ...slot, mapName: "Ozeti", zone: "Random zone", seatsFree: 1, yours: true, private: false,
+        teams: [{ slug: "other", name: "Other", tag: "OTH" }, { slug: "remnant", name: "Remnant", tag: "RMNT" }] };
+      mocks.slots.mockResolvedValue({ stale: false, data: { slots: [current] } });
+      mocks.raw.mockResolvedValue(event);
+      mocks.update.mockImplementation(async (_id, changes) => { mocks.raw.mockResolvedValue({ ...event, ...changes }); });
+      mocks.query.mockImplementation(async (sql: string) => {
+        if (sql.startsWith("SELECT *")) return [row];
+        if (sql.includes("RETURNING match_number")) return [row];
+        return [];
+      });
+      await processOpenSlots([], [{ ...match, sides: [side("other", "OLD"), match.sides[1]!, match.sides[2]!] }]);
+      expect(mocks.update).toHaveBeenCalledWith("event1", expect.objectContaining({
+        title: "GWL | RMNT v OTH v TBD",
+        description: expect.stringContaining("**Map:** Ozeti\n**Zone:** Random zone"),
+      }));
+      expect(mocks.raw).toHaveBeenCalledTimes(3);
+  });
+
+  it("does not update an event if the slot tag changes during the fresh check", async () => {
+      const old = { ...open, presentationVersion: 2 };
+      const oldBody = openSlotEventBody(old, names, 0);
+      const row = { match_number: open.number, fixture: old, state: "posted", scheduled_id: null, event_id: "event1",
+        event_channel_id: "thread", start_time: oldBody.date, post_at: null, temporary_role: oldBody.title,
+        member_role_name: "Member", voice_channel_name: "Briefing", error: null };
+      const current = { ...slot, teams: [{ slug: "other", name: "Other", tag: "OTH" }, { slug: "remnant", name: "Remnant", tag: "RMNT" }] };
+      const changed = { ...current, teams: [{ slug: "other", name: "Other", tag: "NEW" }, current.teams[1]!] };
+      mocks.slots.mockResolvedValueOnce({ stale: false, data: { slots: [current] } })
+        .mockResolvedValueOnce({ stale: false, data: { slots: [changed] } });
+      mocks.raw.mockResolvedValue({ id: "event1", serverId: "guild", channelId: "thread", templateId: "ct34",
+        title: oldBody.title, startTime: Number(oldBody.date), description: oldBody.description, signUps: [] });
+      mocks.query.mockImplementation(async (sql: string) => sql.startsWith("SELECT *") ? [row] : []);
+      await processOpenSlots([]);
+      expect(mocks.update).not.toHaveBeenCalled();
+      expect(mocks.query).toHaveBeenCalledWith(expect.stringContaining("state = 'review'"), expect.arrayContaining([open.number]));
+  });
+
+  it("restores and updates a temporarily missing slot when it returns with a new tag", async () => {
+    const old = { ...open, presentationVersion: 2 };
+    const oldBody = openSlotEventBody(old, names, 0);
+    const row = { match_number: open.number, fixture: old, state: "review", scheduled_id: null, event_id: "event1",
+      event_channel_id: "thread", start_time: oldBody.date, post_at: null, temporary_role: oldBody.title,
+      member_role_name: "Member", voice_channel_name: "Briefing",
+      error: "GWL open slot is missing; waiting for a second fresh check before removal." };
+    const current = { ...slot, teams: [{ slug: "other", name: "Other", tag: "OTH" }, { slug: "remnant", name: "Remnant", tag: "RMNT" }] };
+    const event = { id: "event1", serverId: "guild", channelId: "thread", templateId: "ct34",
+      title: oldBody.title, startTime: Number(oldBody.date), description: oldBody.description, signUps: [] };
+    mocks.slots.mockResolvedValue({ stale: false, data: { slots: [current] } });
+    mocks.raw.mockResolvedValue(event);
+    mocks.update.mockImplementation(async (_id, changes) => { mocks.raw.mockResolvedValue({ ...event, ...changes }); });
+    mocks.query.mockImplementation(async (sql: string) => {
+      if (sql.startsWith("SELECT *")) return [row];
+      if (sql.includes("RETURNING match_number")) return [row];
+      return [];
+    });
+    await processOpenSlots([]);
+    expect(mocks.update).toHaveBeenCalledWith("event1", expect.objectContaining({ title: "GWL | RMNT v OTH v TBD" }));
+  });
+
   it("does not guess between conflicting historical team tags", async () => {
     mocks.slots.mockResolvedValue({ stale: false, data: { slots: [slot] } });
     mocks.query.mockResolvedValue([]);
