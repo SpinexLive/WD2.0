@@ -33,6 +33,13 @@ const match: GwlFixture = { number: "42", status: "scheduled", startsAt: slot.st
   map: "europe", layer: null, weather: null, sides: [side("other", "OTH"), side("remnant", "RMNT"), side("third", "THD")] };
 const names = { role: "Member", voice: "Briefing", roleNames: [] };
 const body = openSlotEventBody(open, names, 0);
+const legacyOpen = (presentationVersion: number | undefined = 3) => ({
+  ...open,
+  sides: open.sides.map((entry) => entry.team.slug.startsWith("__tbd")
+    ? { ...entry, team: { ...entry.team, tag: "TBD" } }
+    : entry),
+  presentationVersion,
+});
 
 beforeEach(() => {
   vi.resetAllMocks();
@@ -44,14 +51,17 @@ beforeEach(() => {
 });
 
 describe("GWL open slots", () => {
-  it("creates TBD payloads for one or two teams using existing scheduling settings", () => {
+  it("creates ??? payloads for one or two teams using existing scheduling settings", () => {
     const single = openSlotFixture({ ...slot, host: "remnant", joinedTeam: null, seatsFilled: 1 }, team);
-    expect(openSlotEventBody(single, names, 0).title).toBe("GWL | RMNT v TBD1 v TBD2");
+    expect(openSlotEventBody(single, names, 0).title).toBe("GWL | RMNT v ??? v ???");
+    expect(body.title).toBe("GWL | RMNT v other v ???");
     for (const fixture of [single, open]) {
       const event = openSlotEventBody(fixture, names, 0);
-      expect(event.title).toContain("TBD");
-      expect(event.description).toContain("**Status:** TBD");
+      expect(event.title).toContain("???");
+      expect(event.description).toContain("**Status:** ??? — awaiting third team");
+      expect(event.description).toContain("??? (???)");
       expect(event.description).not.toContain("**Open slot:**");
+      expect(event.description).not.toContain("TBD");
       expect(event.templateId).toBe("ct34");
       expect(Number(event.date)).toBe(Date.parse(slot.startsAt) / 1000 - 1800);
       expect(event.schedule).toBe(Date.parse(slot.startsAt) / 1000 - 12 * 86400);
@@ -66,14 +76,15 @@ describe("GWL open slots", () => {
   });
 
   it("uses unambiguous team tags from fixture history and updates a legacy event without losing signups", async () => {
-    const legacy = { ...open, presentationVersion: undefined };
-    const oldDescription = body.description.replace("**Status:** TBD — awaiting teams",
+    const legacy = legacyOpen(0);
+    const oldBody = openSlotEventBody(legacy, names, 0);
+    const oldDescription = oldBody.description.replace("**Status:** TBD — awaiting teams",
       `**Open slot:** ${slot.id}\n**Status:** TBD — awaiting teams`);
     const row = { match_number: open.number, fixture: legacy, state: "posted", scheduled_id: null, event_id: "event1",
-      event_channel_id: "thread", start_time: body.date, post_at: null, temporary_role: body.title,
+      event_channel_id: "thread", start_time: oldBody.date, post_at: null, temporary_role: oldBody.title,
       member_role_name: "Member", voice_channel_name: "Briefing", error: null };
     const event = { id: "event1", serverId: "guild", channelId: "thread", templateId: "ct34",
-      title: body.title, startTime: Number(body.date), description: oldDescription, signUps: [{ id: 1, userId: "player" }] };
+      title: oldBody.title, startTime: Number(oldBody.date), description: oldDescription, signUps: [{ id: 1, userId: "player" }] };
     mocks.slots.mockResolvedValue({ stale: false, data: { slots: [slot] } });
     mocks.raw.mockResolvedValue(event);
     mocks.update.mockImplementation(async (_id, changes) => { mocks.raw.mockResolvedValue({ ...event, ...changes }); });
@@ -84,14 +95,16 @@ describe("GWL open slots", () => {
     });
     await processOpenSlots([], [match]);
     expect(mocks.update).toHaveBeenCalledWith("event1", expect.objectContaining({
-      title: "GWL | RMNT v OTH v TBD",
-      description: expect.not.stringContaining("**Open slot:**"),
+      title: "GWL | RMNT v OTH v ???",
+      description: expect.stringContaining("**Status:** ??? — awaiting third team"),
     }));
+    expect(mocks.update.mock.calls[0]?.[1].description).not.toContain("TBD");
+    expect(mocks.update.mock.calls[0]?.[1].description).not.toContain("**Open slot:**");
     expect(mocks.raw).toHaveBeenCalledTimes(3);
   });
 
   it("uses current slot tags and display names to update a previously posted event", async () => {
-      const old = { ...open, presentationVersion: 2 };
+      const old = legacyOpen(3);
       const oldBody = openSlotEventBody(old, names, 0);
       const row = { match_number: open.number, fixture: old, state: "posted", scheduled_id: null, event_id: "event1",
         event_channel_id: "thread", start_time: oldBody.date, post_at: null, temporary_role: oldBody.title,
@@ -108,16 +121,46 @@ describe("GWL open slots", () => {
         if (sql.includes("RETURNING match_number")) return [row];
         return [];
       });
+
       await processOpenSlots([], [{ ...match, sides: [side("other", "OLD"), match.sides[1]!, match.sides[2]!] }]);
       expect(mocks.update).toHaveBeenCalledWith("event1", expect.objectContaining({
-        title: "GWL | RMNT v OTH v TBD",
+        title: "GWL | RMNT v OTH v ???",
         description: expect.stringContaining("**Map:** Ozeti\n**Zone:** Random zone"),
       }));
       expect(mocks.raw).toHaveBeenCalledTimes(3);
   });
 
+  it("updates existing scheduled TBD events to ??? in both title and description", async () => {
+    const old = legacyOpen(3);
+    const oldBody = openSlotEventBody(old, names, 0);
+    const row = { match_number: open.number, fixture: old, state: "scheduled", scheduled_id: "schedule1", event_id: null,
+      event_channel_id: null, start_time: oldBody.date, post_at: String(oldBody.schedule), temporary_role: oldBody.title,
+      member_role_name: "Member", voice_channel_name: "Briefing", error: null };
+    const entry = { id: "schedule1", channelId: "channel", title: oldBody.title, startTime: Number(oldBody.date), postTime: oldBody.schedule };
+    const event = { serverId: "guild", channelId: "schedule1", title: oldBody.title, templateId: "ct34",
+      startTime: Number(oldBody.date), postTime: oldBody.schedule, interval: "0 days", description: oldBody.description };
+    mocks.slots.mockResolvedValue({ stale: false, data: { slots: [slot] } });
+    mocks.scheduled.mockResolvedValue([entry]);
+    mocks.scheduledEvent.mockResolvedValue(event);
+    mocks.update.mockImplementation(async (_id, changes) => {
+      mocks.scheduled.mockResolvedValue([{ ...entry, title: changes.title }]);
+      mocks.scheduledEvent.mockResolvedValue({ ...event, ...changes });
+    });
+    mocks.query.mockImplementation(async (sql: string) => {
+      if (sql.startsWith("SELECT *")) return [row];
+      if (sql.includes("RETURNING match_number")) return [row];
+      return [];
+    });
+    await processOpenSlots([]);
+    expect(mocks.update).toHaveBeenCalledWith("schedule1", expect.objectContaining({
+      title: "GWL | RMNT v other v ???",
+      description: expect.stringContaining("**Status:** ??? — awaiting third team"),
+    }));
+    expect(mocks.update.mock.calls[0]?.[1].description).not.toContain("TBD");
+  });
+
   it("does not update an event if the slot tag changes during the fresh check", async () => {
-      const old = { ...open, presentationVersion: 2 };
+      const old = legacyOpen(3);
       const oldBody = openSlotEventBody(old, names, 0);
       const row = { match_number: open.number, fixture: old, state: "posted", scheduled_id: null, event_id: "event1",
         event_channel_id: "thread", start_time: oldBody.date, post_at: null, temporary_role: oldBody.title,
@@ -135,7 +178,7 @@ describe("GWL open slots", () => {
   });
 
   it("restores and updates a temporarily missing slot when it returns with a new tag", async () => {
-    const old = { ...open, presentationVersion: 2 };
+    const old = legacyOpen(3);
     const oldBody = openSlotEventBody(old, names, 0);
     const row = { match_number: open.number, fixture: old, state: "review", scheduled_id: null, event_id: "event1",
       event_channel_id: "thread", start_time: oldBody.date, post_at: null, temporary_role: oldBody.title,
@@ -153,7 +196,7 @@ describe("GWL open slots", () => {
       return [];
     });
     await processOpenSlots([]);
-    expect(mocks.update).toHaveBeenCalledWith("event1", expect.objectContaining({ title: "GWL | RMNT v OTH v TBD" }));
+    expect(mocks.update).toHaveBeenCalledWith("event1", expect.objectContaining({ title: "GWL | RMNT v OTH v ???" }));
   });
 
   it("does not guess between conflicting historical team tags", async () => {

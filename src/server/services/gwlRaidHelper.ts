@@ -5,7 +5,7 @@ import { FACTIONS, resolveFaction } from "@/lib/scouting";
 import type { GwlFixture, GwlSlot } from "./gwl";
 import { type leagueEventNames } from "./leagueRaidHelper";
 
-const clean = (value: string | null) => value?.replace(/@/g, "@\u200b").replace(/[\r\n]/g, " ").trim() || "TBD";
+const clean = (value: string | null, fallback = "TBD") => value?.replace(/@/g, "@\u200b").replace(/[\r\n]/g, " ").trim() || fallback;
 
 export function updatedGwlWeatherDescription(description: string, previous: GwlFixture, current: GwlFixture): string {
   if (description.includes("\r")) throw new HttpError(409, "Unexpected event description format.", "gwl_description_unsafe");
@@ -38,13 +38,21 @@ export function updatedGwlWeatherDescription(description: string, previous: GwlF
   return lines.join("\n");
 }
 
-export function gwlEventBody(fixture: GwlFixture, names: Awaited<ReturnType<typeof leagueEventNames>>, now: number, useDisplayNames = true) {
+export function gwlEventBody(
+  fixture: GwlFixture,
+  names: Awaited<ReturnType<typeof leagueEventNames>>,
+  now: number,
+  useDisplayNames = true,
+  unknownLabel = "TBD",
+) {
   const sides = fixture.sides.map((side) => ({ ...side, tag: side.team.tag?.trim() ?? "" }));
   const ours = sides.filter((side) => side.tag.toUpperCase() === "RMNT");
   const opponents = sides.filter((side) => side.tag.toUpperCase() !== "RMNT");
-  const tags = sides.map((side) => side.tag.toUpperCase());
+  const isOpenSlot = "openSlot" in fixture;
+  const tags = sides.filter((side) => !(isOpenSlot && side.team.slug.startsWith("__tbd"))).map((side) => side.tag.toUpperCase());
   if (fixture.status.trim().toUpperCase() !== "SCHEDULED" || ours.length !== 1 || !opponents.length ||
-      sides.some((side) => !/^[A-Za-z0-9_-]{1,30}$/.test(side.tag)) || new Set(tags).size !== tags.length) {
+      sides.some((side) => !(isOpenSlot && side.team.slug.startsWith("__tbd") && side.tag === "???") &&
+        !/^[A-Za-z0-9_-]{1,30}$/.test(side.tag)) || new Set(tags).size !== tags.length) {
     throw new HttpError(409, "The GWL fixture needs one RMNT team and unique, valid team tags before creating an event.", "gwl_fixture_incomplete");
   }
 
@@ -62,7 +70,8 @@ export function gwlEventBody(fixture: GwlFixture, names: Awaited<ReturnType<type
   const postAt = matchTime - 12 * 24 * 60 * 60;
   const lines = [...opponents, ...ours].map((side) => {
     const faction = resolveFaction(side.faction);
-    return faction ? `<:${faction}:${FACTIONS[faction].emojiId}> ${side.tag}` : `${side.tag} (${clean(side.faction)})`;
+    const tag = side.team.slug.startsWith("__tbd") && unknownLabel !== "TBD" ? unknownLabel : side.tag;
+    return faction ? `<:${faction}:${FACTIONS[faction].emojiId}> ${tag}` : `${tag} (${clean(side.faction, unknownLabel)})`;
   });
   return {
     leaderId: "839225558806167582",
@@ -77,8 +86,8 @@ export function gwlEventBody(fixture: GwlFixture, names: Awaited<ReturnType<type
       `**Match Start:** <t:${matchTime}:F>`,
       "", "**Competition:** GWL",
       `**Match:** #${clean(fixture.number)}`,
-      "", `**Map:** ${clean(useDisplayNames ? fixture.mapName ?? gwlMapLabel(fixture.map) : gwlMapLabel(fixture.map))}`,
-      `**Zone:** ${clean(useDisplayNames ? fixture.zone ?? fixture.layer : fixture.layer)}`,
+      "", `**Map:** ${clean(useDisplayNames ? fixture.mapName ?? gwlMapLabel(fixture.map) : gwlMapLabel(fixture.map), unknownLabel)}`,
+      `**Zone:** ${clean(useDisplayNames ? fixture.zone ?? fixture.layer : fixture.layer, unknownLabel)}`,
       `**Weather:** ${clean(gwlWeatherLabel(fixture.weather))}`,
       "", ...lines,
     ].join("\n"),
@@ -112,18 +121,27 @@ export function openSlotFixture(slot: GwlSlot, team: { slug: string; tag: string
     faction: null, points: null, score: null, placement: null, eloDelta: null,
   }));
   for (let index = 0; index < 3 - teams.length; index++) {
-    const tag = teams.length === 1 ? `TBD${index + 1}` : "TBD";
+    const tag = "???";
     sides.push({ team: { slug: `__tbd${index}__`, tag, name: null }, faction: null, points: null, score: null, placement: null, eloDelta: null });
   }
   return {
     number: `slot:${slot.id}`, status: "scheduled", startsAt: slot.startsAt, region: slot.region,
-    map: slot.map, mapName: slot.mapName, layer: slot.layer, zone: slot.zone, weather: slot.weather, sides, openSlot: slot, teamSlug: team.slug, presentationVersion: 3,
+    map: slot.map, mapName: slot.mapName, layer: slot.layer, zone: slot.zone, weather: slot.weather, sides, openSlot: slot, teamSlug: team.slug, presentationVersion: 4,
   };
 }
 
 export function openSlotEventBody(fixture: GwlOpenFixture, names: Awaited<ReturnType<typeof leagueEventNames>>, now: number) {
-  const body = gwlEventBody(fixture, names, now, fixture.presentationVersion === 3);
-  return { ...body, description: body.description.replace(`**Match:** #${fixture.number}`, "**Status:** TBD — awaiting teams") };
+  const modern = (fixture.presentationVersion ?? 0) >= 3;
+  const legacy = (fixture.presentationVersion ?? 0) < 4;
+  const unknownLabel = legacy ? "TBD" : "???";
+  const body = gwlEventBody(fixture, names, now, modern, unknownLabel);
+  return {
+    ...body,
+    description: body.description.replace(
+      `**Match:** #${fixture.number}`,
+      legacy ? "**Status:** TBD — awaiting teams" : "**Status:** ??? — awaiting third team",
+    ),
+  };
 }
 
 export function matchesOpenSlot(slot: GwlOpenFixture, fixture: GwlFixture): boolean {
