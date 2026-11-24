@@ -6,9 +6,10 @@ import { HttpError, ProviderError } from "@/lib/http";
 import { getGwlFixtures, getGwlSlots, getGwlTeam, gwlSlotSchema, type GwlFixture } from "./gwl";
 import { gwlEventBody, matchesOpenSlot, openSlotEventBody, openSlotFixture, slotFingerprint, type GwlOpenFixture } from "./gwlRaidHelper";
 import { deleteLeagueRaidEvent, getRawLeagueEvent, getScheduledLeagueEvent,
-  getScheduledLeagueEvents, isLeagueEventChannel, LEAGUE_EVENT_CHANNEL, updateLeagueEvent } from "./leagueRaidHelper";
+  getScheduledLeagueEvents, isLeagueEventChannel, LEAGUE_EVENT_CHANNEL, prepareLeagueRoleRename,
+  otherLeagueSettingsUnchanged, renameLeagueRole, updateLeagueEvent, verifyLeagueRoleAbsent, verifyLeagueRoleRename } from "./leagueRaidHelper";
 
-type Row = {
+export type Row = {
   match_number: string; fixture: GwlFixture; state: string; scheduled_id: string | null;
   event_id: string | null; event_channel_id: string | null; start_time: string | null; post_at: string | null;
   temporary_role: string | null; member_role_name: string | null; voice_channel_name: string | null;
@@ -43,7 +44,7 @@ async function review(row: Row, message: string) {
     [row.match_number, message, row.state]);
 }
 
-async function inspect(row: Row, open: GwlOpenFixture) {
+export async function inspectOpenEvent(row: Row, open: GwlOpenFixture) {
   if (!row.temporary_role || !row.start_time || !row.member_role_name || !row.voice_channel_name ||
       Number(row.start_time) !== Math.floor(Date.parse(open.startsAt) / 1000) - 1800) {
     throw new HttpError(409, "The open-slot event identity is incomplete.", "gwl_slot_unsafe");
@@ -62,7 +63,8 @@ async function inspect(row: Row, open: GwlOpenFixture) {
         event.description !== expectedDescription) {
       throw new HttpError(409, "The scheduled open-slot event could not be verified.", "gwl_slot_unsafe");
     }
-    return { id: row.scheduled_id, scheduled: true, description: event.description, signups: null };
+    return { id: row.scheduled_id, scheduled: true, description: event.description, signups: null,
+      roleSetting: event.advancedSettings, roleId: event.temporaryRole };
   }
   if (row.state === "posted" && row.event_id && row.event_channel_id) {
     const event = await getRawLeagueEvent(row.event_id);
@@ -73,7 +75,8 @@ async function inspect(row: Row, open: GwlOpenFixture) {
         event.description !== expectedDescription || !signups.success) {
       throw new HttpError(409, "The posted open-slot event or its signups could not be verified.", "gwl_slot_unsafe");
     }
-    return { id: row.event_id, scheduled: false, description: event.description, signups: signups.data };
+    return { id: row.event_id, scheduled: false, description: event.description, signups: signups.data,
+      roleSetting: event.advancedSettings, roleId: event.temporaryRole };
   }
   throw new HttpError(409, "The open-slot event is not in a safely editable state.", "gwl_slot_unsafe");
 }
@@ -91,7 +94,7 @@ async function updateOpenEvent(row: Row, open: GwlOpenFixture, next: GwlFixture,
   if (!isSlot && (await query("SELECT match_number FROM gwl_raid_events WHERE match_number = $1", [next.number])).length) {
     throw new HttpError(409, "A GWL event record already exists for this match; review both records.", "gwl_slot_unsafe");
   }
-  const old = await inspect(row, open);
+  const old = await inspectOpenEvent(row, open);
   const current = await freshMatches(open);
   if (isSlot) {
     const slot = current.slots.find((item) => item.id === open.openSlot.id);
@@ -105,7 +108,7 @@ async function updateOpenEvent(row: Row, open: GwlOpenFixture, next: GwlFixture,
       throw new HttpError(409, "The GWL match could not be uniquely verified.", "gwl_slot_unsafe");
     }
   }
-  const again = await inspect(row, open);
+  const again = await inspectOpenEvent(row, open);
   if (again.id !== old.id || again.description !== old.description ||
       JSON.stringify(again.signups) !== JSON.stringify(old.signups)) {
     throw new HttpError(409, "The event or signups changed during the update checks.", "gwl_slot_unsafe");
@@ -113,6 +116,38 @@ async function updateOpenEvent(row: Row, open: GwlOpenFixture, next: GwlFixture,
   const names = { role: row.member_role_name!, voice: row.voice_channel_name!, roleNames: [] };
   const body = isSlot ? openSlotEventBody(next as GwlOpenFixture, names, Math.floor(Date.now() / 1000))
     : gwlEventBody(next, names, Math.floor(Date.now() / 1000));
+  const titleChanged = row.temporary_role !== body.title;
+  const oldSetting = z.object({ temp_role: z.string().startsWith("GWL | RMNT v ") }).safeParse(old.roleSetting);
+  if (titleChanged && !oldSetting.success) {
+    throw new HttpError(409, "The existing temporary role setting could not be verified.", "gwl_slot_unsafe");
+  }
+  const oldRoleName = oldSetting.success ? oldSetting.data.temp_role : row.temporary_role!;
+  const roleId = titleChanged
+    ? await prepareLeagueRoleRename(old.id, oldRoleName, body.title, old.scheduled, row.temporary_role!)
+    : null;
+  if (titleChanged) {
+    const latest = await freshMatches(open);
+    if (isSlot) {
+      const slot = latest.slots.find((item) => item.id === open.openSlot.id);
+      if (!slot || slotFingerprint(slot) !== slotFingerprint((next as GwlOpenFixture).openSlot)) {
+        throw new HttpError(409, "The GWL slot changed during the role update checks.", "gwl_slot_unsafe");
+      }
+    } else {
+      const candidates = possibleMatches(open, latest.fixtures);
+      if (latest.slots.some((slot) => slot.id === open.openSlot.id) || candidates.length !== 1 ||
+          matchFingerprint(candidates[0]!) !== matchFingerprint(next) || !matchesOpenSlot(open, candidates[0]!)) {
+        throw new HttpError(409, "The GWL match changed during the role update checks.", "gwl_slot_unsafe");
+      }
+    }
+    const finalCheck = await inspectOpenEvent(row, open);
+    if (finalCheck.id !== old.id || finalCheck.description !== old.description ||
+        JSON.stringify(finalCheck.signups) !== JSON.stringify(old.signups) ||
+        !z.object({ temp_role: z.literal(oldRoleName) }).safeParse(finalCheck.roleSetting).success ||
+        !otherLeagueSettingsUnchanged(old.roleSetting, finalCheck.roleSetting) ||
+        (roleId === null ? finalCheck.roleId != null : finalCheck.roleId !== roleId)) {
+      throw new HttpError(409, "The event or signups changed during the role update checks.", "gwl_slot_unsafe");
+    }
+  }
   const claimed = await independentQuery(
     `UPDATE gwl_raid_events SET state = 'uncertain', error = $3, updated_at = now()
      WHERE match_number = $1 AND state = $2 AND fixture = $4::jsonb RETURNING match_number`,
@@ -121,7 +156,11 @@ async function updateOpenEvent(row: Row, open: GwlOpenFixture, next: GwlFixture,
   if (!claimed.length) return false;
   await audit(actor, "gwl.slot_update_started", "gwl_slot", open.openSlot.id, { eventId: old.id });
   try {
-    await updateLeagueEvent(old.id, { title: body.title, description: body.description });
+    if (roleId) await renameLeagueRole(roleId, oldRoleName, body.title);
+    await updateLeagueEvent(old.id, { title: body.title, description: body.description,
+      ...(titleChanged ? { advancedSettings: { temp_role: body.title } } : {}) });
+    if (roleId) await verifyLeagueRoleRename(roleId, oldRoleName, body.title);
+    else if (titleChanged) await verifyLeagueRoleAbsent(oldRoleName, body.title);
     if (old.scheduled) {
       const [entry, event] = await Promise.all([getScheduledLeagueEvents(), getScheduledLeagueEvent(old.id)]);
       const saved = entry.find((item) => item.id === old.id);
@@ -129,7 +168,9 @@ async function updateOpenEvent(row: Row, open: GwlOpenFixture, next: GwlFixture,
           saved.startTime !== Number(row.start_time) || saved.postTime !== Number(row.post_at) ||
           event.serverId !== env().DISCORD_GUILD_ID || event.channelId !== old.id || event.interval !== "0 days" ||
           event.templateId !== "ct34" || event.postTime !== Number(row.post_at) ||
-          event.title !== body.title || event.description !== body.description || event.startTime !== Number(row.start_time)) {
+          event.title !== body.title || event.description !== body.description || event.startTime !== Number(row.start_time) ||
+          (titleChanged && (!z.object({ temp_role: z.literal(body.title) }).safeParse(event.advancedSettings).success ||
+            !otherLeagueSettingsUnchanged(old.roleSetting, event.advancedSettings)))) {
         throw new Error("The updated schedule could not be verified.");
       }
     } else {
@@ -138,6 +179,9 @@ async function updateOpenEvent(row: Row, open: GwlOpenFixture, next: GwlFixture,
       if (event.id !== old.id || event.serverId !== env().DISCORD_GUILD_ID || event.channelId !== row.event_channel_id ||
           event.templateId !== "ct34" || event.startTime !== Number(row.start_time) || event.title !== body.title ||
           event.description !== body.description || !signups.success || !old.signups ||
+          (titleChanged && (!z.object({ temp_role: z.literal(body.title) }).safeParse(event.advancedSettings).success ||
+            !otherLeagueSettingsUnchanged(old.roleSetting, event.advancedSettings) ||
+            (roleId === null ? event.temporaryRole != null || signups.data.length !== 0 : event.temporaryRole !== roleId))) ||
           old.signups.some((signup) => !signups.data.some((item) => item.id === signup.id && item.userId === signup.userId))) {
         throw new Error("The updated event or its existing signups could not be verified.");
       }
@@ -158,10 +202,10 @@ async function updateOpenEvent(row: Row, open: GwlOpenFixture, next: GwlFixture,
 }
 
 async function deleteOpenEvent(row: Row, open: GwlOpenFixture) {
-  const old = await inspect(row, open);
+  const old = await inspectOpenEvent(row, open);
   const fresh = await freshMatches(open);
   if (fresh.slots.some((slot) => slot.id === open.openSlot.id) || possibleMatches(open, fresh.fixtures).length) return;
-  const again = await inspect(row, open);
+  const again = await inspectOpenEvent(row, open);
   if (again.id !== old.id || again.description !== old.description || JSON.stringify(again.signups) !== JSON.stringify(old.signups)) {
     throw new HttpError(409, "The event changed during deletion checks.", "gwl_slot_unsafe");
   }

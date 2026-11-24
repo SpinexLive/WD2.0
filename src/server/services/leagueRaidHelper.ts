@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { isDeepStrictEqual } from "node:util";
 import { env } from "@/lib/env";
 import { HttpError, requestJson } from "@/lib/http";
 import type { gwlEventBody } from "./gwlRaidHelper";
@@ -115,12 +116,100 @@ export async function getScheduledLeagueEvent(eventId: string) {
   }).passthrough().parse(data);
 }
 
-export async function updateLeagueEvent(eventId: string, changes: { title: string; description: string }) {
+export async function updateLeagueEvent(eventId: string, changes: { title: string; description: string; advancedSettings?: { temp_role: string } }) {
   if (!/^[\w-]{1,64}$/.test(eventId)) throw new HttpError(400, "Invalid Raid Helper event ID.", "invalid_event");
   await requestJson({
     provider: "raid-helper", method: "PATCH", url: raidUrl(`/api/v4/events/${encodeURIComponent(eventId)}`),
     headers: raidHeaders(), body: changes, retries: 0, timeoutMs: 15000,
   });
+}
+
+export async function prepareLeagueRoleRename(
+  eventId: string, oldName: string, newName: string, scheduled: boolean, expectedTitle = oldName,
+): Promise<string | null> {
+  const [event, roles, posted, schedules] = await Promise.all([
+    scheduled ? getScheduledLeagueEvent(eventId) : getRawLeagueEvent(eventId),
+    discordData("roles").then((data) => z.array(discordName.extend({ managed: z.boolean() })).parse(data)),
+    getPostedLeagueEvents(), getScheduledLeagueEvents(),
+  ]);
+  const settings = z.object({ temp_role: z.string() }).safeParse(event.advancedSettings);
+  const roleId = z.string().regex(/^\d{15,22}$/).optional().safeParse(event.temporaryRole ?? undefined);
+  const oldRoles = roles.filter((role) => role.name.toLowerCase() === oldName.toLowerCase());
+  const signups = z.array(z.unknown()).safeParse(event.signUps);
+  const noPostedRole = !scheduled && roleId.success && roleId.data === undefined &&
+    oldRoles.length === 0 && signups.success && signups.data.length === 0;
+  if (event.serverId !== env().DISCORD_GUILD_ID || event.title !== expectedTitle ||
+      !settings.success || settings.data.temp_role !== oldName || !roleId.success ||
+      roles.some((role) => role.name.toLowerCase() === newName.toLowerCase()) ||
+      (scheduled ? oldRoles.length !== 0 || roleId.data !== undefined
+        : !noPostedRole && (oldRoles.length !== 1 || oldRoles[0]?.name !== oldName || oldRoles[0]?.id !== roleId.data || oldRoles[0]?.managed))) {
+    throw new HttpError(409, "The temporary role or its new name could not be verified.", "gwl_slot_unsafe");
+  }
+  const others = [...posted, ...schedules].filter((item) => item.id !== eventId);
+  for (const other of others) {
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    const data = await (schedules.some((item) => item.id === other.id)
+      ? getScheduledLeagueEvent(other.id) : getRawLeagueEvent(other.id));
+    const otherSettings = z.object({ temp_role: z.string().nullable().optional() }).safeParse(data.advancedSettings);
+    if (!otherSettings.success || otherSettings.data.temp_role?.toLowerCase() === oldName.toLowerCase() ||
+        otherSettings.data.temp_role?.toLowerCase() === newName.toLowerCase() ||
+        (roleId.data && data.temporaryRole === roleId.data)) {
+      throw new HttpError(409, "Another Raid Helper event may use the temporary role.", "gwl_slot_unsafe");
+    }
+  }
+  return roleId.data ?? null;
+}
+
+export function otherLeagueSettingsUnchanged(before: unknown, after: unknown): boolean {
+  const schema = z.record(z.unknown());
+  const previous = schema.safeParse(before);
+  const current = schema.safeParse(after);
+  if (!previous.success || !current.success) return false;
+  const { temp_role: _oldRole, ...oldSettings } = previous.data;
+  const { temp_role: _newRole, ...newSettings } = current.data;
+  return isDeepStrictEqual(oldSettings, newSettings);
+}
+
+export async function updateLeagueTempRole(eventId: string, name: string) {
+  if (!/^[\w-]{1,64}$/.test(eventId)) throw new HttpError(400, "Invalid Raid Helper event ID.", "invalid_event");
+  await requestJson({
+    provider: "raid-helper", method: "PATCH", url: raidUrl(`/api/v4/events/${encodeURIComponent(eventId)}`),
+    headers: raidHeaders(), body: { advancedSettings: { temp_role: name } }, retries: 0, timeoutMs: 15000,
+  });
+}
+
+export async function renameLeagueRole(roleId: string, oldName: string, newName: string) {
+  const roles = z.array(discordName.extend({ managed: z.boolean() })).parse(await discordData("roles"));
+  if (roles.filter((role) => role.name.toLowerCase() === oldName.toLowerCase()).length !== 1 ||
+      !roles.some((role) => role.id === roleId && role.name === oldName && !role.managed) ||
+      roles.some((role) => role.name.toLowerCase() === newName.toLowerCase())) {
+    throw new Error("The temporary role changed during the update checks.");
+  }
+  const e = env();
+  const { data } = await requestJson({
+    provider: "discord", method: "PATCH",
+    url: `https://discord.com/api/v10/guilds/${e.DISCORD_GUILD_ID}/roles/${encodeURIComponent(roleId)}`,
+    headers: { Authorization: `Bot ${e.DISCORD_BOT_TOKEN}`, "X-Audit-Log-Reason": "Synchronize GWL event role" },
+    body: { name: newName }, retries: 0,
+  });
+  const role = discordName.parse(data);
+  if (role.id !== roleId || role.name !== newName) throw new Error("The Discord role rename could not be confirmed.");
+}
+
+export async function verifyLeagueRoleRename(roleId: string, oldName: string, newName: string) {
+  const roles = z.array(discordName).parse(await discordData("roles"));
+  if (roles.some((role) => role.name.toLowerCase() === oldName.toLowerCase()) ||
+      roles.filter((role) => role.name.toLowerCase() === newName.toLowerCase()).length !== 1 ||
+      !roles.some((role) => role.id === roleId && role.name === newName)) {
+    throw new Error("The updated Discord role could not be verified.");
+  }
+}
+
+export async function verifyLeagueRoleAbsent(oldName: string, newName: string) {
+  const roles = z.array(discordName).parse(await discordData("roles"));
+  if (roles.some((role) => [oldName.toLowerCase(), newName.toLowerCase()].includes(role.name.toLowerCase()))) {
+    throw new Error("An unexpected Discord role appeared during the update.");
+  }
 }
 
 export async function updateLeagueEventDescription(eventId: string, description: string) {

@@ -15,6 +15,7 @@ vi.mock("@/server/services/gwlOpenSlots", async (original) => {
   const actual = await original<typeof import("@/server/services/gwlOpenSlots")>();
   return { ...actual, processOpenSlots: vi.fn().mockResolvedValue(new Set()) };
 });
+vi.mock("@/server/services/gwlRoleSync", () => ({ syncGwlEventRole: vi.fn().mockResolvedValue(undefined) }));
 vi.mock("@/server/services/leagueRaidHelper", async (original) => {
   const actual = await original<typeof import("@/server/services/leagueRaidHelper")>();
   return { ...actual, leagueEventNames: mocks.names, getPostedLeagueEvents: mocks.posted,

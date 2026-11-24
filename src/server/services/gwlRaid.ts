@@ -6,6 +6,7 @@ import { z } from "zod";
 import { getGwlFixtures, getGwlSlots, type GwlFixture } from "./gwl";
 import { gwlEventBody, openSlotEventBody, slotFingerprint, updatedGwlWeatherDescription } from "./gwlRaidHelper";
 import { processOpenSlots, readOpenFixture } from "./gwlOpenSlots";
+import { syncGwlEventRole } from "./gwlRoleSync";
 import { createGwlRaidEvent, deleteLeagueRaidEvent, getPostedLeagueEvents, getRawLeagueEvent, getScheduledLeagueEvents, isLeagueEventChannel, updateLeagueEventDescription, leagueEventNames, LEAGUE_EVENT_CHANNEL } from "./leagueRaidHelper";
 
 type EventRow = {
@@ -278,6 +279,27 @@ async function runTick() {
           [row.match_number, `${error.message} Review the event and its signups in Raid Helper.`]);
       } else throw error;
     }
+  }
+  const roleRows = await query<EventRow & { updated_at: Date }>("SELECT * FROM gwl_raid_events");
+  for (const row of roleRows) {
+    if (!["posted", "scheduled"].includes(row.state)) continue;
+    if (!readOpenFixture(row.fixture)) {
+      const current = snapshot.data.upcoming.find((fixture) => fixture.number === row.match_number);
+      if (!current || relevant(row.fixture) !== relevant(current)) continue;
+    }
+    await syncGwlEventRole(row, async () => {
+      const open = readOpenFixture(row.fixture);
+      if (open) {
+        const latest = await getGwlSlots(true);
+        if (latest.stale) throw new Error(latest.error ?? "GWL slots are stale.");
+        const slot = latest.data.slots.find((item) => item.id === open.openSlot.id);
+        return !!slot && slotFingerprint(slot) === slotFingerprint(open.openSlot);
+      }
+      const latest = await getGwlFixtures(true);
+      if (latest.stale) throw new Error(latest.error ?? "GWL fixtures are stale.");
+      const current = latest.data.upcoming.find((fixture) => fixture.number === row.match_number);
+      return !!current && relevant(row.fixture) === relevant(current);
+    });
   }
   const [candidate] = await query<EventRow>(
     "SELECT * FROM gwl_raid_events WHERE state = 'pending' AND NOT (match_number = ANY($1::text[])) ORDER BY updated_at LIMIT 1",

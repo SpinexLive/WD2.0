@@ -4,6 +4,7 @@ import type { GwlFixture, GwlSlot } from "@/server/services/gwl";
 const mocks = vi.hoisted(() => ({
   query: vi.fn(), slots: vi.fn(), fixtures: vi.fn(), team: vi.fn(), audit: vi.fn(),
   raw: vi.fn(), scheduled: vi.fn(), scheduledEvent: vi.fn(), update: vi.fn(), remove: vi.fn(), channel: vi.fn(),
+  prepareRole: vi.fn(), renameRole: vi.fn(), verifyRole: vi.fn(), verifyAbsent: vi.fn(),
 }));
 vi.mock("@/lib/env", () => ({ env: () => ({ APP_URL: "https://dashboard.test", DISCORD_GUILD_ID: "guild" }) }));
 vi.mock("@/lib/db", () => ({ query: mocks.query, independentQuery: mocks.query }));
@@ -16,6 +17,9 @@ vi.mock("@/server/services/leagueRaidHelper", () => ({
   LEAGUE_EVENT_CHANNEL: "channel", getRawLeagueEvent: mocks.raw,
   getScheduledLeagueEvents: mocks.scheduled, getScheduledLeagueEvent: mocks.scheduledEvent,
   updateLeagueEvent: mocks.update, deleteLeagueRaidEvent: mocks.remove,
+  prepareLeagueRoleRename: mocks.prepareRole, renameLeagueRole: mocks.renameRole,
+  verifyLeagueRoleRename: mocks.verifyRole, verifyLeagueRoleAbsent: mocks.verifyAbsent,
+  otherLeagueSettingsUnchanged: () => true,
   isLeagueEventChannel: mocks.channel,
 }));
 
@@ -44,6 +48,10 @@ const legacyOpen = (presentationVersion: number | undefined = 3) => ({
 beforeEach(() => {
   vi.resetAllMocks();
   mocks.audit.mockResolvedValue(undefined);
+  mocks.prepareRole.mockImplementation(async (_id, _old, _next, scheduled) => scheduled ? null : "role");
+  mocks.renameRole.mockResolvedValue(undefined);
+  mocks.verifyRole.mockResolvedValue(undefined);
+  mocks.verifyAbsent.mockResolvedValue(undefined);
   mocks.channel.mockResolvedValue(true);
   mocks.team.mockResolvedValue({ stale: false, data: team });
   mocks.slots.mockResolvedValue({ stale: false, data: { slots: [] } });
@@ -84,10 +92,11 @@ describe("GWL open slots", () => {
       event_channel_id: "thread", start_time: oldBody.date, post_at: null, temporary_role: oldBody.title,
       member_role_name: "Member", voice_channel_name: "Briefing", error: null };
     const event = { id: "event1", serverId: "guild", channelId: "thread", templateId: "ct34",
-      title: oldBody.title, startTime: Number(oldBody.date), description: oldDescription, signUps: [{ id: 1, userId: "player" }] };
+      title: oldBody.title, startTime: Number(oldBody.date), description: oldDescription, signUps: [{ id: 1, userId: "player" }],
+      advancedSettings: { temp_role: oldBody.title }, temporaryRole: "role" };
     mocks.slots.mockResolvedValue({ stale: false, data: { slots: [slot] } });
     mocks.raw.mockResolvedValue(event);
-    mocks.update.mockImplementation(async (_id, changes) => { mocks.raw.mockResolvedValue({ ...event, ...changes }); });
+    mocks.update.mockImplementation(async (_id, changes) => { mocks.raw.mockResolvedValue({ ...event, ...changes, temporaryRole: "role" }); });
     mocks.query.mockImplementation(async (sql: string) => {
       if (sql.startsWith("SELECT *")) return [row];
       if (sql.includes("RETURNING match_number")) return [row];
@@ -100,7 +109,7 @@ describe("GWL open slots", () => {
     }));
     expect(mocks.update.mock.calls[0]?.[1].description).not.toContain("TBD");
     expect(mocks.update.mock.calls[0]?.[1].description).not.toContain("**Open slot:**");
-    expect(mocks.raw).toHaveBeenCalledTimes(3);
+    expect(mocks.raw).toHaveBeenCalledTimes(4);
   });
 
   it("uses current slot tags and display names to update a previously posted event", async () => {
@@ -110,12 +119,13 @@ describe("GWL open slots", () => {
         event_channel_id: "thread", start_time: oldBody.date, post_at: null, temporary_role: oldBody.title,
         member_role_name: "Member", voice_channel_name: "Briefing", error: null };
       const event = { id: "event1", serverId: "guild", channelId: "thread", templateId: "ct34",
-        title: oldBody.title, startTime: Number(oldBody.date), description: oldBody.description, signUps: [{ id: 1, userId: "player" }] };
+        title: oldBody.title, startTime: Number(oldBody.date), description: oldBody.description, signUps: [{ id: 1, userId: "player" }],
+        advancedSettings: { temp_role: oldBody.title }, temporaryRole: "role" };
       const current = { ...slot, mapName: "Ozeti", zone: "Random zone", seatsFree: 1, yours: true, private: false,
         teams: [{ slug: "other", name: "Other", tag: "OTH" }, { slug: "remnant", name: "Remnant", tag: "RMNT" }] };
       mocks.slots.mockResolvedValue({ stale: false, data: { slots: [current] } });
       mocks.raw.mockResolvedValue(event);
-      mocks.update.mockImplementation(async (_id, changes) => { mocks.raw.mockResolvedValue({ ...event, ...changes }); });
+      mocks.update.mockImplementation(async (_id, changes) => { mocks.raw.mockResolvedValue({ ...event, ...changes, temporaryRole: "role" }); });
       mocks.query.mockImplementation(async (sql: string) => {
         if (sql.startsWith("SELECT *")) return [row];
         if (sql.includes("RETURNING match_number")) return [row];
@@ -127,7 +137,7 @@ describe("GWL open slots", () => {
         title: "GWL | RMNT v OTH v ???",
         description: expect.stringContaining("**Map:** Ozeti\n**Zone:** Random zone"),
       }));
-      expect(mocks.raw).toHaveBeenCalledTimes(3);
+      expect(mocks.raw).toHaveBeenCalledTimes(4);
   });
 
   it("updates existing scheduled TBD events to ??? in both title and description", async () => {
@@ -138,7 +148,8 @@ describe("GWL open slots", () => {
       member_role_name: "Member", voice_channel_name: "Briefing", error: null };
     const entry = { id: "schedule1", channelId: "channel", title: oldBody.title, startTime: Number(oldBody.date), postTime: oldBody.schedule };
     const event = { serverId: "guild", channelId: "schedule1", title: oldBody.title, templateId: "ct34",
-      startTime: Number(oldBody.date), postTime: oldBody.schedule, interval: "0 days", description: oldBody.description };
+      startTime: Number(oldBody.date), postTime: oldBody.schedule, interval: "0 days", description: oldBody.description,
+      advancedSettings: { temp_role: oldBody.title } };
     mocks.slots.mockResolvedValue({ stale: false, data: { slots: [slot] } });
     mocks.scheduled.mockResolvedValue([entry]);
     mocks.scheduledEvent.mockResolvedValue(event);
@@ -186,10 +197,11 @@ describe("GWL open slots", () => {
       error: "GWL open slot is missing; waiting for a second fresh check before removal." };
     const current = { ...slot, teams: [{ slug: "other", name: "Other", tag: "OTH" }, { slug: "remnant", name: "Remnant", tag: "RMNT" }] };
     const event = { id: "event1", serverId: "guild", channelId: "thread", templateId: "ct34",
-      title: oldBody.title, startTime: Number(oldBody.date), description: oldBody.description, signUps: [] };
+      title: oldBody.title, startTime: Number(oldBody.date), description: oldBody.description, signUps: [],
+      advancedSettings: { temp_role: oldBody.title }, temporaryRole: "role" };
     mocks.slots.mockResolvedValue({ stale: false, data: { slots: [current] } });
     mocks.raw.mockResolvedValue(event);
-    mocks.update.mockImplementation(async (_id, changes) => { mocks.raw.mockResolvedValue({ ...event, ...changes }); });
+    mocks.update.mockImplementation(async (_id, changes) => { mocks.raw.mockResolvedValue({ ...event, ...changes, temporaryRole: "role" }); });
     mocks.query.mockImplementation(async (sql: string) => {
       if (sql.startsWith("SELECT *")) return [row];
       if (sql.includes("RETURNING match_number")) return [row];
@@ -237,14 +249,16 @@ describe("GWL open slots", () => {
   });
 
   it("updates the existing posted event for a unique match and verifies signups", async () => {
+    const previousRoleName = body.title.replace("???", "TBD");
     const row = { match_number: open.number, fixture: open, state: "posted", scheduled_id: null, event_id: "event1",
       event_channel_id: "thread", start_time: body.date, post_at: null, temporary_role: body.title,
       member_role_name: "Member", voice_channel_name: "Briefing", error: null };
     const event = { id: "event1", serverId: "guild", channelId: "thread", templateId: "ct34",
-      title: body.title, startTime: Number(body.date), description: body.description, signUps: [{ id: 1, userId: "player" }] };
+      title: body.title, startTime: Number(body.date), description: body.description, signUps: [{ id: 1, userId: "player" }],
+      advancedSettings: { temp_role: previousRoleName }, temporaryRole: "role" };
     mocks.fixtures.mockResolvedValue({ stale: false, data: { upcoming: [match], recent: [] } });
     mocks.raw.mockResolvedValue(event);
-    mocks.update.mockImplementation(async (_id, changes) => { mocks.raw.mockResolvedValue({ ...event, ...changes }); });
+    mocks.update.mockImplementation(async (_id, changes) => { mocks.raw.mockResolvedValue({ ...event, ...changes, temporaryRole: "role" }); });
     mocks.query.mockImplementation(async (sql: string) => {
       if (sql.startsWith("SELECT *")) return [row];
       if (sql.startsWith("SELECT match_number")) return [];
@@ -254,7 +268,12 @@ describe("GWL open slots", () => {
     expect(await processOpenSlots([match])).toEqual(new Set());
     expect(mocks.update).toHaveBeenCalledOnce();
     expect(mocks.update).toHaveBeenCalledWith("event1", expect.objectContaining({ title: "GWL | RMNT v OTH v THD" }));
-    expect(mocks.raw).toHaveBeenCalledTimes(3);
+    expect(mocks.raw).toHaveBeenCalledTimes(4);
+    expect(mocks.prepareRole).toHaveBeenCalledWith("event1", previousRoleName, "GWL | RMNT v OTH v THD", false, body.title);
+    expect(mocks.renameRole).toHaveBeenCalledWith("role", previousRoleName, "GWL | RMNT v OTH v THD");
+    expect(mocks.update).toHaveBeenCalledWith("event1", expect.objectContaining({
+      advancedSettings: { temp_role: "GWL | RMNT v OTH v THD" },
+    }));
   });
 
   it("leaves an unconfirmed update uncertain and does not retry it", async () => {
@@ -263,7 +282,8 @@ describe("GWL open slots", () => {
       member_role_name: "Member", voice_channel_name: "Briefing", error: null as string | null };
     mocks.fixtures.mockResolvedValue({ stale: false, data: { upcoming: [match], recent: [] } });
     mocks.raw.mockResolvedValue({ id: "event1", serverId: "guild", channelId: "thread", templateId: "ct34",
-      title: body.title, startTime: Number(body.date), description: body.description, signUps: [] });
+      title: body.title, startTime: Number(body.date), description: body.description, signUps: [],
+      advancedSettings: { temp_role: body.title }, temporaryRole: "role" });
     mocks.update.mockRejectedValue(new Error("timeout"));
     mocks.query.mockImplementation(async (sql: string, values: unknown[] = []) => {
       if (sql.startsWith("SELECT *")) return [row];
@@ -300,7 +320,8 @@ describe("GWL open slots", () => {
       member_role_name: "Member", voice_channel_name: "Briefing", error: null };
     const entry = { id: "schedule1", channelId: "channel", title: body.title, startTime: Number(body.date), postTime: body.schedule };
     const event = { serverId: "guild", channelId: "schedule1", title: body.title, templateId: "ct34",
-      startTime: Number(body.date), postTime: body.schedule, interval: "0 days", description: body.description };
+      startTime: Number(body.date), postTime: body.schedule, interval: "0 days", description: body.description,
+      advancedSettings: { temp_role: body.title } };
     mocks.fixtures.mockResolvedValue({ stale: false, data: { upcoming: [match], recent: [] } });
     mocks.scheduled.mockResolvedValue([entry]);
     mocks.scheduledEvent.mockResolvedValue(event);
