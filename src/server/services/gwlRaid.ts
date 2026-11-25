@@ -5,7 +5,7 @@ import { HttpError, ProviderError } from "@/lib/http";
 import { z } from "zod";
 import { getGwlFixtures, getGwlSlots, type GwlFixture } from "./gwl";
 import { gwlEventBody, openSlotEventBody, slotFingerprint, updatedGwlWeatherDescription } from "./gwlRaidHelper";
-import { processOpenSlots, readOpenFixture } from "./gwlOpenSlots";
+import { missingFixtureError, processOpenSlots, readOpenFixture } from "./gwlOpenSlots";
 import { syncGwlEventRole } from "./gwlRoleSync";
 import { createGwlRaidEvent, deleteLeagueRaidEvent, getPostedLeagueEvents, getRawLeagueEvent, getScheduledLeagueEvents, isLeagueEventChannel, updateLeagueEventDescription, leagueEventNames, LEAGUE_EVENT_CHANNEL } from "./leagueRaidHelper";
 
@@ -13,9 +13,10 @@ type EventRow = {
   match_number: string; fixture: GwlFixture; state: string; scheduled_id: string | null;
   event_id: string | null; event_channel_id: string | null; start_time: string | null; post_at: string | null;
   temporary_role: string | null; member_role_name: string | null; voice_channel_name: string | null; error: string | null;
+  updated_at: Date;
 };
 const actor = { discordId: "system:gwl", displayName: "GWL fixture worker" };
-const missingFixtureError = "The future fixture is no longer visible in GWL. Review it and any linked event.";
+const missingFixtureGraceMs = 60 * 60_000;
 const changedFixtureError = "GWL changed this fixture. Review the linked Raid Helper event; it was not changed automatically.";
 const deletionInProgress = "Automatic deletion in progress or unconfirmed. Check Raid Helper before taking action.";
 const signupsSchema = z.array(z.object({ id: z.number(), userId: z.string() }));
@@ -228,7 +229,12 @@ async function runTick() {
     if (!current) {
       if (Date.parse(row.fixture.startsAt) <= Date.now()) continue;
       const fixtureReview = row.state === "review" && (row.error === missingFixtureError || row.error === changedFixtureError);
-      if (row.state === "posted" || (fixtureReview && row.event_id)) {
+      if (row.state === "posted" && row.event_id) {
+        await query("UPDATE gwl_raid_events SET state = 'review', error = $2, updated_at = now() WHERE match_number = $1 AND state = 'posted'",
+          [row.match_number, missingFixtureError]);
+      } else if (row.state === "posted" || (fixtureReview && row.event_id)) {
+        const held = row.state === "review" && row.error === missingFixtureError;
+        if (held && Date.now() - new Date(row.updated_at).getTime() < missingFixtureGraceMs) continue;
         try {
           await removeMissingPostedEvent(row);
         } catch (error) {
@@ -252,6 +258,11 @@ async function runTick() {
       continue;
     }
     if (relevant(row.fixture) === relevant(current)) {
+      if (row.state === "review" && row.error === missingFixtureError && row.event_id) {
+        await query("UPDATE gwl_raid_events SET state = 'posted', error = NULL, updated_at = now() WHERE match_number = $1 AND state = 'review' AND error = $2",
+          [row.match_number, missingFixtureError]);
+        continue;
+      }
       if (["pending", "waiting"].includes(row.state) &&
           (row.fixture.mapName !== current.mapName || row.fixture.zone !== current.zone)) {
         await query("UPDATE gwl_raid_events SET fixture = $2, updated_at = now() WHERE match_number = $1 AND state = $3 AND fixture = $4::jsonb",

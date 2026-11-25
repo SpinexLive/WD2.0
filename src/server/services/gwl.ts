@@ -81,6 +81,21 @@ export const getGwlFixtures = (force = false) => get("/fixtures?limit=100", gwlF
 export const getGwlElo = (force = false) => get("/elo?limit=100", eloSchema, force);
 export const getGwlSlots = (force = false) => get("/slots", slotsSchema, force);
 
+export const gwlEventTypes = ["slot.posted", "slot.joined", "slot.withdrawn", "match.locked", "match.changed", "match.withdrawn",
+  "match.cancelled", "match.confirmed", "match.rated", "application.submitted"] as const;
+const eventsSchema = z.object({
+  events: z.array(z.object({
+    id: z.number().int(), type: text, createdAt: z.string().datetime({ offset: true }), team: text,
+    data: z.object({
+      slot: gwlSlotSchema.nullable().optional(), match: gwlFixtureSchema.nullable().optional(), applicationId: text.optional(),
+    }),
+  })),
+  next: z.number().int(), hasMore: z.boolean(),
+});
+export type GwlEvent = z.infer<typeof eventsSchema>["events"][number];
+// Events are kept for 14 days; `after` is the last handled id (0 for the oldest kept).
+export const getGwlEvents = (after = 0, force = false) => get(`/events?after=${Math.max(0, Math.floor(after))}&limit=100`, eventsSchema, force);
+
 export async function respondGwlApplication(id: string, accept: boolean) {
   const key = env().GWL_API_KEY;
   if (!key) throw new HttpError(503, "GWL is not configured. Set GWL_API_KEY on the server.", "gwl_not_configured");

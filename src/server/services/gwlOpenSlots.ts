@@ -16,6 +16,7 @@ export type Row = {
   error: string | null; updated_at: Date;
 };
 const actor = { discordId: "system:gwl", displayName: "GWL fixture worker" };
+export const missingFixtureError = "The future fixture is no longer visible in GWL. Review it and any linked event.";
 const missing = "GWL open slot is missing; waiting for a second fresh check before removal.";
 const updating = "Open-slot event update in progress or unconfirmed; check Raid Helper before taking action.";
 const deleting = "Open-slot event deletion in progress or unconfirmed; check Raid Helper before taking action.";
@@ -241,6 +242,103 @@ async function deleteOpenEvent(row: Row, open: GwlOpenFixture) {
   }
 }
 
+// A locked match that vanishes (withdrawn or cancelled) usually reopens as a new slot. Keep the event and its signups
+// by turning it back into the slot event instead of deleting it and creating another.
+async function convertMatchEventToSlot(row: Row, open: GwlOpenFixture) {
+  const unsafe = (message: string) => new HttpError(409, message, "gwl_slot_unsafe");
+  if (!row.event_id || !row.event_channel_id || !row.temporary_role || !row.start_time || !row.member_role_name || !row.voice_channel_name ||
+      Number(row.start_time) !== Math.floor(Date.parse(open.startsAt) / 1000) - 1800) {
+    throw unsafe("The match event identity is incomplete.");
+  }
+  const inspect = async () => {
+    const event = await getRawLeagueEvent(row.event_id!);
+    const signups = signupsSchema.safeParse(event.signUps);
+    const lines = typeof event.description === "string" ? event.description.split(/\r?\n/) : [];
+    if (event.id !== row.event_id || event.serverId !== env().DISCORD_GUILD_ID || event.channelId !== row.event_channel_id ||
+        !(await isLeagueEventChannel(event.channelId)) || event.templateId !== "ct34" || event.title !== row.temporary_role ||
+        event.startTime !== Number(row.start_time) || !signups.success ||
+        lines.filter((line) => line === "**Competition:** GWL").length !== 1 ||
+        lines.filter((line) => line === `**Match:** #${row.match_number}`).length !== 1) {
+      throw unsafe("The match event or its signups could not be verified.");
+    }
+    return { event, signups: signups.data };
+  };
+  const verifySlot = async () => {
+    const fresh = await freshMatches(open);
+    const slot = fresh.slots.find((item) => item.id === open.openSlot.id);
+    if (!slot || slotFingerprint(slot) !== slotFingerprint(open.openSlot) || fresh.fixtures.some((item) => item.number === row.match_number)) {
+      throw unsafe("The GWL slot changed while reopening the match event.");
+    }
+  };
+  const old = await inspect();
+  await verifySlot();
+  const body = openSlotEventBody(open, { role: row.member_role_name, voice: row.voice_channel_name, roleNames: [] }, Math.floor(Date.now() / 1000));
+  const titleChanged = row.temporary_role !== body.title;
+  const oldSetting = z.object({ temp_role: z.string().startsWith("GWL | RMNT v ") }).safeParse(old.event.advancedSettings);
+  if (titleChanged && !oldSetting.success) throw unsafe("The existing temporary role setting could not be verified.");
+  const oldRoleName = oldSetting.success ? oldSetting.data.temp_role : row.temporary_role;
+  const roleId = titleChanged ? await prepareLeagueRoleRename(old.event.id as string, oldRoleName, body.title, false, row.temporary_role) : null;
+  await verifySlot();
+  const again = await inspect();
+  if (again.event.description !== old.event.description || JSON.stringify(again.signups) !== JSON.stringify(old.signups) ||
+      (roleId === null ? again.event.temporaryRole != null : again.event.temporaryRole !== roleId)) {
+    throw unsafe("The match event changed during the reopen checks.");
+  }
+  const claimed = await independentQuery(
+    `UPDATE gwl_raid_events SET state = 'uncertain', error = $3, updated_at = now()
+     WHERE match_number = $1 AND state = $2 AND fixture = $4::jsonb AND event_id = $5 RETURNING match_number`,
+    [row.match_number, row.state, updating, JSON.stringify(row.fixture), row.event_id],
+  );
+  if (!claimed.length) return false;
+  await audit(actor, "gwl.match_reopen_started", "gwl_slot", open.openSlot.id, { eventId: row.event_id, matchNumber: row.match_number });
+  try {
+    if (roleId) await renameLeagueRole(roleId, oldRoleName, body.title);
+    await updateLeagueEvent(row.event_id, { title: body.title, description: body.description,
+      ...(titleChanged ? { advancedSettings: { temp_role: body.title } } : {}) });
+    if (roleId) await verifyLeagueRoleRename(roleId, oldRoleName, body.title);
+    else if (titleChanged) await verifyLeagueRoleAbsent(oldRoleName, body.title);
+    const event = await getRawLeagueEvent(row.event_id);
+    const signups = signupsSchema.safeParse(event.signUps);
+    if (event.id !== row.event_id || event.title !== body.title || event.description !== body.description ||
+        event.startTime !== Number(row.start_time) || !signups.success ||
+        old.signups.some((signup) => !signups.data.some((item) => item.id === signup.id && item.userId === signup.userId)) ||
+        (titleChanged && (!z.object({ temp_role: z.literal(body.title) }).safeParse(event.advancedSettings).success ||
+          (roleId === null ? event.temporaryRole != null : event.temporaryRole !== roleId)))) {
+      throw new Error("The reopened event or its existing signups could not be verified.");
+    }
+    const recorded = await independentQuery(
+      `UPDATE gwl_raid_events SET match_number = $2, fixture = $3, temporary_role = $4, state = 'posted', error = NULL, updated_at = now()
+       WHERE match_number = $1 AND state = 'uncertain' AND error = $5
+         AND NOT EXISTS (SELECT 1 FROM gwl_raid_events WHERE match_number = $2) RETURNING match_number`,
+      [row.match_number, open.number, JSON.stringify(open), body.title, updating],
+    );
+    if (!recorded.length) throw new Error("The verified event update could not be recorded.");
+  } catch (error) {
+    await audit(actor, "gwl.match_reopen_uncertain", "gwl_slot", open.openSlot.id, { eventId: row.event_id });
+    throw new Error(`GWL match reopen could not be confirmed: ${error instanceof Error ? error.message : "unknown error"}`);
+  }
+  await audit(actor, "gwl.match_reopened", "gwl_slot", open.openSlot.id, { eventId: row.event_id, matchNumber: row.match_number });
+  return true;
+}
+
+async function reopenMatchEvent(open: GwlOpenFixture, visible: Set<string>): Promise<boolean> {
+  const rows = await query<Row>(
+    "SELECT * FROM gwl_raid_events WHERE match_number NOT LIKE 'slot:%' AND event_id IS NOT NULL AND (state = 'posted' OR (state = 'review' AND error = $1))",
+    [missingFixtureError]);
+  const known = [open.openSlot.host, ...(open.openSlot.joinedTeam ? [open.openSlot.joinedTeam] : [])];
+  const candidates = rows.filter((row) => !visible.has(row.match_number) &&
+    Date.parse(row.fixture.startsAt) === Date.parse(open.startsAt) && row.fixture.region === open.region &&
+    [...known, open.teamSlug].every((slug) => row.fixture.sides.some((side) => side.team.slug === slug)));
+  if (!candidates.length) return false;
+  if (candidates.length === 1) {
+    try { await convertMatchEventToSlot(candidates[0]!, open); } catch (error) {
+      if (error instanceof HttpError && error.code === "gwl_slot_unsafe") await review(candidates[0]!, error.message);
+      else throw error;
+    }
+  }
+  return true;
+}
+
 export async function processOpenSlots(fixtures: GwlFixture[], recent: GwlFixture[] = []): Promise<Set<string>> {
   const [slots, team, rows] = await Promise.all([
     getGwlSlots(true), getGwlTeam(), query<Row>("SELECT * FROM gwl_raid_events WHERE match_number LIKE 'slot:%'"),
@@ -267,6 +365,7 @@ export async function processOpenSlots(fixtures: GwlFixture[], recent: GwlFixtur
   }
   const openFixtures = slots.data.slots.map((slot) => openSlotFixture(slot, team.data, tags));
   const blocked = new Set<string>();
+  const visible = new Set([...fixtures, ...recent].map((fixture) => fixture.number));
   for (let row of rows) {
     const open = readOpenFixture(row.fixture);
     if (!open) throw new Error("A stored GWL open slot has invalid identity data.");
@@ -360,6 +459,7 @@ export async function processOpenSlots(fixtures: GwlFixture[], recent: GwlFixtur
           [open.number, JSON.stringify(open), "An open slot and possible match are both visible. Review before creating events."]);
         continue;
       }
+      if (await reopenMatchEvent(open, visible)) continue;
     }
     await query("INSERT INTO gwl_raid_events (match_number, fixture, state) VALUES ($1, $2, 'pending') ON CONFLICT DO NOTHING",
       [open.number, JSON.stringify(open)]);

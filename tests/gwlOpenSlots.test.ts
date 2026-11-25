@@ -24,7 +24,7 @@ vi.mock("@/server/services/leagueRaidHelper", () => ({
 }));
 
 import { processOpenSlots } from "@/server/services/gwlOpenSlots";
-import { matchesOpenSlot, openSlotEventBody, openSlotFixture, slotFingerprint } from "@/server/services/gwlRaidHelper";
+import { gwlEventBody, matchesOpenSlot, openSlotEventBody, openSlotFixture, slotFingerprint } from "@/server/services/gwlRaidHelper";
 import { ProviderError } from "@/lib/http";
 
 const slot: GwlSlot = { id: "slot-1", startsAt: "2035-01-21T19:30:00Z", region: "EU", map: "europe",
@@ -228,6 +228,29 @@ describe("GWL open slots", () => {
     mocks.query.mockClear();
     expect(await processOpenSlots([match])).toEqual(new Set(["42"]));
     expect(mocks.query).toHaveBeenCalledWith(expect.stringContaining("VALUES ($1, $2, 'review'"), expect.arrayContaining([open.number]));
+  });
+
+  it("turns a vanished match event back into the reopened slot event and keeps its signups", async () => {
+    const matchBody = gwlEventBody(match, names, 0);
+    const row = { match_number: "42", fixture: match, state: "posted", scheduled_id: null, event_id: "event1",
+      event_channel_id: "thread", start_time: matchBody.date, post_at: null, temporary_role: matchBody.title,
+      member_role_name: "Member", voice_channel_name: "Briefing", error: null };
+    const event = { id: "event1", serverId: "guild", channelId: "thread", templateId: "ct34", title: matchBody.title,
+      startTime: Number(matchBody.date), description: matchBody.description, signUps: [{ id: 1, userId: "player" }],
+      advancedSettings: { temp_role: matchBody.title }, temporaryRole: "role" };
+    mocks.slots.mockResolvedValue({ stale: false, data: { slots: [slot] } });
+    mocks.raw.mockResolvedValue(event);
+    mocks.update.mockImplementation(async (_id, changes) => { mocks.raw.mockResolvedValue({ ...event, ...changes, temporaryRole: "role" }); });
+    mocks.query.mockImplementation(async (sql: string) => {
+      if (sql.includes("NOT LIKE 'slot:%'")) return [row];
+      if (sql.includes("RETURNING match_number")) return [{ match_number: open.number }];
+      return [];
+    });
+    await processOpenSlots([]);
+    expect(mocks.update).toHaveBeenCalledWith("event1", expect.objectContaining({ title: body.title, description: body.description }));
+    expect(mocks.remove).not.toHaveBeenCalled();
+    expect(mocks.query).not.toHaveBeenCalledWith(expect.stringContaining("VALUES ($1, $2, 'pending')"), expect.anything());
+    expect(mocks.audit).toHaveBeenCalledWith(expect.anything(), "gwl.match_reopened", "gwl_slot", slot.id, expect.anything());
   });
 
   it("flags ambiguous matches and never updates or deletes the event", async () => {

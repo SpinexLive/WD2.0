@@ -56,7 +56,14 @@ describe("GWL missing fixture event deletion", () => {
   const record = () => ({ match_number: fixture.number, fixture, state: "posted", event_id: "event1" as string | null,
     event_channel_id: "thread1", temporary_role: "GWL | RMNT v PMF v TLL", scheduled_id: null as string | null,
     start_time: String(Date.parse(fixture.startsAt) / 1000 - 1800), post_at: null,
-    member_role_name: "Member", voice_channel_name: "Briefing", error: null as string | null });
+    member_role_name: "Member", voice_channel_name: "Briefing", error: null as string | null,
+    updated_at: new Date(now - 90 * 60_000) });
+  const hold = async (row: ReturnType<typeof record>) => {
+    await gwlFixtureTick();
+    expect(row.state).toBe("review");
+    expect(mocks.delete).not.toHaveBeenCalled();
+    row.updated_at = new Date(now - 90 * 60_000);
+  };
   const event = () => ({ id: "event1", serverId: "1332320879073296404", channelId: "thread1",
     title: "GWL | RMNT v PMF v TLL", templateId: "ct34", startTime: Date.parse(fixture.startsAt) / 1000 - 1800,
     description: "**Competition:** GWL\n**Match:** #2901" });
@@ -90,6 +97,7 @@ describe("GWL missing fixture event deletion", () => {
     vi.useFakeTimers(); vi.setSystemTime(now);
     try {
       const row = setup(); row.state = state; row.error = error;
+      if (state === "posted") await hold(row);
       mocks.delete.mockResolvedValue(undefined);
       mocks.raw.mockResolvedValueOnce(event()).mockResolvedValueOnce(event())
         .mockRejectedValueOnce(new ProviderError("raid-helper", "Not found", 404));
@@ -102,13 +110,25 @@ describe("GWL missing fixture event deletion", () => {
     } finally { vi.useRealTimers(); }
   });
 
-  it("does not delete if the fixture reappears during checks or the snapshot is stale", async () => {
+  it("holds a vanished match event for a grace period instead of deleting it", async () => {
     vi.useFakeTimers(); vi.setSystemTime(now);
     try {
       const row = setup();
+      await hold(row);
+      row.updated_at = new Date(now - 60_000);
+      await gwlFixtureTick();
+      expect(row.state).toBe("review");
+      expect(mocks.delete).not.toHaveBeenCalled();
+    } finally { vi.useRealTimers(); }
+  });
+
+  it("does not delete if the fixture reappears during checks or the snapshot is stale", async () => {
+    vi.useFakeTimers(); vi.setSystemTime(now);
+    try {
+      const row = setup(); row.state = "review"; row.error = missingError;
       mocks.fixtures.mockResolvedValueOnce(empty).mockResolvedValueOnce({ stale: false, data: { upcoming: [fixture], recent: [] } });
       await gwlFixtureTick();
-      expect(row.state).toBe("posted");
+      expect(row.state).toBe("review");
       expect(mocks.delete).not.toHaveBeenCalled();
       mocks.fixtures.mockResolvedValueOnce({ ...empty, stale: true, error: "GWL unavailable" });
       await expect(gwlFixtureTick()).rejects.toThrow("GWL unavailable");
@@ -143,7 +163,7 @@ describe("GWL missing fixture event deletion", () => {
   it("never retries an uncertain deletion", async () => {
     vi.useFakeTimers(); vi.setSystemTime(now);
     try {
-      const row = setup();
+      const row = setup(); await hold(row);
       mocks.delete.mockRejectedValue(new Error("timeout"));
       await expect(gwlFixtureTick()).rejects.toThrow("deletion could not be confirmed");
       expect(row.state).toBe("uncertain");
@@ -155,7 +175,7 @@ describe("GWL missing fixture event deletion", () => {
   it("confirms deletion by readback even if the DELETE response is unrecognized", async () => {
     vi.useFakeTimers(); vi.setSystemTime(now);
     try {
-      const row = setup();
+      const row = setup(); await hold(row);
       mocks.delete.mockRejectedValue(new Error("unrecognized response"));
       mocks.raw.mockResolvedValueOnce(event()).mockResolvedValueOnce(event())
         .mockRejectedValueOnce(new ProviderError("raid-helper", "Not found", 404));
@@ -168,7 +188,7 @@ describe("GWL missing fixture event deletion", () => {
   it("keeps the write uncertain if Raid Helper still returns the event after deletion", async () => {
     vi.useFakeTimers(); vi.setSystemTime(now);
     try {
-      const row = setup();
+      const row = setup(); await hold(row);
       mocks.delete.mockResolvedValue(undefined);
       await expect(gwlFixtureTick()).rejects.toThrow("still returns the event");
       expect(row.state).toBe("uncertain");
